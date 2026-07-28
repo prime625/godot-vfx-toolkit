@@ -14,70 +14,65 @@ void AnimationCurve::sort_keys() {
 float AnimationCurve::sample_scalar(float time) const {
     if (keys.empty()) return 0.0f;
     if (keys.size() == 1) return keys[0].value;
-
-    // Find surrounding keys
+    
     size_t i = 0;
     for (; i < keys.size() - 1; i++) {
         if (time >= keys[i].time && time <= keys[i+1].time) break;
     }
     if (i >= keys.size() - 1) return keys.back().value;
-
+    
     const Keyframe& k0 = keys[i];
     const Keyframe& k1 = keys[i+1];
-
+    
     if (k1.time - k0.time < 0.0001f) return k0.value;
     float t = (time - k0.time) / (k1.time - k0.time);
-
-    switch (k0.interp) {
-        case INTERP_STEP: return k0.value;
-        case INTERP_BEZIER: {
-            // Cubic bezier interpolation (simplified)
-            float t2 = t * t;
-            float t3 = t2 * t;
-            float omt = 1.0f - t;
-            float omt2 = omt * omt;
-            float omt3 = omt2 * omt;
-            return omt3 * k0.value + 3.0f * omt2 * t * (k0.value + k0.out_tangent) +
-                   3.0f * omt * t2 * (k1.value + k1.in_tangent) + t3 * k1.value;
-        }
-        default: // INTERP_LINEAR
-            return k0.value + (k1.value - k0.value) * t;
+    
+    if (k0.interp == VFXAnimator::INTERP_STEP) return k0.value;
+    if (k0.interp == VFXAnimator::INTERP_BEZIER) {
+        float t2 = t * t;
+        float t3 = t2 * t;
+        float omt = 1.0f - t;
+        float omt2 = omt * omt;
+        float omt3 = omt2 * omt;
+        return omt3 * k0.value + 3.0f * omt2 * t * (k0.value + k0.out_tangent) +
+               3.0f * omt * t2 * (k1.value + k1.in_tangent) + t3 * k1.value;
     }
+    return k0.value + (k1.value - k0.value) * t;
 }
 
 Vector3 AnimationCurve::sample_vector(float time) const {
     if (keys.empty()) return Vector3();
     if (keys.size() == 1) return keys[0].vec_value;
-
+    
     size_t i = 0;
     for (; i < keys.size() - 1; i++) {
         if (time >= keys[i].time && time <= keys[i+1].time) break;
     }
     if (i >= keys.size() - 1) return keys.back().vec_value;
-
+    
     const Keyframe& k0 = keys[i];
     const Keyframe& k1 = keys[i+1];
     float t = (k1.time - k0.time < 0.0001f) ? 0.0f : (time - k0.time) / (k1.time - k0.time);
-
-    if (k0.interp == INTERP_STEP) return k0.vec_value;
+    
+    if (k0.interp == VFXAnimator::INTERP_STEP) return k0.vec_value;
     return k0.vec_value.lerp(k1.vec_value, t);
 }
 
 Quaternion AnimationCurve::sample_quaternion(float time) const {
     if (keys.empty()) return Quaternion();
     if (keys.size() == 1) return keys[0].quat_value;
-
+    
     size_t i = 0;
     for (; i < keys.size() - 1; i++) {
         if (time >= keys[i].time && time <= keys[i+1].time) break;
     }
     if (i >= keys.size() - 1) return keys.back().quat_value;
-
+    
     const Keyframe& k0 = keys[i];
     const Keyframe& k1 = keys[i+1];
     float t = (k1.time - k0.time < 0.0001f) ? 0.0f : (time - k0.time) / (k1.time - k0.time);
-
-    if (k0.interp == INTERP_STEP) return k0.quat_value;
+    
+    if (k0.interp == VFXAnimator::INTERP_STEP) return k0.quat_value;
     return k0.quat_value.slerp(k1.quat_value, t);
 }
 
@@ -89,19 +84,19 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_clip_duration", "idx"), &VFXAnimator::get_clip_duration);
     ClassDB::bind_method(D_METHOD("set_clip_loop", "idx", "loop"), &VFXAnimator::set_clip_loop);
     ClassDB::bind_method(D_METHOD("get_clip_loop", "idx"), &VFXAnimator::get_clip_loop);
-
+    
     ClassDB::bind_method(D_METHOD("add_curve", "clip_idx", "name", "bone_id", "is_rotation", "is_scale"), &VFXAnimator::add_curve);
     ClassDB::bind_method(D_METHOD("delete_curve", "clip_idx", "curve_idx"), &VFXAnimator::delete_curve);
     ClassDB::bind_method(D_METHOD("get_curve_count", "clip_idx"), &VFXAnimator::get_curve_count);
     ClassDB::bind_method(D_METHOD("get_curve_name", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_name);
-
+    
     ClassDB::bind_method(D_METHOD("add_keyframe_scalar", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_scalar);
     ClassDB::bind_method(D_METHOD("add_keyframe_vector", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_vector);
     ClassDB::bind_method(D_METHOD("add_keyframe_quaternion", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_quaternion);
     ClassDB::bind_method(D_METHOD("delete_keyframe", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::delete_keyframe);
     ClassDB::bind_method(D_METHOD("get_keyframe_count", "clip_idx", "curve_idx"), &VFXAnimator::get_keyframe_count);
     ClassDB::bind_method(D_METHOD("get_keyframe_time", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_time);
-
+    
     ClassDB::bind_method(D_METHOD("play", "clip_idx"), &VFXAnimator::play);
     ClassDB::bind_method(D_METHOD("pause"), &VFXAnimator::pause);
     ClassDB::bind_method(D_METHOD("stop"), &VFXAnimator::stop);
@@ -109,18 +104,18 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("advance", "delta"), &VFXAnimator::advance);
     ClassDB::bind_method(D_METHOD("is_clip_playing"), &VFXAnimator::is_clip_playing);
     ClassDB::bind_method(D_METHOD("get_playback_time"), &VFXAnimator::get_playback_time);
-
+    
     ClassDB::bind_method(D_METHOD("sample_scalar", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_scalar);
     ClassDB::bind_method(D_METHOD("sample_vector", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_vector);
     ClassDB::bind_method(D_METHOD("sample_quaternion", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_quaternion);
     ClassDB::bind_method(D_METHOD("sample_pose", "clip_idx", "time", "bone_count"), &VFXAnimator::sample_pose);
-
+    
     ClassDB::bind_method(D_METHOD("serialize_clip", "idx"), &VFXAnimator::serialize_clip);
     ClassDB::bind_method(D_METHOD("deserialize_clip", "data"), &VFXAnimator::deserialize_clip);
-
-    BIND_ENUM_CONSTANT(INTERP_LINEAR);
-    BIND_ENUM_CONSTANT(INTERP_BEZIER);
-    BIND_ENUM_CONSTANT(INTERP_STEP);
+    
+    ClassDB::bind_integer_constant(get_class_static(), "", "INTERP_LINEAR", INTERP_LINEAR);
+    ClassDB::bind_integer_constant(get_class_static(), "", "INTERP_BEZIER", INTERP_BEZIER);
+    ClassDB::bind_integer_constant(get_class_static(), "", "INTERP_STEP", INTERP_STEP);
 }
 
 VFXAnimator::VFXAnimator() {}
@@ -196,7 +191,7 @@ void VFXAnimator::add_keyframe_scalar(int clip_idx, int curve_idx, float time, f
     Keyframe k;
     k.time = time;
     k.value = value;
-    k.interp = (InterpolationType)interp;
+    k.interp = interp;
     clips[clip_idx].curves[curve_idx].keys.push_back(k);
     clips[clip_idx].curves[curve_idx].sort_keys();
 }
@@ -207,7 +202,7 @@ void VFXAnimator::add_keyframe_vector(int clip_idx, int curve_idx, float time, c
     Keyframe k;
     k.time = time;
     k.vec_value = value;
-    k.interp = (InterpolationType)interp;
+    k.interp = interp;
     clips[clip_idx].curves[curve_idx].keys.push_back(k);
     clips[clip_idx].curves[curve_idx].sort_keys();
 }
@@ -218,7 +213,7 @@ void VFXAnimator::add_keyframe_quaternion(int clip_idx, int curve_idx, float tim
     Keyframe k;
     k.time = time;
     k.quat_value = value;
-    k.interp = (InterpolationType)interp;
+    k.interp = interp;
     clips[clip_idx].curves[curve_idx].keys.push_back(k);
     clips[clip_idx].curves[curve_idx].sort_keys();
 }
@@ -295,14 +290,13 @@ Quaternion VFXAnimator::sample_quaternion(int clip_idx, int curve_idx, float tim
 PackedFloat32Array VFXAnimator::sample_pose(int clip_idx, float time, int bone_count) const {
     PackedFloat32Array pose;
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return pose;
-
-    // Per bone: 3 pos + 4 rot + 3 scale = 10 floats
+    
     pose.resize(bone_count * 10);
-
+    
     for (const auto& curve : clips[clip_idx].curves) {
         if (curve.bone_id < 0 || curve.bone_id >= bone_count) continue;
         int base = curve.bone_id * 10;
-
+        
         if (curve.is_rotation) {
             Quaternion q = curve.sample_quaternion(time);
             pose[base + 3] = q.x;
@@ -326,8 +320,7 @@ PackedFloat32Array VFXAnimator::sample_pose(int clip_idx, float time, int bone_c
 
 PackedByteArray VFXAnimator::serialize_clip(int idx) const {
     PackedByteArray data;
-    data.append(0x56); data.append(0x46); data.append(0x58); data.append(0x41); // "VFXA"
-    // TODO: full serialization
+    data.append(0x56); data.append(0x46); data.append(0x58); data.append(0x41);
     return data;
 }
 

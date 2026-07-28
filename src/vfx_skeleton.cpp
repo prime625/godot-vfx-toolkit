@@ -164,9 +164,10 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
     
     Bone& b = bones[bone_idx];
     
-    // Build local transform properly: Basis from rotation, then apply scale
     Basis rot_basis(b.local_rotation);
-    rot_basis.scale(b.local_scale);
+    rot_basis[0] *= b.local_scale.x;
+    rot_basis[1] *= b.local_scale.y;
+    rot_basis[2] *= b.local_scale.z;
     
     Transform3D local;
     local.set_basis(rot_basis);
@@ -174,7 +175,6 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
     
     b.model_transform = parent_transform * local;
     
-    // Update children
     for (int i = 0; i < (int)bones.size(); i++) {
         if (bones[i].parent_id == bone_idx) {
             _update_transforms_recursive(i, b.model_transform);
@@ -183,7 +183,6 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
 }
 
 void VFXSkeleton::update_transforms() {
-    // Find root bones and update from there
     for (int i = 0; i < (int)bones.size(); i++) {
         if (bones[i].parent_id < 0) {
             _update_transforms_recursive(i, Transform3D());
@@ -192,7 +191,6 @@ void VFXSkeleton::update_transforms() {
     dirty = false;
 }
 
-// === IK: Two-Bone (Analytic) ===
 void VFXSkeleton::solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, const Vector3& target, const Vector3& pole, float twist) {
     if (root_bone < 0 || mid_bone < 0 || tip_bone < 0) return;
     if (root_bone >= (int)bones.size() || mid_bone >= (int)bones.size() || tip_bone >= (int)bones.size()) return;
@@ -205,11 +203,9 @@ void VFXSkeleton::solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, c
     float len2 = (tip_pos - mid_pos).length();
     float dist = (target - root_pos).length();
     
-    // Clamp to reach
     if (dist > len1 + len2 - 0.001f) dist = len1 + len2 - 0.001f;
     if (dist < fabs(len1 - len2) + 0.001f) dist = fabs(len1 - len2) + 0.001f;
     
-    // Law of cosines for elbow angle
     float cos_angle = (dist * dist + len1 * len1 - len2 * len2) / (2.0f * dist * len1);
     cos_angle = vfx::clampf(cos_angle, -1.0f, 1.0f);
     float angle = acos(cos_angle);
@@ -218,7 +214,6 @@ void VFXSkeleton::solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, c
     dirty = true;
 }
 
-// === IK: CCD (Cyclic Coordinate Descent) ===
 void VFXSkeleton::solve_ik_ccd(int tip_bone, const Vector3& target, int iterations, float threshold) {
     if (tip_bone < 0 || tip_bone >= (int)bones.size()) return;
     
@@ -271,9 +266,9 @@ PackedVector3Array VFXSkeleton::get_skinning_matrices() const {
         Basis b = skin.get_basis();
         
         int base = i * 3;
-        matrices[base + 0] = b.get_column(0);
-        matrices[base + 1] = b.get_column(1);
-        matrices[base + 2] = b.get_column(2);
+        matrices[base + 0] = b[0];
+        matrices[base + 1] = b[1];
+        matrices[base + 2] = b[2];
     }
     return matrices;
 }
@@ -310,7 +305,6 @@ void VFXSkeleton::create_mixamo_skeleton() {
     int r_foot = add_bone("mixamorig_RightFoot", r_leg);
     int r_toe = add_bone("mixamorig_RightToeBase", r_foot);
     
-    // Set default bind poses
     set_bone_local_position(spine, Vector3(0, 1.0f, 0));
     set_bone_local_position(spine1, Vector3(0, 0.15f, 0));
     set_bone_local_position(spine2, Vector3(0, 0.15f, 0));
