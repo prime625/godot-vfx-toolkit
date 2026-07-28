@@ -9,7 +9,6 @@ on:
 
 env:
   GODOT_VERSION: "4.3"
-  NDK_VERSION: "r26d"
 
 jobs:
   build-android:
@@ -41,9 +40,15 @@ jobs:
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
+        id: setup-ndk
         with:
-          ndk-version: ${{ env.NDK_VERSION }}
+          ndk-version: r26d
           link-to-sdk: true
+
+      - name: Set NDK environment
+        run: |
+          echo "ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
 
       - name: Cache godot-cpp build
         uses: actions/cache@v4
