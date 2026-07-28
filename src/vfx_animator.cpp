@@ -1,6 +1,6 @@
 #include "vfx_animator.h"\n#include "vfx_math.h"
 #include <godot_cpp/variant/utility_functions.hpp>
-#include <algorithm>
+#include <algorithm>\n#include <cmath>
 #include <cmath>
 
 using namespace godot;
@@ -257,7 +257,7 @@ void VFXAnimator::seek(float time) {
         current_time = fmod(current_time, clips[current_clip].duration);
         if (current_time < 0) current_time += clips[current_clip].duration;
     } else {
-        current_time = vfx::clampf(current_time, 0.0f, clips[current_clip].duration);
+        current_time = fmin(fmax(current_time, 0.0f, clips[current_clip].duration);
     }
 }
 
