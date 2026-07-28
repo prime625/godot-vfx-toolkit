@@ -395,10 +395,7 @@ void VFXMesh::recalculate_bounds() {
 }
 
 vfx::AABB VFXMesh::get_bounds() const {
-    vfx::AABB aabb;
-    aabb.position = bounds.min;
-    aabb.size = bounds.max - bounds.min;
-    return aabb;
+    return bounds;
 }
 
 PackedByteArray VFXMesh::serialize() const {

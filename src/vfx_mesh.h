@@ -139,7 +139,7 @@ public:
     // === UTILS ===
     void recalculate_normals();
     void recalculate_bounds();
-    AABB get_bounds() const;
+    vfx::AABB get_bounds() const;
 
     // === SERIALIZATION ===
     PackedByteArray serialize() const;
