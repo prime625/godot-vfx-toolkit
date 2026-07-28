@@ -32,4 +32,3 @@ config.log
 Thumbs.db
 
 # godot-cpp (submodule, don't track)
-godot-cpp/
