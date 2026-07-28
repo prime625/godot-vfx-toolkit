@@ -394,8 +394,8 @@ void VFXMesh::recalculate_bounds() {
     for (auto* v : vertices) bounds.expand(v->position);
 }
 
-AABB VFXMesh::get_bounds() const {
-    AABB aabb;
+vfx::AABB VFXMesh::get_bounds() const {
+    vfx::AABB aabb;
     aabb.position = bounds.min;
     aabb.size = bounds.max - bounds.min;
     return aabb;

@@ -1,4 +1,4 @@
-#include "vfx_animator.h"
+#include "vfx_animator.h"\n#include "vfx_math.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <algorithm>
 #include <cmath>

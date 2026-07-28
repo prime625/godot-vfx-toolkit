@@ -1,4 +1,4 @@
-#include "vfx_skin.h"
+#include "vfx_skin.h"\n#include "vfx_math.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
 #include <algorithm>
