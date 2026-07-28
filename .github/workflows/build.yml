@@ -1,0 +1,98 @@
+name: Build Android GDExtension
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+  NDK_VERSION: "r26d"
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [arm64, arm32]
+        include:
+          - arch: arm64
+            ndk_arch: arm64-v8a
+            scons_arch: arm64
+          - arch: arm32
+            ndk_arch: armeabi-v7a
+            scons_arch: arm32
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install SCons
+        run: pip install scons==4.8.0
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          link-to-sdk: true
+
+      - name: Cache godot-cpp build
+        uses: actions/cache@v4
+        with:
+          path: godot-cpp/**/*.o
+          key: ${{ runner.os }}-${{ matrix.arch }}-godot-cpp-${{ hashFiles('godot-cpp/**/*.cpp', 'godot-cpp/**/*.h') }}
+
+      - name: Generate godot-cpp bindings
+        run: |
+          cd godot-cpp
+          scons platform=android arch=${{ matrix.scons_arch }} target=template_debug generate_bindings=yes -j$(nproc)
+
+      - name: Build Extension
+        run: |
+          scons platform=android arch=${{ matrix.scons_arch }} target=template_debug -j$(nproc)
+          scons platform=android arch=${{ matrix.scons_arch }} target=template_release -j$(nproc)
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.arch }}
+          path: |
+            demo/addons/vfx_toolkit/**/*.so
+            demo/addons/vfx_toolkit/**/*.gdextension
+
+  package:
+    needs: build-android
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: android-*
+
+      - name: Package Addon
+        run: |
+          mkdir -p release/addons/vfx_toolkit
+          cp -r artifacts/*/* release/addons/vfx_toolkit/ || true
+          cp demo/addons/vfx_toolkit/*.gdextension release/addons/vfx_toolkit/ 2>/dev/null || true
+          cd release && zip -r ../godot_vfx_toolkit_android.zip addons/
+
+      - name: Upload Release Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot_vfx_toolkit_android
+          path: godot_vfx_toolkit_android.zip

@@ -1,0 +1,35 @@
+# Godot
+.import/
+export.cfg
+export_presets.cfg
+*.tmp
+
+# Build artifacts
+*.o
+*.os
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+*.framework/
+*.dSYM/
+
+# SCons
+.sconsign.dblite
+.sconf_temp/
+config.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# godot-cpp (submodule, don't track)
+godot-cpp/
