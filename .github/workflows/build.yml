@@ -37,14 +37,19 @@ jobs:
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
           unzip -q android-ndk-r26d-linux.zip
-          echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r26d" >> $GITHUB_ENV
+          # Wipe the pre-installed NDK so SCons can't find it
+          sudo rm -rf /usr/local/lib/android/sdk/ndk || true
 
       - name: Generate godot-cpp bindings
+        env:
+          ANDROID_NDK_ROOT: ${{ github.workspace }}/android-ndk-r26d
         run: |
           cd godot-cpp
           scons platform=android arch=${{ matrix.scons_arch }} target=template_debug generate_bindings=yes -j$(nproc)
 
       - name: Build Extension
+        env:
+          ANDROID_NDK_ROOT: ${{ github.workspace }}/android-ndk-r26d
         run: |
           scons platform=android arch=${{ matrix.scons_arch }} target=template_debug -j$(nproc)
           scons platform=android arch=${{ matrix.scons_arch }} target=template_release -j$(nproc)
