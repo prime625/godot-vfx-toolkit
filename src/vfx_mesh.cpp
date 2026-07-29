@@ -394,8 +394,12 @@ void VFXMesh::recalculate_bounds() {
     for (auto* v : vertices) bounds.expand(v->position);
 }
 
-vfx::AABB VFXMesh::get_bounds() const {
-    return bounds;
+PackedFloat32Array VFXMesh::get_bounds() const {
+    PackedFloat32Array arr;
+    arr.resize(6);
+    arr[0] = bounds.min.x; arr[1] = bounds.min.y; arr[2] = bounds.min.z;
+    arr[3] = bounds.max.x; arr[4] = bounds.max.y; arr[5] = bounds.max.z;
+    return arr;
 }
 
 PackedByteArray VFXMesh::serialize() const {
