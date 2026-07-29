@@ -164,8 +164,21 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
     
     Bone& b = bones[bone_idx];
     
-    Basis rot_basis(b.local_rotation);
-    rot_basis = Basis(rot_basis[0] * b.local_scale.x, rot_basis[1] * b.local_scale.y, rot_basis[2] * b.local_scale.z);
+    Quaternion q = b.local_rotation;
+    float x2 = q.x + q.x, y2 = q.y + q.y, z2 = q.z + q.z;
+    float xx = q.x * x2, xy = q.x * y2, xz = q.x * z2;
+    float yy = q.y * y2, yz = q.y * z2, zz = q.z * z2;
+    float wx = q.w * x2, wy = q.w * y2, wz = q.w * z2;
+    
+    Vector3 col0(1.0f - (yy + zz), xy + wz, xz - wy);
+    Vector3 col1(xy - wz, 1.0f - (xx + zz), yz + wx);
+    Vector3 col2(xz + wy, yz - wx, 1.0f - (xx + yy));
+    
+    col0 = col0 * b.local_scale.x;
+    col1 = col1 * b.local_scale.y;
+    col2 = col2 * b.local_scale.z;
+    
+    Basis rot_basis(col0, col1, col2);
     
     Transform3D local;
     local.set_basis(rot_basis);
@@ -205,7 +218,7 @@ void VFXSkeleton::solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, c
     if (dist < fabs(len1 - len2) + 0.001f) dist = fabs(len1 - len2) + 0.001f;
     
     float cos_angle = (dist * dist + len1 * len1 - len2 * len2) / (2.0f * dist * len1);
-    cos_angle = vfx::clampf(cos_angle, -1.0f, 1.0f);
+    cos_angle = cos_angle < -1.0f ? -1.0f : (cos_angle > 1.0f ? 1.0f : cos_angle);
     float angle = acos(cos_angle);
     
     UtilityFunctions::print("IK two-bone: angle = ", angle);
@@ -229,7 +242,8 @@ void VFXSkeleton::solve_ik_ccd(int tip_bone, const Vector3& target, int iteratio
                 continue;
             }
             
-            float dot = vfx::clampf(to_tip.dot(to_target), -1.0f, 1.0f);
+            float dot = to_tip.dot(to_target);
+            dot = dot < -1.0f ? -1.0f : (dot > 1.0f ? 1.0f : dot);
             float angle = acos(dot);
             if (angle < 0.0001f) {
                 current = bones[current].parent_id;
