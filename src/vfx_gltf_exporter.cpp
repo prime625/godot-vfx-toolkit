@@ -394,7 +394,8 @@ PackedByteArray VFXGLTFExporter::json_to_bytes(const Dictionary& doc) {
     String json = JSON::stringify(doc, "        ", false, true);
     PackedByteArray bytes;
     CharString utf8 = json.utf8();
-    for (int i = 0; i < utf8.size(); i++) bytes.append(utf8[i]);
+    const char* utf8_data = utf8.get_data();
+    for (int i = 0; i < utf8.size(); i++) bytes.append(utf8_data[i]);
     return bytes;
 }
 
