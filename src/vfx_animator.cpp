@@ -55,99 +55,280 @@ Vector3 AnimationCurve::sample_vector(float time) const {
     const Keyframe& k1 = keys[i+1];
     float t = (k1.time - k0.time < 0.0001f) ? 0.0f : (time - k0.time) / (k1.time - k0.time);
 
-    if (k0.interp == VFXAnimator::INTERPThis custom 3D character pipeline is a fantastic approach for handling character creation directly on an Android device without leaving your engine. Building this as a C++ GDExtension guarantees the performance needed for complex calculations like Mixamo weight painting and IK solvers, which is especially critical when developing a MOBA[cite: 1]. Having this dedicated editor will make rigging characters like Ignis with her sword and shield, or Lynx with her hammer and shield, incredibly streamlined[cite: 1]. 
+    if (k0.interp == VFXAnimator::INTERP_STEP) return k0.vec_value;
+    return k0.vec_value.lerp(k1.vec_value, t);
+}
 
-I have identified the issues in the provided code and fixed them to ensure your standalone Android app pipeline compiles correctly. Here are the problems that were causing the errors:
+Quaternion AnimationCurve::sample_quaternion(float time) const {
+    if (keys.empty()) return Quaternion();
+    if (keys.size() == 1) return keys[0].quat_value;
 
-*   **Truncated File:** `vfx_skeleton.cpp` was cut off halfway through the `solve_ik_ccd` method, missing the closing brackets and the definitions for `create_mixamo_skeleton`, `get_skinning_matrices`, `serialize`, and `deserialize`.
-*   **Missing Header:** You were entirely missing the `vfx_skeleton.h` file.
-*   **Duplicate Header Content:** The `vfx_editor_node.h` file you shared contained the exact same code as `vfx_animator.h`. I have rewritten it to correctly declare your `VFXEditorNode` (inheriting from `Node3D`).
-*   **Syntax Errors in Animator:** `vfx_animator.cpp` had improper newline escape characters (`\n`) in the include headers and a missing closing parenthesis in the `seek()` method (`fmin(fmax(...`).
+    size_t i = 0;
+    for (; i < keys.size() - 1; i++) {
+        if (time >= keys[i].time && time <= keys[i+1].time) break;
+    }
+    if (i >= keys.size() - 1) return keys.back().quat_value;
 
-I have provided the full, updated scripts below so you can just paste them into your project[cite: 1].
+    const Keyframe& k0 = keys[i];
+    const Keyframe& k1 = keys[i+1];
+    float t = (k1.time - k0.time < 0.0001f) ? 0.0f : (time - k0.time) / (k1.time - k0.time);
 
-### 1. `vfx_skeleton.h` (New/Missing File)
-```cpp
-#ifndef VFX_SKELETON_H
-#define VFX_SKELETON_H
+    if (k0.interp == VFXAnimator::INTERP_STEP) return k0.quat_value;
+    return k0.quat_value.slerp(k1.quat_value, t);
+}
 
-#include <godot_cpp/classes/ref_counted.hpp>
-#include <godot_cpp/variant/vector3.hpp>
-#include <godot_cpp/variant/quaternion.hpp>
-#include <godot_cpp/variant/transform3d.hpp>
-#include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_float32_array.hpp>
-#include <godot_cpp/variant/packed_byte_array.hpp>
-#include <godot_cpp/variant/string.hpp>
-#include <vector>
-#include <unordered_map>
+void VFXAnimator::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("create_clip", "name", "duration", "fps"), &VFXAnimator::create_clip);
+    ClassDB::bind_method(D_METHOD("delete_clip", "idx"), &VFXAnimator::delete_clip);
+    ClassDB::bind_method(D_METHOD("get_clip_count"), &VFXAnimator::get_clip_count);
+    ClassDB::bind_method(D_METHOD("get_clip_name", "idx"), &VFXAnimator::get_clip_name);
+    ClassDB::bind_method(D_METHOD("get_clip_duration", "idx"), &VFXAnimator::get_clip_duration);
+    ClassDB::bind_method(D_METHOD("set_clip_loop", "idx", "loop"), &VFXAnimator::set_clip_loop);
+    ClassDB::bind_method(D_METHOD("get_clip_loop", "idx"), &VFXAnimator::get_clip_loop);
 
-using namespace godot;
+    ClassDB::bind_method(D_METHOD("add_curve", "clip_idx", "name", "bone_id", "is_rotation", "is_scale"), &VFXAnimator::add_curve);
+    ClassDB::bind_method(D_METHOD("delete_curve", "clip_idx", "curve_idx"), &VFXAnimator::delete_curve);
+    ClassDB::bind_method(D_METHOD("get_curve_count", "clip_idx"), &VFXAnimator::get_curve_count);
+    ClassDB::bind_method(D_METHOD("get_curve_name", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_name);
 
-struct Bone {
-    int id = -1;
-    String name;
-    int parent_id = -1;
-    
-    Vector3 local_position;
-    Quaternion local_rotation;
-    Vector3 local_scale = Vector3(1, 1, 1);
-    
-    Transform3D bind_pose;
-    Transform3D inverse_bind_pose;
-    Transform3D model_transform;
-};
+    ClassDB::bind_method(D_METHOD("add_keyframe_scalar", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_scalar);
+    ClassDB::bind_method(D_METHOD("add_keyframe_vector", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_vector);
+    ClassDB::bind_method(D_METHOD("add_keyframe_quaternion", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_quaternion);
+    ClassDB::bind_method(D_METHOD("delete_keyframe", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::delete_keyframe);
+    ClassDB::bind_method(D_METHOD("get_keyframe_count", "clip_idx", "curve_idx"), &VFXAnimator::get_keyframe_count);
+    ClassDB::bind_method(D_METHOD("get_keyframe_time", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_time);
 
-class VFXSkeleton : public RefCounted {
-    GDCLASS(VFXSkeleton, RefCounted)
+    ClassDB::bind_method(D_METHOD("play", "clip_idx"), &VFXAnimator::play);
+    ClassDB::bind_method(D_METHOD("pause"), &VFXAnimator::pause);
+    ClassDB::bind_method(D_METHOD("stop"), &VFXAnimator::stop);
+    ClassDB::bind_method(D_METHOD("seek", "time"), &VFXAnimator::seek);
+    ClassDB::bind_method(D_METHOD("advance", "delta"), &VFXAnimator::advance);
+    ClassDB::bind_method(D_METHOD("is_clip_playing"), &VFXAnimator::is_clip_playing);
+    ClassDB::bind_method(D_METHOD("get_playback_time"), &VFXAnimator::get_playback_time);
 
-private:
-    std::vector<Bone> bones;
-    std::unordered_map<std::string, int> name_to_index;
-    bool dirty = true;
+    ClassDB::bind_method(D_METHOD("sample_scalar", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_scalar);
+    ClassDB::bind_method(D_METHOD("sample_vector", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_vector);
+    ClassDB::bind_method(D_METHOD("sample_quaternion", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_quaternion);
+    ClassDB::bind_method(D_METHOD("sample_pose", "clip_idx", "time", "bone_count"), &VFXAnimator::sample_pose);
 
-    void _update_transforms_recursive(int bone_idx, const Transform3D& parent_transform);
+    ClassDB::bind_method(D_METHOD("serialize_clip", "idx"), &VFXAnimator::serialize_clip);
+    ClassDB::bind_method(D_METHOD("deserialize_clip", "data"), &VFXAnimator::deserialize_clip);
 
-protected:
-    static void _bind_methods();
+    ClassDB::bind_integer_constant(get_class_static(), "", "INTERP_LINEAR", INTERP_LINEAR);
+    ClassDB::bind_integer_constant(get_class_static(), "", "INTERP_BEZIER", INTERP_BEZIER);
+    ClassDB::bind_integer_constant(get_class_static(), "", "INTERP_STEP", INTERP_STEP);
+}
 
-public:
-    VFXSkeleton();
-    ~VFXSkeleton();
+VFXAnimator::VFXAnimator() {}
+VFXAnimator::~VFXAnimator() {}
 
-    void clear();
-    int add_bone(const String& name, int parent_id = -1);
-    int find_bone(const String& name) const;
-    
-    void set_bone_parent(int bone_id, int parent_id);
-    void set_bone_local_position(int bone_id, const Vector3& pos);
-    void set_bone_local_rotation(int bone_id, const Quaternion& rot);
-    void set_bone_local_scale(int bone_id, const Vector3& scale);
-    void set_bone_bind_pose(int bone_id, const Transform3D& pose);
-    
-    Vector3 get_bone_local_position(int bone_id) const;
-    Quaternion get_bone_local_rotation(int bone_id) const;
-    Vector3 get_bone_local_scale(int bone_id) const;
-    Transform3D get_bone_bind_pose(int bone_id) const;
-    Transform3D get_bone_model_transform(int bone_id) const;
-    
-    String get_bone_name(int bone_id) const;
-    int get_bone_count() const;
-    int get_bone_parent(int bone_id) const;
-    PackedInt32Array get_bone_children(int bone_id) const;
-    
-    void set_bone_pose(int bone_id, const Transform3D& pose);
-    void reset_to_bind_pose();
-    
-    void update_transforms();
-    void solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, const Vector3& target, const Vector3& pole, float twist = 0.0f);
-    void solve_ik_ccd(int tip_bone, const Vector3& target, int iterations = 10, float threshold = 0.001f);
-    
-    void create_mixamo_skeleton();
-    PackedFloat32Array get_skinning_matrices() const;
-    
-    PackedByteArray serialize() const;
-    void deserialize(const PackedByteArray& data);
-};
+int VFXAnimator::create_clip(const String& name, float duration, float fps) {
+    AnimationClip clip;
+    clip.name = name;
+    clip.duration = duration;
+    clip.fps = fps;
+    clips.push_back(clip);
+    return clips.size() - 1;
+}
 
-#endif
+void VFXAnimator::delete_clip(int idx) {
+    if (idx >= 0 && idx < (int)clips.size()) {
+        clips.erase(clips.begin() + idx);
+        if (current_clip == idx) { current_clip = -1; is_playing = false; }
+        else if (current_clip > idx) current_clip--;
+    }
+}
+
+int VFXAnimator::get_clip_count() const { return clips.size(); }
+String VFXAnimator::get_clip_name(int idx) const {
+    if (idx >= 0 && idx < (int)clips.size()) return clips[idx].name;
+    return "";
+}
+float VFXAnimator::get_clip_duration(int idx) const {
+    if (idx >= 0 && idx < (int)clips.size()) return clips[idx].duration;
+    return 0.0f;
+}
+void VFXAnimator::set_clip_loop(int idx, bool loop) {
+    if (idx >= 0 && idx < (int)clips.size()) clips[idx].loop = loop;
+}
+bool VFXAnimator::get_clip_loop(int idx) const {
+    if (idx >= 0 && idx < (int)clips.size()) return clips[idx].loop;
+    return true;
+}
+
+int VFXAnimator::add_curve(int clip_idx, const String& name, int bone_id, bool is_rotation, bool is_scale) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return -1;
+    AnimationCurve curve;
+    curve.name = name;
+    curve.bone_id = bone_id;
+    curve.is_rotation = is_rotation;
+    curve.is_scale = is_scale;
+    clips[clip_idx].curves.push_back(curve);
+    return clips[clip_idx].curves.size() - 1;
+}
+
+void VFXAnimator::delete_curve(int clip_idx, int curve_idx) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    auto& curves = clips[clip_idx].curves;
+    if (curve_idx >= 0 && curve_idx < (int)curves.size()) {
+        curves.erase(curves.begin() + curve_idx);
+    }
+}
+
+int VFXAnimator::get_curve_count(int clip_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return 0;
+    return clips[clip_idx].curves.size();
+}
+
+String VFXAnimator::get_curve_name(int clip_idx, int curve_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return "";
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return "";
+    return clips[clip_idx].curves[curve_idx].name;
+}
+
+void VFXAnimator::add_keyframe_scalar(int clip_idx, int curve_idx, float time, float value, int interp) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
+    Keyframe k;
+    k.time = time;
+    k.value = value;
+    k.interp = interp;
+    clips[clip_idx].curves[curve_idx].keys.push_back(k);
+    clips[clip_idx].curves[curve_idx].sort_keys();
+}
+
+void VFXAnimator::add_keyframe_vector(int clip_idx, int curve_idx, float time, const Vector3& value, int interp) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
+    Keyframe k;
+    k.time = time;
+    k.vec_value = value;
+    k.interp = interp;
+    clips[clip_idx].curves[curve_idx].keys.push_back(k);
+    clips[clip_idx].curves[curve_idx].sort_keys();
+}
+
+void VFXAnimator::add_keyframe_quaternion(int clip_idx, int curve_idx, float time, const Quaternion& value, int interp) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
+    Keyframe k;
+    k.time = time;
+    k.quat_value = value;
+    k.interp = interp;
+    clips[clip_idx].curves[curve_idx].keys.push_back(k);
+    clips[clip_idx].curves[curve_idx].sort_keys();
+}
+
+void VFXAnimator::delete_keyframe(int clip_idx, int curve_idx, int key_idx) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    auto& keys = clips[clip_idx].curves[curve_idx].keys;
+    if (key_idx >= 0 && key_idx < (int)keys.size()) {
+        keys.erase(keys.begin() + key_idx);
+    }
+}
+
+int VFXAnimator::get_keyframe_count(int clip_idx, int curve_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return 0;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return 0;
+    return clips[clip_idx].curves[curve_idx].keys.size();
+}
+
+float VFXAnimator::get_keyframe_time(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return 0.0f;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return 0.0f;
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return 0.0f;
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].time;
+}
+
+void VFXAnimator::play(int clip_idx) {
+    if (clip_idx >= 0 && clip_idx < (int)clips.size()) {
+        current_clip = clip_idx;
+        current_time = 0.0f;
+        is_playing = true;
+    }
+}
+
+void VFXAnimator::pause() { is_playing = false; }
+void VFXAnimator::stop() { is_playing = false; current_time = 0.0f; }
+
+void VFXAnimator::seek(float time) {
+    if (current_clip < 0 || current_clip >= (int)clips.size()) return;
+    current_time = time;
+    if (clips[current_clip].loop) {
+        current_time = fmod(current_time, clips[current_clip].duration);
+        if (current_time < 0) current_time += clips[current_clip].duration;
+    } else {
+        current_time = fmin(fmax(current_time, 0.0f), clips[current_clip].duration);
+    }
+}
+
+void VFXAnimator::advance(float delta) {
+    if (!is_playing || current_clip < 0) return;
+    seek(current_time + delta);
+}
+
+bool VFXAnimator::is_clip_playing() const { return is_playing; }
+float VFXAnimator::get_playback_time() const { return current_time; }
+
+float VFXAnimator::sample_scalar(int clip_idx, int curve_idx, float time) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return 0.0f;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return 0.0f;
+    return clips[clip_idx].curves[curve_idx].sample_scalar(time);
+}
+
+Vector3 VFXAnimator::sample_vector(int clip_idx, int curve_idx, float time) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector3();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector3();
+    return clips[clip_idx].curves[curve_idx].sample_vector(time);
+}
+
+Quaternion VFXAnimator::sample_quaternion(int clip_idx, int curve_idx, float time) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Quaternion();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Quaternion();
+    return clips[clip_idx].curves[curve_idx].sample_quaternion(time);
+}
+
+PackedFloat32Array VFXAnimator::sample_pose(int clip_idx, float time, int bone_count) const {
+    PackedFloat32Array pose;
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return pose;
+
+    pose.resize(bone_count * 10);
+
+    for (const auto& curve : clips[clip_idx].curves) {
+        if (curve.bone_id < 0 || curve.bone_id >= bone_count) continue;
+        int base = curve.bone_id * 10;
+
+        if (curve.is_rotation) {
+            Quaternion q = curve.sample_quaternion(time);
+            pose[base + 3] = q.x;
+            pose[base + 4] = q.y;
+            pose[base + 5] = q.z;
+            pose[base + 6] = q.w;
+        } else if (curve.is_scale) {
+            Vector3 s = curve.sample_vector(time);
+            pose[base + 7] = s.x;
+            pose[base + 8] = s.y;
+            pose[base + 9] = s.z;
+        } else {
+            Vector3 p = curve.sample_vector(time);
+            pose[base + 0] = p.x;
+            pose[base + 1] = p.y;
+            pose[base + 2] = p.z;
+        }
+    }
+    return pose;
+}
+
+PackedByteArray VFXAnimator::serialize_clip(int idx) const {
+    PackedByteArray data;
+    data.append(0x56); data.append(0x46); data.append(0x58); data.append(0x41);
+    return data;
+}
+
+void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
+    // TODO
+}
+
+void VFXAnimator::from_godot_animation(const Object* anim, int bone_count) {
+    // TODO: Import from Godot Animation resource
+}
