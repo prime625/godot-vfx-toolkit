@@ -32,12 +32,14 @@ struct SkinMatrix {
     Transform3D transform;
 
     Vector3 transform_point(const Vector3& p) const {
-        return transform * p;
+        // Use xform() instead of operator* to avoid Android NDK ambiguity
+        return transform.xform(p);
     }
 
     Vector3 transform_vector(const Vector3& v) const {
         Basis b = transform.get_basis();
-        return b * v;
+        // Use xform() instead of operator* to avoid Android NDK ambiguity
+        return b.xform(v);
     }
 };
 
