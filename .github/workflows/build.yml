@@ -41,6 +41,26 @@ jobs:
           sudo mkdir -p /usr/local/lib/android/sdk/ndk
           sudo ln -sf $PWD/android-ndk-r26d /usr/local/lib/android/sdk/ndk/23.2.8568313
 
+      - name: Clean cached artifacts
+        run: |
+          echo "=== Cleaning extension objects ==="
+          scons -c platform=android arch=${{ matrix.scons_arch }} target=template_debug 2>/dev/null || true
+          scons -c platform=android arch=${{ matrix.scons_arch }} target=template_release 2>/dev/null || true
+          
+          echo "=== Cleaning godot-cpp objects ==="
+          cd godot-cpp
+          scons -c platform=android arch=${{ matrix.scons_arch }} target=template_debug 2>/dev/null || true
+          scons -c platform=android arch=${{ matrix.scons_arch }} target=template_release 2>/dev/null || true
+          cd ..
+          
+          echo "=== Nuking all .os files and generated bindings ==="
+          rm -f src/*.os
+          find . -name "*.os" -delete 2>/dev/null || true
+          find . -name "*.o" -delete 2>/dev/null || true
+          # Force godot-cpp to regenerate bindings from scratch
+          rm -rf godot-cpp/gen 2>/dev/null || true
+          rm -rf godot-cpp/src/gen 2>/dev/null || true
+
       - name: Generate godot-cpp bindings
         run: |
           cd godot-cpp
