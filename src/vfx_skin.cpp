@@ -1,4 +1,5 @@
-#include "vfx_skin.h"\n#include "vfx_math.h"
+#include "vfx_skin.h"
+#include "vfx_math.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
 #include <algorithm>
@@ -230,7 +231,8 @@ PackedVector3Array VFXSkin::compute_skinned_positions() const {
             if (bidx < 0 || w < 0.0001f) continue;
 
             Transform3D skin_mat = skeleton->get_bone_model_transform(bidx) * skeleton->get_bone_bind_pose(bidx).affine_inverse();
-            skinned += (skin_mat * mesh->get_vertex_position(vi)) * w;
+            // Use xform() to avoid Transform3D * Vector3 ambiguity on Android/clang
+            skinned += skin_mat.xform(mesh->get_vertex_position(vi)) * w;
         }
         result[vi] = skinned;
     }
