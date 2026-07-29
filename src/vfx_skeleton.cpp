@@ -164,8 +164,8 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
 
     Bone& b = bones[bone_idx];
 
-    // Use Godot's built-in Basis(Quaternion) instead of manual math to avoid
-    // ambiguous operator resolution on Android NDK / clang.
+    // Godot's Basis(Quaternion) constructor + scaled() avoids all manual
+    // Vector3*float math that Android NDK clang resolves ambiguously.
     Basis rot_basis(b.local_rotation);
     rot_basis = rot_basis.scaled(b.local_scale);
 
