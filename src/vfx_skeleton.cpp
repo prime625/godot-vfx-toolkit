@@ -165,9 +165,7 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
     Bone& b = bones[bone_idx];
     
     Basis rot_basis(b.local_rotation);
-    rot_basis[0] *= b.local_scale.x;
-    rot_basis[1] *= b.local_scale.y;
-    rot_basis[2] *= b.local_scale.z;
+    rot_basis = Basis(rot_basis[0] * b.local_scale.x, rot_basis[1] * b.local_scale.y, rot_basis[2] * b.local_scale.z);
     
     Transform3D local;
     local.set_basis(rot_basis);
