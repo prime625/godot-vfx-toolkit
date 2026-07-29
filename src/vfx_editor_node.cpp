@@ -228,9 +228,9 @@ void VFXEditorNode::create_demo_character() {
 
     // Animate hips up/down
     int hips_curve = anim->add_curve(clip, "hips_pos", 0, false, false);
-    anim->add_keyframe_vector(clip, hips_curve, 0.0f, Vector3(0, 1.0f, 0), INTERP_LINEAR);
-    anim->add_keyframe_vector(clip, hips_curve, 1.0f, Vector3(0, 1.05f, 0), INTERP_LINEAR);
-    anim->add_keyframe_vector(clip, hips_curve, 2.0f, Vector3(0, 1.0f, 0), INTERP_LINEAR);
+    anim->add_keyframe_vector(clip, hips_curve, 0.0f, Vector3(0, 1.0f, 0), VFXAnimator::INTERP_LINEAR);
+    anim->add_keyframe_vector(clip, hips_curve, 1.0f, Vector3(0, 1.05f, 0), VFXAnimator::INTERP_LINEAR);
+    anim->add_keyframe_vector(clip, hips_curve, 2.0f, Vector3(0, 1.0f, 0), VFXAnimator::INTERP_LINEAR);
 
     set_vfx_animator(anim);
 }
