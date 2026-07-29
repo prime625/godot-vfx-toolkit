@@ -161,31 +161,20 @@ void VFXSkeleton::reset_to_bind_pose() {
 
 void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& parent_transform) {
     if (bone_idx < 0 || bone_idx >= (int)bones.size()) return;
-    
+
     Bone& b = bones[bone_idx];
-    
-    Quaternion q = b.local_rotation;
-    float x2 = q.x + q.x, y2 = q.y + q.y, z2 = q.z + q.z;
-    float xx = q.x * x2, xy = q.x * y2, xz = q.x * z2;
-    float yy = q.y * y2, yz = q.y * z2, zz = q.z * z2;
-    float wx = q.w * x2, wy = q.w * y2, wz = q.w * z2;
-    
-    Vector3 col0(1.0f - (yy + zz), xy + wz, xz - wy);
-    Vector3 col1(xy - wz, 1.0f - (xx + zz), yz + wx);
-    Vector3 col2(xz + wy, yz - wx, 1.0f - (xx + yy));
-    
-    col0 = col0 * b.local_scale.x;
-    col1 = col1 * b.local_scale.y;
-    col2 = col2 * b.local_scale.z;
-    
-    Basis rot_basis(col0, col1, col2);
-    
+
+    // Use Godot's built-in Basis(Quaternion) instead of manual math to avoid
+    // ambiguous operator resolution on Android NDK / clang.
+    Basis rot_basis(b.local_rotation);
+    rot_basis = rot_basis.scaled(b.local_scale);
+
     Transform3D local;
     local.set_basis(rot_basis);
     local.set_origin(b.local_position);
-    
+
     b.model_transform = parent_transform * local;
-    
+
     for (int i = 0; i < (int)bones.size(); i++) {
         if (bones[i].parent_id == bone_idx) {
             _update_transforms_recursive(i, b.model_transform);
@@ -205,43 +194,43 @@ void VFXSkeleton::update_transforms() {
 void VFXSkeleton::solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, const Vector3& target, const Vector3& pole, float twist) {
     if (root_bone < 0 || mid_bone < 0 || tip_bone < 0) return;
     if (root_bone >= (int)bones.size() || mid_bone >= (int)bones.size() || tip_bone >= (int)bones.size()) return;
-    
+
     Vector3 root_pos = bones[root_bone].model_transform.get_origin();
     Vector3 mid_pos = bones[mid_bone].model_transform.get_origin();
     Vector3 tip_pos = bones[tip_bone].model_transform.get_origin();
-    
+
     float len1 = (mid_pos - root_pos).length();
     float len2 = (tip_pos - mid_pos).length();
     float dist = (target - root_pos).length();
-    
+
     if (dist > len1 + len2 - 0.001f) dist = len1 + len2 - 0.001f;
     if (dist < fabs(len1 - len2) + 0.001f) dist = fabs(len1 - len2) + 0.001f;
-    
+
     float cos_angle = (dist * dist + len1 * len1 - len2 * len2) / (2.0f * dist * len1);
     cos_angle = cos_angle < -1.0f ? -1.0f : (cos_angle > 1.0f ? 1.0f : cos_angle);
     float angle = acos(cos_angle);
-    
+
     UtilityFunctions::print("IK two-bone: angle = ", angle);
     dirty = true;
 }
 
 void VFXSkeleton::solve_ik_ccd(int tip_bone, const Vector3& target, int iterations, float threshold) {
     if (tip_bone < 0 || tip_bone >= (int)bones.size()) return;
-    
+
     for (int iter = 0; iter < iterations; iter++) {
         int current = bones[tip_bone].parent_id;
         while (current >= 0) {
             Vector3 tip_world = bones[tip_bone].model_transform.get_origin();
             Vector3 joint_world = bones[current].model_transform.get_origin();
-            
+
             Vector3 to_tip = (tip_world - joint_world).normalized();
             Vector3 to_target = (target - joint_world).normalized();
-            
+
             if (to_tip.length_squared() < 0.0001f || to_target.length_squared() < 0.0001f) {
                 current = bones[current].parent_id;
                 continue;
             }
-            
+
             float dot = to_tip.dot(to_target);
             dot = dot < -1.0f ? -1.0f : (dot > 1.0f ? 1.0f : dot);
             float angle = acos(dot);
@@ -249,21 +238,21 @@ void VFXSkeleton::solve_ik_ccd(int tip_bone, const Vector3& target, int iteratio
                 current = bones[current].parent_id;
                 continue;
             }
-            
+
             Vector3 axis = to_tip.cross(to_target).normalized();
             if (axis.length_squared() < 0.0001f) {
                 current = bones[current].parent_id;
                 continue;
             }
-            
+
             Quaternion rot(axis, angle);
             bones[current].local_rotation = rot * bones[current].local_rotation;
             update_transforms();
-            
+
             if ((bones[tip_bone].model_transform.get_origin() - target).length() < threshold) {
                 return;
             }
-            
+
             current = bones[current].parent_id;
         }
     }
@@ -272,11 +261,12 @@ void VFXSkeleton::solve_ik_ccd(int tip_bone, const Vector3& target, int iteratio
 PackedVector3Array VFXSkeleton::get_skinning_matrices() const {
     PackedVector3Array matrices;
     matrices.resize(bones.size() * 3);
-    
+
     for (int i = 0; i < (int)bones.size(); i++) {
         Transform3D skin = bones[i].model_transform * bones[i].inverse_bind_pose;
         Basis b = skin.get_basis();
-        
+        Vector3 t = skin.get_origin();
+
         int base = i * 3;
         matrices[base + 0] = b[0];
         matrices[base + 1] = b[1];
@@ -287,62 +277,62 @@ PackedVector3Array VFXSkeleton::get_skinning_matrices() const {
 
 void VFXSkeleton::create_mixamo_skeleton() {
     clear();
-    
+
     int hips = add_bone("mixamorig_Hips", -1);
-    
+
     int spine = add_bone("mixamorig_Spine", hips);
     int spine1 = add_bone("mixamorig_Spine1", spine);
     int spine2 = add_bone("mixamorig_Spine2", spine1);
-    
+
     int neck = add_bone("mixamorig_Neck", spine2);
     int head = add_bone("mixamorig_Head", neck);
-    
+
     int l_shoulder = add_bone("mixamorig_LeftShoulder", spine2);
     int l_arm = add_bone("mixamorig_LeftArm", l_shoulder);
     int l_forearm = add_bone("mixamorig_LeftForeArm", l_arm);
     int l_hand = add_bone("mixamorig_LeftHand", l_forearm);
-    
+
     int r_shoulder = add_bone("mixamorig_RightShoulder", spine2);
     int r_arm = add_bone("mixamorig_RightArm", r_shoulder);
     int r_forearm = add_bone("mixamorig_RightForeArm", r_arm);
     int r_hand = add_bone("mixamorig_RightHand", r_forearm);
-    
+
     int l_upleg = add_bone("mixamorig_LeftUpLeg", hips);
     int l_leg = add_bone("mixamorig_LeftLeg", l_upleg);
     int l_foot = add_bone("mixamorig_LeftFoot", l_leg);
     int l_toe = add_bone("mixamorig_LeftToeBase", l_foot);
-    
+
     int r_upleg = add_bone("mixamorig_RightUpLeg", hips);
     int r_leg = add_bone("mixamorig_RightLeg", r_upleg);
     int r_foot = add_bone("mixamorig_RightFoot", r_leg);
     int r_toe = add_bone("mixamorig_RightToeBase", r_foot);
-    
+
     set_bone_local_position(spine, Vector3(0, 1.0f, 0));
     set_bone_local_position(spine1, Vector3(0, 0.15f, 0));
     set_bone_local_position(spine2, Vector3(0, 0.15f, 0));
     set_bone_local_position(neck, Vector3(0, 0.15f, 0));
     set_bone_local_position(head, Vector3(0, 0.1f, 0));
-    
+
     set_bone_local_position(l_shoulder, Vector3(0.15f, 0.05f, 0));
     set_bone_local_position(l_arm, Vector3(0.1f, 0, 0));
     set_bone_local_position(l_forearm, Vector3(0.25f, 0, 0));
     set_bone_local_position(l_hand, Vector3(0.25f, 0, 0));
-    
+
     set_bone_local_position(r_shoulder, Vector3(-0.15f, 0.05f, 0));
     set_bone_local_position(r_arm, Vector3(-0.1f, 0, 0));
     set_bone_local_position(r_forearm, Vector3(-0.25f, 0, 0));
     set_bone_local_position(r_hand, Vector3(-0.25f, 0, 0));
-    
+
     set_bone_local_position(l_upleg, Vector3(0.1f, 0, 0));
     set_bone_local_position(l_leg, Vector3(0, -0.45f, 0));
     set_bone_local_position(l_foot, Vector3(0, -0.45f, 0));
     set_bone_local_position(l_toe, Vector3(0, 0, 0.15f));
-    
+
     set_bone_local_position(r_upleg, Vector3(-0.1f, 0, 0));
     set_bone_local_position(r_leg, Vector3(0, -0.45f, 0));
     set_bone_local_position(r_foot, Vector3(0, -0.45f, 0));
     set_bone_local_position(r_toe, Vector3(0, 0, 0.15f));
-    
+
     update_transforms();
     for (auto& b : bones) {
         b.bind_pose = b.model_transform;
@@ -358,4 +348,8 @@ PackedByteArray VFXSkeleton::serialize() const {
 
 void VFXSkeleton::deserialize(const PackedByteArray& data) {
     clear();
+}
+
+void VFXSkeleton::from_godot_skeleton(const Object* skeleton) {
+    // TODO: Import from Godot Skeleton3D resource
 }
