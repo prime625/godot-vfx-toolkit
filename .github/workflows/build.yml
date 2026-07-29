@@ -16,8 +16,10 @@ jobs:
         include:
           - arch: arm64
             scons_arch: arm64
+            ndk_arch: aarch64-linux-android
           - arch: arm32
             scons_arch: arm32
+            ndk_arch: arm-linux-androideabi
 
     steps:
       - name: Checkout
@@ -40,24 +42,26 @@ jobs:
           # Symlink our NDK to the exact path godot-cpp expects
           sudo mkdir -p /usr/local/lib/android/sdk/ndk
           sudo ln -sf $PWD/android-ndk-r26d /usr/local/lib/android/sdk/ndk/23.2.8568313
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=/usr/local/lib/android/sdk/ndk/23.2.8568313" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/23.2.8568313" >> $GITHUB_ENV
 
       - name: Clean cached artifacts
         run: |
           echo "=== Cleaning extension objects ==="
           scons -c platform=android arch=${{ matrix.scons_arch }} target=template_debug 2>/dev/null || true
           scons -c platform=android arch=${{ matrix.scons_arch }} target=template_release 2>/dev/null || true
-          
+
           echo "=== Cleaning godot-cpp objects ==="
           cd godot-cpp
           scons -c platform=android arch=${{ matrix.scons_arch }} target=template_debug 2>/dev/null || true
           scons -c platform=android arch=${{ matrix.scons_arch }} target=template_release 2>/dev/null || true
           cd ..
-          
+
           echo "=== Nuking all .os files and generated bindings ==="
           rm -f src/*.os
           find . -name "*.os" -delete 2>/dev/null || true
           find . -name "*.o" -delete 2>/dev/null || true
-          # Force godot-cpp to regenerate bindings from scratch
           rm -rf godot-cpp/gen 2>/dev/null || true
           rm -rf godot-cpp/src/gen 2>/dev/null || true
 
@@ -67,6 +71,9 @@ jobs:
           scons platform=android arch=${{ matrix.scons_arch }} target=template_debug generate_bindings=yes -j$(nproc)
 
       - name: Build Extension
+        env:
+          ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/23.2.8568313
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/23.2.8568313
         run: |
           scons platform=android arch=${{ matrix.scons_arch }} target=template_debug -j$(nproc)
           scons platform=android arch=${{ matrix.scons_arch }} target=template_release -j$(nproc)
