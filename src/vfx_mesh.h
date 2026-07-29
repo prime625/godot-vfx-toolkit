@@ -19,7 +19,6 @@ using namespace godot;
 namespace vfx {
 
 // Half-edge data structure for topological editing
-struct HalfEdge;
 struct HEVertex;
 struct HEEdge;
 struct HEFace;
@@ -30,7 +29,7 @@ struct HEVertex {
     Vector3 normal;
     Vector2 uv;
     Color color;
-    HalfEdge* halfedge = nullptr;  // one outgoing half-edge
+    HEEdge* halfedge = nullptr;  // one outgoing half-edge
 
     // Skinning data (up to 4 bones per vertex, standard for games)
     int bone_indices[4] = {-1, -1, -1, -1};
@@ -139,7 +138,7 @@ public:
     // === UTILS ===
     void recalculate_normals();
     void recalculate_bounds();
-    PackedFloat32Array get_bounds() const;
+    vfx::AABB get_bounds() const;
 
     // === SERIALIZATION ===
     PackedByteArray serialize() const;
