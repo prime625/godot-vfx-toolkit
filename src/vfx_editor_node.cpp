@@ -99,6 +99,7 @@ void VFXEditorNode::_update_godot_mesh() {
     mesh_instance->set_mesh(am);
 }
 
+
 void VFXEditorNode::_draw_skeleton_gizmos() {
     if (skeleton.is_null()) return;
     // TODO: Use ImmediateMesh or DebugDraw to show bone lines
