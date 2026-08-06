@@ -18,7 +18,6 @@ using namespace godot;
 
 namespace vfx {
 
-// Half-edge data structure for topological editing
 struct HEVertex;
 struct HEEdge;
 struct HEFace;
@@ -29,32 +28,30 @@ struct HEVertex {
     Vector3 normal;
     Vector2 uv;
     Color color;
-    HEEdge* halfedge = nullptr;  // one outgoing half-edge
+    HEEdge* halfedge = nullptr;
 
-    // Skinning data (up to 4 bones per vertex, standard for games)
     int bone_indices[4] = {-1, -1, -1, -1};
     float bone_weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
 
 struct HEEdge {
     uint32_t id = 0;
-    HEVertex* vertex = nullptr;      // vertex this edge points TO
-    HEEdge* twin = nullptr;          // opposite half-edge
-    HEEdge* next = nullptr;          // next edge around face
-    HEFace* face = nullptr;          // face this edge belongs to
+    HEVertex* vertex = nullptr;
+    HEEdge* twin = nullptr;
+    HEEdge* next = nullptr;
+    HEFace* face = nullptr;
     bool is_boundary = false;
 };
 
 struct HEFace {
     uint32_t id = 0;
-    HEEdge* halfedge = nullptr;      // one edge of this face
+    HEEdge* halfedge = nullptr;
     Vector3 normal;
     uint32_t vertex_count = 0;
 };
 
 } // namespace vfx
 
-// Godot-exposed mesh class
 class VFXMesh : public RefCounted {
     GDCLASS(VFXMesh, RefCounted)
 
@@ -68,9 +65,8 @@ private:
     uint32_t next_face_id = 0;
 
     vfx::AABB bounds;
-    bool dirty = true;  // needs Godot mesh rebuild
+    bool dirty = true;
 
-    // Cached Godot arrays for rendering
     PackedVector3Array godot_positions;
     PackedVector3Array godot_normals;
     PackedVector2Array godot_uvs;
@@ -88,13 +84,11 @@ public:
     VFXMesh();
     ~VFXMesh();
 
-    // === CREATION ===
     void clear();
     int add_vertex(const Vector3& pos, const Vector2& uv = Vector2(), const Color& col = Color(1,1,1,1));
     void add_triangle(int v0, int v1, int v2);
     void add_quad(int v0, int v1, int v2, int v3);
 
-    // === TOPOLOGY QUERIES ===
     int get_vertex_count() const;
     int get_face_count() const;
     int get_edge_count() const;
@@ -106,7 +100,6 @@ public:
     Vector2 get_vertex_uv(int idx) const;
     void set_vertex_uv(int idx, const Vector2& uv);
 
-    // === MODELLING OPERATIONS ===
     void extrude_face(int face_idx, float distance);
     void inset_face(int face_idx, float amount);
     void delete_face(int face_idx);
@@ -118,29 +111,25 @@ public:
     void set_vertex_weights(int vidx, float w0, float w1, float w2, float w3);
     void normalize_weights(int vidx);
 
+    // FAST direct accessors — zero-copy, use these from C++
+    void get_vertex_skinning(int idx, int out_bones[4], float out_weights[4]) const;
+    void set_vertex_skinning(int idx, const int bones[4], const float weights[4]);
+
     // === DATA EXPORT ===
     PackedVector3Array get_positions() const;
     PackedVector3Array get_normals() const;
     PackedVector2Array get_uvs() const;
     PackedColorArray get_colors() const;
     PackedInt32Array get_indices() const;
-
-    // Returns raw bone data as PackedFloat32Array: [idx0, w0, idx1, w1, ...] per vertex
     PackedFloat32Array get_skinning_data() const;
 
-    // === CONVERSION ===
-    // Build a Godot ArrayMesh from our data (for viewport preview)
     Ref<Mesh> to_godot_mesh() const;
-
-    // Import from Godot ArrayMesh
     void from_godot_mesh(const Ref<Mesh>& mesh);
 
-    // === UTILS ===
     void recalculate_normals();
     void recalculate_bounds();
     PackedFloat32Array get_bounds() const;
 
-    // === SERIALIZATION ===
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& data);
 };
