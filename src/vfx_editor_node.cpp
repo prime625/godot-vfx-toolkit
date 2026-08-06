@@ -81,18 +81,22 @@ void VFXEditorNode::_update_godot_mesh() {
     _ensure_mesh_instance();
     if (mesh.is_null()) return;
 
-    Ref<Mesh> gm = mesh->to_godot_mesh();
-    if (gm.is_valid()) {
-        if (show_weights && skin.is_valid()) {
-            gm->surface_set_material(0, weight_material);
-            // Update vertex colors from weight visualization
-            PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
-            // TODO: Apply colors to mesh surface
-        } else {
-            gm->surface_set_material(0, base_material);
+    Ref<ArrayMesh> am = mesh->to_godot_mesh();
+    if (am.is_null() || am->get_surface_count() == 0) return;
+
+    if (show_weights && skin.is_valid()) {
+        PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
+        if (colors.size() > 0) {
+            Array arrays = am->surface_get_arrays(0);
+            arrays[Mesh::ARRAY_COLOR] = colors;
+            am->surface_remove(0);
+            am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
         }
-        mesh_instance->set_mesh(gm);
+        am->surface_set_material(0, weight_material);
+    } else {
+        am->surface_set_material(0, base_material);
     }
+    mesh_instance->set_mesh(am);
 }
 
 void VFXEditorNode::_draw_skeleton_gizmos() {
