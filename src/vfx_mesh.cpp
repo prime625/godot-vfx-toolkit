@@ -3,6 +3,8 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <cmath>
+#include <unordered_map>
+#include <algorithm>
 
 using namespace godot;
 
@@ -174,6 +176,105 @@ void VFXMesh::subdivide_face(int face_idx) {
    UtilityFunctions::print("VFXMesh::subdivide_face - TODO");
 }
 
+// === TOPOLOGY ===
+void VFXMesh::link_twins() {
+    struct EdgeKey {
+        int a, b;
+        bool operator==(const EdgeKey& o) const { return a == o.a && b == o.b; }
+    };
+    struct EdgeKeyHash {
+        size_t operator()(const EdgeKey& k) const {
+            return ((uint64_t)(k.a) << 32) | (uint64_t)(k.b);
+        }
+    };
+    std::unordered_map<EdgeKey, vfx::HEEdge*, EdgeKeyHash> edge_map;
+    edge_map.reserve(edges.size());
+
+    for (auto* e : edges) {
+        if (!e || !e->next || !e->vertex || !e->next->vertex) continue;
+        int a = e->vertex->id;
+        int b = e->next->vertex->id;
+        EdgeKey key{b, a};
+        auto it = edge_map.find(key);
+        if (it != edge_map.end()) {
+            e->twin = it->second;
+            it->second->twin = e;
+            edge_map.erase(it);
+        } else {
+            EdgeKey my_key{a, b};
+            edge_map[my_key] = e;
+        }
+    }
+}
+
+// === RAYCAST (Möller–Trumbore) ===
+bool VFXMesh::raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance) const {
+    bool hit = false;
+    float closest = max_distance;
+    Vector3 dir = ray_dir.normalized();
+
+    for (auto* face : faces) {
+        if (!face->halfedge) continue;
+        vfx::HEEdge* start = face->halfedge;
+        vfx::HEEdge* e = start;
+        std::vector<Vector3> fverts;
+        do {
+            if (!e || !e->vertex) break;
+            fverts.push_back(e->vertex->position);
+            e = e->next;
+        } while (e && e != start);
+
+        if (fverts.size() < 3) continue;
+
+        for (size_t i = 1; i + 1 < fverts.size(); i++) {
+            const Vector3& v0 = fverts[0];
+            const Vector3& v1 = fverts[i];
+            const Vector3& v2 = fverts[i+1];
+
+            Vector3 edge1 = v1 - v0;
+            Vector3 edge2 = v2 - v0;
+            Vector3 h = dir.cross(edge2);
+            float a = edge1.dot(h);
+            if (a > -0.00001f && a < 0.00001f) continue;
+
+            float f = 1.0f / a;
+            Vector3 s = ray_origin - v0;
+            float u = f * s.dot(h);
+            if (u < 0.0f || u > 1.0f) continue;
+
+            Vector3 q = s.cross(edge1);
+            float v = f * dir.dot(q);
+            if (v < 0.0f || u + v > 1.0f) continue;
+
+            float t = f * edge2.dot(q);
+            if (t > 0.00001f && t < closest) {
+                closest = t;
+                out_hit = ray_origin + dir * t;
+                hit = true;
+            }
+        }
+    }
+    return hit;
+}
+
+// === ADJACENCY ===
+void VFXMesh::get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const {
+    out_neighbors.clear();
+    if (vidx < 0 || vidx >= (int)vertices.size()) return;
+    vfx::HEVertex* v = vertices[vidx];
+    if (!v->halfedge) return;
+
+    vfx::HEEdge* start = v->halfedge;
+    vfx::HEEdge* e = start;
+    do {
+        if (!e || !e->twin) break;
+        if (e->twin->vertex) {
+            out_neighbors.push_back(e->twin->vertex->id);
+        }
+        e = e->twin->next;
+    } while (e && e != start);
+}
+
 // === SKINNING ===
 void VFXMesh::set_vertex_bones(int vidx, int b0, int b1, int b2, int b3) {
    if (vidx >= 0 && vidx < (int)vertices.size()) {
@@ -202,7 +303,7 @@ void VFXMesh::normalize_weights(int vidx) {
    }
 }
 
-// === NEW: ZERO-COPY SKINNING ACCESSORS ===
+// === ZERO-COPY SKINNING ACCESSORS ===
 void VFXMesh::get_vertex_skinning(int idx, int out_bones[4], float out_weights[4]) const {
    if (idx < 0 || idx >= (int)vertices.size()) {
        out_bones[0] = out_bones[1] = out_bones[2] = out_bones[3] = -1;
@@ -367,6 +468,7 @@ void VFXMesh::from_godot_mesh(const Ref<Mesh>& mesh) {
        }
    }
    recalculate_normals();
+   link_twins();
 }
 
 void VFXMesh::recalculate_normals() {
