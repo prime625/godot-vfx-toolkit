@@ -106,6 +106,15 @@ public:
     void merge_vertices(int v0, int v1);
     void subdivide_face(int face_idx);
 
+    // === TOPOLOGY ===
+    void link_twins();
+
+    // === RAYCAST ===
+    bool raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance = 1e20f) const;
+
+    // === ADJACENCY ===
+    void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
+
     // === SKINNING ===
     void set_vertex_bones(int vidx, int b0, int b1, int b2, int b3);
     void set_vertex_weights(int vidx, float w0, float w1, float w2, float w3);
