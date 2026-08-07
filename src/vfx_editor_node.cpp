@@ -3,6 +3,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/immediate_mesh.hpp>
+#include <godot_cpp/classes/sphere_mesh.hpp>
 #include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -34,6 +35,10 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_auto_update", "auto_up"), &VFXEditorNode::set_auto_update);
     ClassDB::bind_method(D_METHOD("get_auto_update"), &VFXEditorNode::get_auto_update);
 
+    ClassDB::bind_method(D_METHOD("set_brush_cursor", "world_pos", "radius"), &VFXEditorNode::set_brush_cursor);
+    ClassDB::bind_method(D_METHOD("clear_brush_cursor"), &VFXEditorNode::clear_brush_cursor);
+    ClassDB::bind_method(D_METHOD("raycast_mesh", "ray_origin", "ray_dir", "max_dist"), &VFXEditorNode::raycast_mesh);
+
     ClassDB::bind_method(D_METHOD("export_glb", "filepath"), &VFXEditorNode::export_glb);
     ClassDB::bind_method(D_METHOD("export_glb_animated", "filepath", "clip_idx"), &VFXEditorNode::export_glb_animated);
     ClassDB::bind_method(D_METHOD("export_vat", "filepath", "frame_count", "fps"), &VFXEditorNode::export_vat);
@@ -57,6 +62,7 @@ VFXEditorNode::~VFXEditorNode() {}
 void VFXEditorNode::_notification(int p_what) {
     if (p_what == NOTIFICATION_ENTER_TREE) {
         _ensure_mesh_instance();
+        _ensure_brush_cursor();
     }
     if (p_what == NOTIFICATION_PROCESS) {
         if (animator.is_valid() && animator->is_clip_playing()) {
@@ -77,40 +83,66 @@ void VFXEditorNode::_ensure_mesh_instance() {
     }
 }
 
+void VFXEditorNode::_ensure_brush_cursor() {
+    if (!brush_cursor) {
+        brush_cursor = memnew(MeshInstance3D);
+        Ref<SphereMesh> sm;
+        sm.instantiate();
+        sm->set_radius(1.0f);
+        sm->set_height(2.0f);
+        brush_cursor->set_mesh(sm);
+
+        Ref<StandardMaterial3D> mat;
+        mat.instantiate();
+        mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+        mat->set_albedo(Color(0.2f, 0.8f, 1.0f, 0.3f));
+        mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
+        mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+        mat->set_no_depth_test(true);
+        brush_cursor->set_material_override(mat);
+        brush_cursor->set_visible(false);
+
+        add_child(brush_cursor);
+        brush_cursor->set_owner(this);
+    }
+}
+
 void VFXEditorNode::_update_godot_mesh() {
     _ensure_mesh_instance();
     if (mesh.is_null()) return;
 
-    Ref<ArrayMesh> am = mesh->to_godot_mesh();
-    if (am.is_null() || am->get_surface_count() == 0) return;
-
-    if (show_weights && skin.is_valid()) {
-        PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
-        if (colors.size() > 0) {
-            Array arrays = am->surface_get_arrays(0);
-            arrays[Mesh::ARRAY_COLOR] = colors;
-            // godot-cpp ArrayMesh does not expose remove_surface().
-            // Build a fresh mesh with the updated arrays instead.
-            Ref<ArrayMesh> new_am;
-            new_am.instantiate();
-            new_am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-            am = new_am;
+    Ref<Mesh> gm = mesh->to_godot_mesh();
+    if (gm.is_valid()) {
+        if (show_weights && skin.is_valid()) {
+            // Apply weight visualization as vertex colors
+            Ref<ArrayMesh> am = gm;
+            if (am.is_valid() && am->get_surface_count() > 0) {
+                PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
+                Array arrays = am->surface_get_arrays(0);
+                if (colors.size() == arrays[Mesh::ARRAY_VERTEX].operator PackedVector3Array().size()) {
+                    arrays[Mesh::ARRAY_COLOR] = colors;
+                    am->clear_surfaces();
+                    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+                }
+            }
+            if (mesh_instance->get_surface_override_material(0).is_null()) {
+                mesh_instance->set_surface_override_material(0, weight_material);
+            }
+        } else {
+            mesh_instance->set_surface_override_material(0, base_material);
         }
-        am->surface_set_material(0, weight_material);
-    } else {
-        am->surface_set_material(0, base_material);
+        mesh_instance->set_mesh(gm);
     }
-    mesh_instance->set_mesh(am);
 }
 
 void VFXEditorNode::_draw_skeleton_gizmos() {
     if (skeleton.is_null()) return;
-    // TODO: Use ImmediateMesh or DebugDraw to show bone lines
-    // For now, this is a placeholder for gizmo rendering
+    // TODO: ImmediateMesh line drawing for bones
 }
 
 void VFXEditorNode::set_vfx_mesh(const Ref<VFXMesh>& p_mesh) {
     mesh = p_mesh;
+    if (skin.is_valid()) skin->set_mesh(mesh);
     if (auto_update) _update_godot_mesh();
 }
 
@@ -138,6 +170,7 @@ void VFXEditorNode::set_vfx_skin(const Ref<VFXSkin>& p_skin) {
     skin = p_skin;
     if (mesh.is_valid()) skin->set_mesh(mesh);
     if (skeleton.is_valid()) skin->set_skeleton(skeleton);
+    if (skin.is_valid()) skin->set_mesh_transform(get_global_transform());
 }
 
 Ref<VFXSkin> VFXEditorNode::get_vfx_skin() const { return skin; }
@@ -167,6 +200,28 @@ int VFXEditorNode::get_visualize_bone() const { return visualize_bone; }
 void VFXEditorNode::set_auto_update(bool auto_up) { auto_update = auto_up; }
 bool VFXEditorNode::get_auto_update() const { return auto_update; }
 
+void VFXEditorNode::set_brush_cursor(const Vector3& world_pos, float radius) {
+    _ensure_brush_cursor();
+    if (brush_cursor) {
+        brush_cursor->set_visible(true);
+        brush_cursor->set_position(world_pos);
+        brush_cursor->set_scale(Vector3(radius, radius, radius));
+    }
+}
+
+void VFXEditorNode::clear_brush_cursor() {
+    if (brush_cursor) brush_cursor->set_visible(false);
+}
+
+bool VFXEditorNode::raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_dist) {
+    if (mesh.is_null()) return false;
+    // Transform ray to local space
+    Transform3D inv = get_global_transform().affine_inverse();
+    Vector3 local_origin = inv.xform(ray_origin);
+    Vector3 local_dir = inv.basis.xform(ray_dir).normalized();
+    return mesh->raycast(local_origin, local_dir, out_hit, max_dist);
+}
+
 bool VFXEditorNode::export_glb(const String& filepath) {
     Ref<VFXGLTFExporter> exporter;
     exporter.instantiate();
@@ -189,7 +244,6 @@ void VFXEditorNode::create_demo_cube() {
     Ref<VFXMesh> m;
     m.instantiate();
 
-    // Simple cube (8 verts, 12 tris)
     float s = 0.5f;
     int v[8];
     v[0] = m->add_vertex(Vector3(-s, -s, -s), Vector2(0, 0));
@@ -201,40 +255,33 @@ void VFXEditorNode::create_demo_cube() {
     v[6] = m->add_vertex(Vector3( s,  s,  s), Vector2(1, 1));
     v[7] = m->add_vertex(Vector3(-s,  s,  s), Vector2(0, 1));
 
-    // Front
     m->add_triangle(v[0], v[1], v[2]);
     m->add_triangle(v[0], v[2], v[3]);
-    // Back
     m->add_triangle(v[5], v[4], v[7]);
     m->add_triangle(v[5], v[7], v[6]);
-    // Top
     m->add_triangle(v[3], v[2], v[6]);
     m->add_triangle(v[3], v[6], v[7]);
-    // Bottom
     m->add_triangle(v[4], v[5], v[1]);
     m->add_triangle(v[4], v[1], v[0]);
-    // Right
     m->add_triangle(v[1], v[5], v[6]);
     m->add_triangle(v[1], v[6], v[2]);
-    // Left
     m->add_triangle(v[4], v[0], v[3]);
     m->add_triangle(v[4], v[3], v[7]);
 
     m->recalculate_normals();
+    m->link_twins();
     set_vfx_mesh(m);
 }
 
 void VFXEditorNode::create_demo_character() {
-    create_demo_cube();  // Start with cube
+    create_demo_cube();
     create_mixamo_skeleton();
     auto_weight();
 
-    // Create a simple idle animation
     Ref<VFXAnimator> anim;
     anim.instantiate();
     int clip = anim->create_clip("idle", 2.0f, 30.0f);
 
-    // Animate hips up/down
     int hips_curve = anim->add_curve(clip, "hips_pos", 0, false, false);
     anim->add_keyframe_vector(clip, hips_curve, 0.0f, Vector3(0, 1.0f, 0), VFXAnimator::INTERP_LINEAR);
     anim->add_keyframe_vector(clip, hips_curve, 1.0f, Vector3(0, 1.05f, 0), VFXAnimator::INTERP_LINEAR);
