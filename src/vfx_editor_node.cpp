@@ -67,7 +67,6 @@ void VFXEditorNode::_notification(int p_what) {
     if (p_what == NOTIFICATION_PROCESS) {
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
-            // TODO: Apply sampled pose to skeleton and refresh mesh
         }
         if (show_skeleton && skeleton.is_valid()) {
             _draw_skeleton_gizmos();
@@ -114,7 +113,6 @@ void VFXEditorNode::_update_godot_mesh() {
     Ref<Mesh> gm = mesh->to_godot_mesh();
     if (gm.is_valid()) {
         if (show_weights && skin.is_valid()) {
-            // Apply weight visualization as vertex colors
             Ref<ArrayMesh> am = gm;
             if (am.is_valid() && am->get_surface_count() > 0) {
                 PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
@@ -137,7 +135,6 @@ void VFXEditorNode::_update_godot_mesh() {
 
 void VFXEditorNode::_draw_skeleton_gizmos() {
     if (skeleton.is_null()) return;
-    // TODO: ImmediateMesh line drawing for bones
 }
 
 void VFXEditorNode::set_vfx_mesh(const Ref<VFXMesh>& p_mesh) {
@@ -213,13 +210,16 @@ void VFXEditorNode::clear_brush_cursor() {
     if (brush_cursor) brush_cursor->set_visible(false);
 }
 
-bool VFXEditorNode::raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_dist) {
-    if (mesh.is_null()) return false;
-    // Transform ray to local space
+Variant VFXEditorNode::raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, float max_dist) {
+    if (mesh.is_null()) return Variant();
     Transform3D inv = get_global_transform().affine_inverse();
     Vector3 local_origin = inv.xform(ray_origin);
     Vector3 local_dir = inv.basis.xform(ray_dir).normalized();
-    return mesh->raycast(local_origin, local_dir, out_hit, max_dist);
+    Vector3 hit;
+    if (mesh->raycast(local_origin, local_dir, hit, max_dist)) {
+        return hit;
+    }
+    return Variant();
 }
 
 bool VFXEditorNode::export_glb(const String& filepath) {
