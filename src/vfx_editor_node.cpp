@@ -89,8 +89,12 @@ void VFXEditorNode::_update_godot_mesh() {
         if (colors.size() > 0) {
             Array arrays = am->surface_get_arrays(0);
             arrays[Mesh::ARRAY_COLOR] = colors;
-            am->remove_surface(0);
-            am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+            // godot-cpp ArrayMesh does not expose remove_surface().
+            // Build a fresh mesh with the updated arrays instead.
+            Ref<ArrayMesh> new_am;
+            new_am.instantiate();
+            new_am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+            am = new_am;
         }
         am->surface_set_material(0, weight_material);
     } else {
