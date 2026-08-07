@@ -97,7 +97,6 @@ void VFXEditorNode::_ensure_brush_cursor() {
         mat->set_albedo(Color(0.2f, 0.8f, 1.0f, 0.3f));
         mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
         mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
-        mat->set_no_depth_test(true);
         brush_cursor->set_material_override(mat);
         brush_cursor->set_visible(false);
 
