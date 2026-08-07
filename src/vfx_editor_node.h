@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/sphere_mesh.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
 #include "vfx_skin.h"
@@ -74,8 +75,8 @@ public:
     void set_brush_cursor(const Vector3& world_pos, float radius);
     void clear_brush_cursor();
 
-    // Raycast into mesh for painting
-    bool raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_dist = 1e20f);
+    // Raycast into mesh for painting. Returns Vector3 hit position, or null if miss.
+    Variant raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, float max_dist = 1e20f);
 
     bool export_glb(const String& filepath);
     bool export_glb_animated(const String& filepath, int clip_idx);
