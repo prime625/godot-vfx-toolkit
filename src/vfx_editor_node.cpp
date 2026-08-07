@@ -89,7 +89,7 @@ void VFXEditorNode::_update_godot_mesh() {
         if (colors.size() > 0) {
             Array arrays = am->surface_get_arrays(0);
             arrays[Mesh::ARRAY_COLOR] = colors;
-            am->surface_remove(0);
+            am->remove_surface(0);
             am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
         }
         am->surface_set_material(0, weight_material);
@@ -98,7 +98,6 @@ void VFXEditorNode::_update_godot_mesh() {
     }
     mesh_instance->set_mesh(am);
 }
-
 
 void VFXEditorNode::_draw_skeleton_gizmos() {
     if (skeleton.is_null()) return;
