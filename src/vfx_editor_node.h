@@ -4,6 +4,8 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/immediate_mesh.hpp>
+#include <godot_cpp/classes/sphere_mesh.hpp>
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
 #include "vfx_skin.h"
@@ -21,15 +23,18 @@ private:
     Ref<VFXAnimator> animator;
 
     MeshInstance3D* mesh_instance = nullptr;
+    MeshInstance3D* brush_cursor = nullptr;
+
     Ref<StandardMaterial3D> base_material;
     Ref<StandardMaterial3D> weight_material;
 
-    bool show_skeleton = false;
+    bool show_skeleton = true;
     bool show_weights = false;
     int visualize_bone = 0;
     bool auto_update = true;
 
     void _ensure_mesh_instance();
+    void _ensure_brush_cursor();
     void _update_godot_mesh();
     void _draw_skeleton_gizmos();
 
@@ -64,6 +69,13 @@ public:
     int get_visualize_bone() const;
     void set_auto_update(bool auto_up);
     bool get_auto_update() const;
+
+    // Brush cursor
+    void set_brush_cursor(const Vector3& world_pos, float radius);
+    void clear_brush_cursor();
+
+    // Raycast into mesh for painting
+    bool raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_dist = 1e20f);
 
     bool export_glb(const String& filepath);
     bool export_glb_animated(const String& filepath, int clip_idx);
