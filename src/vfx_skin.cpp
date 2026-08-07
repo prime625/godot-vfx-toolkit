@@ -67,6 +67,9 @@ void VFXSkin::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_skeleton", "sk"), &VFXSkin::set_skeleton);
     ClassDB::bind_method(D_METHOD("get_skeleton"), &VFXSkin::get_skeleton);
 
+    ClassDB::bind_method(D_METHOD("set_mesh_transform", "transform"), &VFXSkin::set_mesh_transform);
+    ClassDB::bind_method(D_METHOD("get_mesh_transform"), &VFXSkin::get_mesh_transform);
+
     ClassDB::bind_method(D_METHOD("set_brush_radius", "r"), &VFXSkin::set_brush_radius);
     ClassDB::bind_method(D_METHOD("get_brush_radius"), &VFXSkin::get_brush_radius);
     ClassDB::bind_method(D_METHOD("set_brush_strength", "s"), &VFXSkin::set_brush_strength);
@@ -90,6 +93,7 @@ void VFXSkin::_bind_methods() {
 
     ClassDB::bind_method(D_METHOD("stroke_begin"), &VFXSkin::stroke_begin);
     ClassDB::bind_method(D_METHOD("paint_at", "world_pos", "delta_time"), &VFXSkin::paint_at);
+    ClassDB::bind_method(D_METHOD("paint_at_local", "local_pos", "delta_time"), &VFXSkin::paint_at_local);
     ClassDB::bind_method(D_METHOD("stroke_end"), &VFXSkin::stroke_end);
 
     ClassDB::bind_method(D_METHOD("can_undo"), &VFXSkin::can_undo);
@@ -108,7 +112,6 @@ void VFXSkin::_bind_methods() {
     ClassDB::bind_method(D_METHOD("compute_skinned_positions"), &VFXSkin::compute_skinned_positions);
     ClassDB::bind_method(D_METHOD("bake_vertex_animation", "frame_count", "fps"), &VFXSkin::bake_vertex_animation);
 
-    // Enums
     ClassDB::bind_integer_constant(get_class_static(), "", "BRUSH_ADD", 0);
     ClassDB::bind_integer_constant(get_class_static(), "", "BRUSH_SUBTRACT", 1);
     ClassDB::bind_integer_constant(get_class_static(), "", "BRUSH_REPLACE", 2);
@@ -140,6 +143,14 @@ void VFXSkin::set_skeleton(const Ref<VFXSkeleton>& p_sk) {
     }
 }
 Ref<VFXSkeleton> VFXSkin::get_skeleton() const { return skeleton; }
+
+void VFXSkin::set_mesh_transform(const Transform3D& transform) {
+    mesh_transform = transform;
+}
+
+Transform3D VFXSkin::get_mesh_transform() const {
+    return mesh_transform;
+}
 
 // ============================================================================
 // BRUSH SETTINGS
@@ -185,7 +196,7 @@ void VFXSkin::_rebuild_grid() {
     std::vector<Vector3> positions;
     positions.reserve(vc);
     for (int i = 0; i < vc; i++) positions.push_back(mesh->get_vertex_position(i));
-    grid.build(positions, brush_radius * 1.5f); // cell size ~ 1.5x brush radius
+    grid.build(positions, brush_radius * 1.5f);
     grid_dirty = false;
 }
 
@@ -227,9 +238,9 @@ void VFXSkin::undo() {
 
     for (size_t i = 0; i < stroke.vertices.size(); i++) {
         int vidx = stroke.vertices[i];
-        int bones[4] = { stroke.old_bones[0][i], stroke.old_bones[1][i], stroke.old_bones[2][i], stroke.old_bones[3][i] };
-        float weights[4] = { stroke.old_weights[0][i], stroke.old_weights[1][i], stroke.old_weights[2][i], stroke.old_weights[3][i] };
-        mesh->set_vertex_skinning(vidx, bones, weights);
+        int b[4] = { stroke.old_bones[0][i], stroke.old_bones[1][i], stroke.old_bones[2][i], stroke.old_bones[3][i] };
+        float w[4] = { stroke.old_weights[0][i], stroke.old_weights[1][i], stroke.old_weights[2][i], stroke.old_weights[3][i] };
+        mesh->set_vertex_skinning(vidx, b, w);
     }
 
     redo_stack.push_back(stroke);
@@ -239,8 +250,14 @@ void VFXSkin::redo() {
     if (redo_stack.empty() || mesh.is_null()) return;
     WeightStroke stroke = redo_stack.back();
     redo_stack.pop_back();
-    // Re-apply is handled by re-playing the stroke, but for simplicity we just store current state and swap
-    // In a full impl you'd store both pre and post. For now, undo pops to redo and vice versa.
+
+    for (size_t i = 0; i < stroke.vertices.size(); i++) {
+        int vidx = stroke.vertices[i];
+        int b[4] = { stroke.new_bones[0][i], stroke.new_bones[1][i], stroke.new_bones[2][i], stroke.new_bones[3][i] };
+        float w[4] = { stroke.new_weights[0][i], stroke.new_weights[1][i], stroke.new_weights[2][i], stroke.new_weights[3][i] };
+        mesh->set_vertex_skinning(vidx, b, w);
+    }
+
     undo_stack.push_back(stroke);
 }
 
@@ -261,7 +278,10 @@ void VFXSkin::stroke_begin() {
     for (int i = 0; i < 4; i++) {
         tls_stroke.old_bones[i].clear();
         tls_stroke.old_weights[i].clear();
+        tls_stroke.new_bones[i].clear();
+        tls_stroke.new_weights[i].clear();
     }
+    if (mirror_x) _build_mirror_map();
 }
 
 void VFXSkin::stroke_end() {
@@ -272,12 +292,48 @@ void VFXSkin::stroke_end() {
     for (int i = 0; i < 4; i++) {
         tls_stroke.old_bones[i].clear();
         tls_stroke.old_weights[i].clear();
+        tls_stroke.new_bones[i].clear();
+        tls_stroke.new_weights[i].clear();
     }
 }
 
 // ============================================================================
-// WEIGHT APPLICATION (hot path, zero alloc)
+// WEIGHT APPLICATION HELPERS
 // ============================================================================
+static void _record_stroke(WeightStroke& stroke, int vidx, const int bones[4], const float weights[4], bool is_pre) {
+    for (size_t i = 0; i < stroke.vertices.size(); i++) {
+        if (stroke.vertices[i] == vidx) {
+            if (!is_pre) {
+                for (int j = 0; j < 4; j++) {
+                    stroke.new_bones[j][i] = bones[j];
+                    stroke.new_weights[j][i] = weights[j];
+                }
+            }
+            return;
+        }
+    }
+    // Not found - append
+    stroke.vertices.push_back(vidx);
+    for (int j = 0; j < 4; j++) {
+        stroke.old_bones[j].push_back(bones[j]);
+        stroke.old_weights[j].push_back(weights[j]);
+        stroke.new_bones[j].push_back(bones[j]);
+        stroke.new_weights[j].push_back(weights[j]);
+    }
+}
+
+static void _update_stroke_post(WeightStroke& stroke, int vidx, const int bones[4], const float weights[4]) {
+    for (size_t i = 0; i < stroke.vertices.size(); i++) {
+        if (stroke.vertices[i] == vidx) {
+            for (int j = 0; j < 4; j++) {
+                stroke.new_bones[j][i] = bones[j];
+                stroke.new_weights[j][i] = weights[j];
+            }
+            return;
+        }
+    }
+}
+
 void VFXSkin::_apply_weight(int vidx, float delta, int bone) {
     if (bone_locked.size() > (size_t)bone && bone_locked[bone]) return;
 
@@ -285,27 +341,14 @@ void VFXSkin::_apply_weight(int vidx, float delta, int bone) {
     float weights[4];
     mesh->get_vertex_skinning(vidx, bones, weights);
 
-    // Record undo if first touch this stroke
-    bool found = false;
-    for (size_t i = 0; i < tls_stroke.vertices.size(); i++) {
-        if (tls_stroke.vertices[i] == vidx) { found = true; break; }
-    }
-    if (!found) {
-        tls_stroke.vertices.push_back(vidx);
-        for (int j = 0; j < 4; j++) {
-            tls_stroke.old_bones[j].push_back(bones[j]);
-            tls_stroke.old_weights[j].push_back(weights[j]);
-        }
-    }
+    _record_stroke(tls_stroke, vidx, bones, weights, true);
 
-    // Find slot
     int slot = -1;
     for (int j = 0; j < 4; j++) {
         if (bones[j] == bone) { slot = j; break; }
         if (bones[j] < 0 && slot < 0) slot = j;
     }
     if (slot < 0) {
-        // Find smallest weight to evict
         slot = 0;
         for (int j = 1; j < 4; j++) if (weights[j] < weights[slot]) slot = j;
     }
@@ -326,11 +369,9 @@ void VFXSkin::_apply_weight(int vidx, float delta, int bone) {
     }
 
     mesh->set_vertex_skinning(vidx, bones, weights);
+    _update_stroke_post(tls_stroke, vidx, bones, weights);
 
-    // Mirror
-    if (mirror_x) {
-        _apply_mirror(vidx, bones, weights);
-    }
+    if (mirror_x) _apply_mirror(vidx, bones, weights);
 }
 
 void VFXSkin::_apply_replace(int vidx, float target, float falloff, int bone) {
@@ -340,17 +381,7 @@ void VFXSkin::_apply_replace(int vidx, float target, float falloff, int bone) {
     float weights[4];
     mesh->get_vertex_skinning(vidx, bones, weights);
 
-    bool found = false;
-    for (size_t i = 0; i < tls_stroke.vertices.size(); i++) {
-        if (tls_stroke.vertices[i] == vidx) { found = true; break; }
-    }
-    if (!found) {
-        tls_stroke.vertices.push_back(vidx);
-        for (int j = 0; j < 4; j++) {
-            tls_stroke.old_bones[j].push_back(bones[j]);
-            tls_stroke.old_weights[j].push_back(weights[j]);
-        }
-    }
+    _record_stroke(tls_stroke, vidx, bones, weights, true);
 
     int slot = -1;
     for (int j = 0; j < 4; j++) {
@@ -372,72 +403,83 @@ void VFXSkin::_apply_replace(int vidx, float target, float falloff, int bone) {
     }
 
     mesh->set_vertex_skinning(vidx, bones, weights);
+    _update_stroke_post(tls_stroke, vidx, bones, weights);
 
     if (mirror_x) _apply_mirror(vidx, bones, weights);
 }
 
 void VFXSkin::_apply_smooth(int vidx, float strength) {
-    // Average with connected vertices (approximate via all-verts for now)
-    // Full impl would use half-edge adjacency
+    if (bone_locked.size() > (size_t)brush_bone && bone_locked[brush_bone]) return;
+
     int bones[4];
     float weights[4];
     mesh->get_vertex_skinning(vidx, bones, weights);
 
-    bool found = false;
-    for (size_t i = 0; i < tls_stroke.vertices.size(); i++) {
-        if (tls_stroke.vertices[i] == vidx) { found = true; break; }
-    }
-    if (!found) {
-        tls_stroke.vertices.push_back(vidx);
-        for (int j = 0; j < 4; j++) {
-            tls_stroke.old_bones[j].push_back(bones[j]);
-            tls_stroke.old_weights[j].push_back(weights[j]);
-        }
-    }
+    _record_stroke(tls_stroke, vidx, bones, weights, true);
 
-    // Simple laplacian-ish: pull toward average of all verts (cheap approximation)
-    // For real smooth you'd walk the half-edge ring. This is good enough for mobile.
+    std::vector<int> neighbors;
+    mesh->get_vertex_neighbors(vidx, neighbors);
+
     float avg = 0.0f;
     int count = 0;
-    int vc = mesh->get_vertex_count();
-    for (int i = 0; i < vc; i++) {
-        int b[4]; float w[4];
-        mesh->get_vertex_skinning(i, b, w);
+    for (int ni : neighbors) {
+        int nb[4]; float nw[4];
+        mesh->get_vertex_skinning(ni, nb, nw);
         for (int j = 0; j < 4; j++) {
-            if (b[j] == brush_bone) { avg += w[j]; count++; break; }
+            if (nb[j] == brush_bone) { avg += nw[j]; count++; break; }
         }
     }
     if (count > 0) avg /= count;
+    else avg = 0.0f;
 
+    bool has_bone = false;
     for (int j = 0; j < 4; j++) {
         if (bones[j] == brush_bone) {
             weights[j] = vfx::lerp(weights[j], avg, strength);
+            has_bone = true;
             break;
         }
     }
+    if (!has_bone && count > 0) {
+        // Inject bone into first empty slot
+        for (int j = 0; j < 4; j++) {
+            if (bones[j] < 0) { bones[j] = brush_bone; weights[j] = avg * strength; break; }
+        }
+    }
+
     mesh->set_vertex_skinning(vidx, bones, weights);
+    _update_stroke_post(tls_stroke, vidx, bones, weights);
+
+    if (mirror_x) _apply_mirror(vidx, bones, weights);
+}
+
+void VFXSkin::_build_mirror_map() {
+    mirror_map.clear();
+    if (mesh.is_null()) return;
+    int vc = mesh->get_vertex_count();
+    for (int i = 0; i < vc; i++) {
+        Vector3 p = mesh->get_vertex_position(i);
+        int64_t key = ((int64_t)(p.y * 1000) << 32) | ((int64_t)(p.z * 1000) & 0xFFFFFFFF);
+        mirror_map[key] = i;
+    }
 }
 
 void VFXSkin::_apply_mirror(int vidx, const int bones[4], const float weights[4]) {
     if (!mirror_x || mesh.is_null()) return;
     Vector3 pos = mesh->get_vertex_position(vidx);
     float dist_to_plane = fabsf(pos.x - mirror_plane_x);
-    if (dist_to_plane < 0.001f) return; // on plane, no mirror needed
+    if (dist_to_plane < 0.001f) return;
 
-    // Find mirrored vertex by position search (slow but rare; grid helps)
-    // For production, build a position->index map at stroke_begin
     Vector3 mirrored_pos = pos;
     mirrored_pos.x = mirror_plane_x * 2.0f - pos.x;
 
-    int best = -1;
-    float best_d = 1e30f;
-    int vc = mesh->get_vertex_count();
-    for (int i = 0; i < vc; i++) {
-        float d = mesh->get_vertex_position(i).distance_squared_to(mirrored_pos);
-        if (d < best_d) { best_d = d; best = i; }
-    }
-    if (best >= 0 && best_d < 0.0001f) {
-        mesh->set_vertex_skinning(best, bones, weights);
+    int64_t key = ((int64_t)(mirrored_pos.y * 1000) << 32) | ((int64_t)(mirrored_pos.z * 1000) & 0xFFFFFFFF);
+    auto it = mirror_map.find(key);
+    if (it != mirror_map.end()) {
+        Vector3 actual = mesh->get_vertex_position(it->second);
+        if (actual.distance_squared_to(mirrored_pos) < 0.0001f) {
+            mesh->set_vertex_skinning(it->second, bones, weights);
+        }
     }
 }
 
@@ -445,11 +487,17 @@ void VFXSkin::_apply_mirror(int vidx, const int bones[4], const float weights[4]
 // PUBLIC PAINT
 // ============================================================================
 void VFXSkin::paint_at(const Vector3& world_pos, float delta_time) {
+    Transform3D inv = mesh_transform.affine_inverse();
+    Vector3 local_pos = inv.xform(world_pos);
+    paint_at_local(local_pos, delta_time);
+}
+
+void VFXSkin::paint_at_local(const Vector3& local_pos, float delta_time) {
     if (mesh.is_null()) return;
     if (brush_bone < 0) return;
     if (brush_radius < 0.0001f) return;
 
-    _find_vertices_brush(world_pos, brush_radius, tls_indices, tls_dists);
+    _find_vertices_brush(local_pos, brush_radius, tls_indices, tls_dists);
 
     for (size_t i = 0; i < tls_indices.size(); i++) {
         int vidx = tls_indices[i];
@@ -458,10 +506,15 @@ void VFXSkin::paint_at(const Vector3& world_pos, float delta_time) {
 
         switch (brush_mode) {
             case 0: // ADD
-            case 1: // SUBTRACT
             {
                 float delta = brush_strength * falloff * delta_time * 5.0f;
                 _apply_weight(vidx, delta, brush_bone);
+                break;
+            }
+            case 1: // SUBTRACT
+            {
+                float delta = brush_strength * falloff * delta_time * 5.0f;
+                _apply_weight(vidx, -delta, brush_bone);
                 break;
             }
             case 2: // REPLACE
