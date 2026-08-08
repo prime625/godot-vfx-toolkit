@@ -7,6 +7,31 @@
 using namespace godot;
 
 // ============================================================================
+// BLENDER-STYLE WEIGHT COLOR PALETTE
+// ============================================================================
+static Color weight_to_color(float w) {
+    w = vfx::clampf(w, 0.0f, 1.0f);
+
+    if (w < 0.25f) {
+        // Blue (0,0,1)  → Cyan (0,1,1)
+        float t = w / 0.25f;
+        return Color(0.0f, t, 1.0f, 1.0f);
+    } else if (w < 0.5f) {
+        // Cyan (0,1,1)  → Green (0,1,0)
+        float t = (w - 0.25f) / 0.25f;
+        return Color(0.0f, 1.0f, 1.0f - t, 1.0f);
+    } else if (w < 0.75f) {
+        // Green (0,1,0) → Yellow (1,1,0)
+        float t = (w - 0.5f) / 0.25f;
+        return Color(t, 1.0f, 0.0f, 1.0f);
+    } else {
+        // Yellow (1,1,0) → Red (1,0,0)
+        float t = (w - 0.75f) / 0.25f;
+        return Color(1.0f, 1.0f - t, 0.0f, 1.0f);
+    }
+}
+
+// ============================================================================
 // SPATIAL GRID
 // ============================================================================
 void SpatialGrid::build(const std::vector<Vector3>& verts, float cell_sz) {
@@ -617,15 +642,7 @@ PackedColorArray VFXSkin::get_weight_visualization(int bone_idx) const {
     colors.resize(vc);
     for (int i = 0; i < vc; i++) {
         float w = get_vertex_bone_weight(i, bone_idx);
-        Color c;
-        if (w < 0.33f) {
-            c = Color(w * 3.0f, 0, 0, 1);
-        } else if (w < 0.66f) {
-            c = Color(1, (w - 0.33f) * 3.0f, 0, 1);
-        } else {
-            c = Color(1, 1, (w - 0.66f) * 3.0f, 1);
-        }
-        colors[i] = c;
+        colors[i] = weight_to_color(w);
     }
     return colors;
 }
