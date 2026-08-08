@@ -122,9 +122,8 @@ void VFXEditorNode::_update_godot_mesh() {
                     am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
                 }
             }
-            if (mesh_instance->get_surface_override_material(0).is_null()) {
-                mesh_instance->set_surface_override_material(0, weight_material);
-            }
+            // FIX: always assign weight_material when in weight mode
+            mesh_instance->set_surface_override_material(0, weight_material);
         } else {
             mesh_instance->set_surface_override_material(0, base_material);
         }
