@@ -615,8 +615,8 @@ void VFXSkin::clear_weights() {
     if (mesh.is_null()) return;
     int vc = mesh->get_vertex_count();
     for (int i = 0; i < vc; i++) {
-        mesh->set_vertex_bones(i, 0, -1, -1, -1);
-        mesh->set_vertex_weights(i, 1.0f, 0, 0, 0);
+        mesh->set_vertex_bones(i, -1, -1, -1, -1);      // no bone
+        mesh->set_vertex_weights(i, 0.0f, 0.0f, 0.0f, 0.0f); // zero weight
     }
     grid_dirty = true;
 }
