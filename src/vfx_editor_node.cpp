@@ -234,9 +234,8 @@ void VFXEditorNode::_build_gizmo_mesh() {
     PackedInt32Array idx;
 
     float s = gizmo_screen_scale;
-    float r = s * 0.025f; // cylinder radius
+    float r = s * 0.025f;
 
-    // Axis colors (yellow on hover)
     Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
     Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
     Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
@@ -245,7 +244,6 @@ void VFXEditorNode::_build_gizmo_mesh() {
     _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
     _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
 
-    // Plane handles (small triangles)
     float p1 = s * 0.1f;
     float p2 = s * 0.25f;
 
@@ -278,7 +276,13 @@ void VFXEditorNode::_build_gizmo_mesh() {
     gizmo_node->set_transform(gizmo_transform);
 }
 
-void VFXEditorNode::set_gizmo_mode(int mode) { gizmo_mode = mode; }
+void VFXEditorNode::set_gizmo_mode(int mode) {
+    gizmo_mode = mode;
+    if (gizmo_node && gizmo_node->is_visible()) {
+        _build_gizmo_mesh();
+    }
+}
+
 int VFXEditorNode::get_gizmo_mode() const { return gizmo_mode; }
 
 void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
@@ -356,7 +360,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
         normal = gizmo_transform.basis.xform(Vector3(0, 0, 1)).normalized();
     } else if (axis == GIZMO_XZ) {
         normal = gizmo_transform.basis.xform(Vector3(0, 1, 0)).normalized();
-    } else { // GIZMO_YZ
+    } else {
         normal = gizmo_transform.basis.xform(Vector3(1, 0, 0)).normalized();
     }
 
@@ -385,7 +389,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
     gizmo_transform = t;
     if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
 
-    // Apply to selected bone
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
@@ -444,12 +447,12 @@ void VFXEditorNode::_build_skeleton_mesh() {
         Vector3 center = (head + tail) * 0.5f;
 
         int base = verts.size();
-        verts.push_back(head);                      // 0
-        verts.push_back(tail);                      // 1
-        verts.push_back(center + right * width);    // 2
-        verts.push_back(center - right * width);    // 3
-        verts.push_back(center + up * width);       // 4
-        verts.push_back(center - up * width);       // 5
+        verts.push_back(head);
+        verts.push_back(tail);
+        verts.push_back(center + right * width);
+        verts.push_back(center - right * width);
+        verts.push_back(center + up * width);
+        verts.push_back(center - up * width);
 
         for (int i = 0; i < 6; i++) colors.push_back(col);
 
@@ -471,7 +474,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
         bool is_selected = (i == selected_bone);
         Color col = is_selected ? Color(1.0f, 0.6f, 0.0f) : Color(0.25f, 0.55f, 0.85f);
-        if (i == 0) col = Color(0.6f, 0.6f, 0.6f); // hips grey
+        if (i == 0) col = Color(0.6f, 0.6f, 0.6f);
 
         add_octa(head, tail, col);
     }
@@ -494,7 +497,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
 }
 
 // ============================================================================
-// MATH HELPERS
+// MATH HELPERS — FIXED ray-vs-segment
 // ============================================================================
 bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
                                     const Vector3& a, const Vector3& b,
@@ -502,39 +505,45 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
     Vector3 ab = b - a;
     Vector3 ao = ro - a;
 
-    float A = ab.dot(ab);
-    float B = -ab.dot(rd);
-    float C = rd.dot(rd);
-    float D = ab.dot(ao);
-    float E = -rd.dot(ao);
+    float ab2 = ab.dot(ab);
+    float ab_rd = ab.dot(rd);
+    float ab_ao = ab.dot(ao);
+    float rd_ao = rd.dot(ao);
+    float rd2 = rd.dot(rd); // 1.0 if normalized
 
-    float det = A * C - B * B;
+    // Closest points on ray (t) and segment (s)
+    float denom = ab2 * rd2 - ab_rd * ab_rd;
     float t, s;
 
-    if (fabs(det) < 0.0001f) {
-        t = -D / A;
-        t = vfx::clampf(t, 0.0f, 1.0f);
-        s = 0.0f;
+    if (fabs(denom) < 0.0001f) {
+        // Parallel
+        s = -ab_ao / ab2;
+        t = -rd_ao / rd2;
     } else {
-        t = (D * C - B * E) / det;
-        s = (A * E - D * B) / det;
-
-        if (t < 0.0f) {
-            t = 0.0f;
-            s = E / C;
-        } else if (t > 1.0f) {
-            t = 1.0f;
-            s = (E + B) / C;
-        }
+        s = (ab_rd * rd_ao - ab_ao * rd2) / denom;
+        t = (ab2 * rd_ao - ab_rd * ab_ao) / denom;
     }
 
-    if (s < 0.0f) s = 0.0f;
+    // Clamp segment parameter to [0, 1]
+    s = vfx::clampf(s, 0.0f, 1.0f);
 
-    Vector3 closest_seg = a + ab * t;
-    Vector3 closest_ray = ro + rd * s;
+    // Recompute t for closest point on ray to the clamped segment point
+    Vector3 closest_seg = a + ab * s;
+    t = rd.dot(closest_seg - ro) / rd2;
 
+    if (t < 0.0f) {
+        // Behind ray origin — check if origin is within radius of segment
+        Vector3 closest_to_origin = a + ab * vfx::clampf(-ab_ao / ab2, 0.0f, 1.0f);
+        if ((closest_to_origin - ro).length_squared() < radius * radius) {
+            out_t = 0.0f;
+            return true;
+        }
+        return false;
+    }
+
+    Vector3 closest_ray = ro + rd * t;
     if ((closest_seg - closest_ray).length_squared() < radius * radius) {
-        out_t = s;
+        out_t = t;
         return true;
     }
     return false;
@@ -726,8 +735,12 @@ void VFXEditorNode::set_selected_bone(int idx) {
     _update_gizmo_visibility();
     if (skeleton.is_valid() && idx >= 0) {
         gizmo_transform = skeleton->get_bone_model_transform(idx);
-        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
-        _build_gizmo_mesh();
+        if (gizmo_node) {
+            gizmo_node->set_transform(gizmo_transform);
+            _build_gizmo_mesh(); // FORCE rebuild so it appears
+        }
+    } else if (gizmo_node) {
+        gizmo_node->set_visible(false);
     }
     _build_skeleton_mesh();
 }
