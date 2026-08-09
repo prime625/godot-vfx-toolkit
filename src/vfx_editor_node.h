@@ -147,7 +147,7 @@ public:
     // === SKELETON INTERACTION ===
     void set_selected_bone(int idx);
     int get_selected_bone() const;
-    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir);
+    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;  // <-- FIXED: added const
 };
 
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
