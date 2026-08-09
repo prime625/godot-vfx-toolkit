@@ -95,6 +95,7 @@ public:
 
     // === POSE ===
     void set_bone_pose(int bone_id, const Transform3D& pose);
+    void set_bone_model_transform(int bone_id, const Transform3D& world_pose);
     void reset_to_bind_pose();
 
     // === IK ===
