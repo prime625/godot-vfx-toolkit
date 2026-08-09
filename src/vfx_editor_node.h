@@ -17,6 +17,24 @@ using namespace godot;
 class VFXEditorNode : public Node3D {
     GDCLASS(VFXEditorNode, Node3D)
 
+public:
+    enum GizmoMode {
+        GIZMO_TRANSLATE = 0,
+        GIZMO_ROTATE = 1,
+        GIZMO_SCALE = 2
+    };
+
+    enum GizmoAxis {
+        GIZMO_NONE = -1,
+        GIZMO_X = 0,
+        GIZMO_Y,
+        GIZMO_Z,
+        GIZMO_XY,
+        GIZMO_XZ,
+        GIZMO_YZ,
+        GIZMO_XYZ
+    };
+
 private:
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
@@ -34,10 +52,40 @@ private:
     int visualize_bone = 0;
     bool auto_update = true;
 
+    // === GIZMO STATE ===
+    int gizmo_mode = GIZMO_TRANSLATE;
+    int gizmo_hover_axis = GIZMO_NONE;
+    int gizmo_drag_axis = GIZMO_NONE;
+    Transform3D gizmo_transform;
+    float gizmo_screen_scale = 0.5f;
+
+    Vector3 gizmo_drag_start_point;
+    Transform3D gizmo_drag_start_transform;
+    Plane gizmo_drag_plane;
+
+    MeshInstance3D* gizmo_node = nullptr;
+
+    void _ensure_gizmo_node();
+    void _build_gizmo_mesh();
+    void _update_gizmo_visibility();
+
+    // === SKELETON VISUAL ===
+    int selected_bone = -1;
+    MeshInstance3D* skel_visual = nullptr;
+
+    void _ensure_skeleton_visual();
+    void _build_skeleton_mesh();
+
+    // === MATH HELPERS ===
+    bool _ray_vs_segment(const Vector3& ro, const Vector3& rd,
+                         const Vector3& a, const Vector3& b,
+                         float radius, float& out_t) const;
+    bool _ray_vs_plane(const Vector3& ro, const Vector3& rd,
+                       const Plane& p, Vector3& out_hit) const;
+
     void _ensure_mesh_instance();
     void _ensure_brush_cursor();
     void _update_godot_mesh();
-    void _draw_skeleton_gizmos();
 
 protected:
     static void _bind_methods();
@@ -84,6 +132,25 @@ public:
 
     void create_demo_cube();
     void create_demo_character();
+
+    // === GIZMO API ===
+    void set_gizmo_mode(int mode);
+    int get_gizmo_mode() const;
+    void set_gizmo_transform(const Transform3D& t);
+    Transform3D get_gizmo_transform() const;
+    int raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_dir);
+    void gizmo_begin_drag(int axis, const Vector3& ray_origin, const Vector3& ray_dir);
+    void gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir);
+    void gizmo_end_drag();
+    bool is_gizmo_dragging() const;
+
+    // === SKELETON INTERACTION ===
+    void set_selected_bone(int idx);
+    int get_selected_bone() const;
+    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir);
 };
+
+VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
+VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
 
 #endif
