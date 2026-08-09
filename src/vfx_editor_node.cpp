@@ -544,55 +544,87 @@ void VFXEditorNode::_build_skeleton_mesh() {
 }
 
 // ============================================================================
-// MATH HELPERS — FIXED ray-vs-segment
+// MATH HELPERS — CORRECTED ray-vs-segment (capsule)
 // ============================================================================
 bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
                                     const Vector3& a, const Vector3& b,
                                     float radius, float& out_t) const {
-    Vector3 ab = b - a;
-    Vector3 ao = ro - a;
-
-    float ab2 = ab.dot(ab);
-    float ab_rd = ab.dot(rd);
-    float ab_ao = ab.dot(ao);
-    float rd_ao = rd.dot(ao);
-    float rd2 = rd.dot(rd); // 1.0 if normalized
-
-    // Closest points on ray (t) and segment (s)
-    float denom = ab2 * rd2 - ab_rd * ab_rd;
-    float t, s;
-
-    if (fabs(denom) < 0.0001f) {
-        // Parallel
-        s = -ab_ao / ab2;
-        t = -rd_ao / rd2;
-    } else {
-        s = (ab_rd * rd_ao - ab_ao * rd2) / denom;
-        t = (ab2 * rd_ao - ab_rd * ab_ao) / denom;
-    }
-
-    // Clamp segment parameter to [0, 1]
-    s = vfx::clampf(s, 0.0f, 1.0f);
-
-    // Recompute t for closest point on ray to the clamped segment point
-    Vector3 closest_seg = a + ab * s;
-    t = rd.dot(closest_seg - ro) / rd2;
-
-    if (t < 0.0f) {
-        // Behind ray origin — check if origin is within radius of segment
-        Vector3 closest_to_origin = a + ab * vfx::clampf(-ab_ao / ab2, 0.0f, 1.0f);
-        if ((closest_to_origin - ro).length_squared() < radius * radius) {
-            out_t = 0.0f;
-            return true;
-        }
-        return false;
-    }
-
-    Vector3 closest_ray = ro + rd * t;
-    if ((closest_seg - closest_ray).length_squared() < radius * radius) {
+    Vector3 u = rd.normalized();
+    Vector3 v = b - a;
+    Vector3 w0 = ro - a;
+    
+    float uv = u.dot(v);
+    float vv = v.length_squared();
+    float uw0 = u.dot(w0);
+    float vw0 = v.dot(w0);
+    
+    // Degenerate segment (point) → sphere test
+    if (vv < 0.0001f) {
+        Vector3 oc = ro - a;
+        float b_ = u.dot(oc);
+        float c = oc.dot(oc) - radius * radius;
+        float disc = b_ * b_ - c;
+        if (disc < 0.0f) return false;
+        float t = -b_ - sqrt(disc);
+        if (t < 0.0f) t = -b_ + sqrt(disc);
+        if (t < 0.0f) return false;
         out_t = t;
         return true;
     }
+    
+    float det = uv * uv - vv;
+    float t, s;
+    
+    if (fabs(det) < 0.0001f) {
+        // Ray is parallel to segment
+        s = vfx::clampf(vw0 / vv, 0.0f, 1.0f);
+        Vector3 closest_seg = a + v * s;
+        t = u.dot(closest_seg - ro);
+    } else {
+        t = (uw0 * vv - uv * vw0) / det;
+        s = (uv * uw0 - vw0) / det;
+    }
+    
+    // Closest approach falls inside the segment and in front of the ray origin
+    if (s >= 0.0f && s <= 1.0f && t >= 0.0f) {
+        Vector3 closest_seg = a + v * s;
+        Vector3 closest_ray = ro + u * t;
+        if ((closest_seg - closest_ray).length_squared() < radius * radius) {
+            out_t = t;
+            return true;
+        }
+    }
+    
+    // Ray origin is inside the capsule (closest approach is behind us)
+    if (s >= 0.0f && s <= 1.0f && t < 0.0f) {
+        Vector3 closest_seg = a + v * s;
+        if ((closest_seg - ro).length_squared() < radius * radius) {
+            out_t = 0.0f;
+            return true;
+        }
+    }
+    
+    // Closest point lies outside segment bounds → test endpoint spheres
+    auto sphere_test = [&](const Vector3& center) -> bool {
+        Vector3 oc = ro - center;
+        float b_ = u.dot(oc);
+        float c = oc.dot(oc) - radius * radius;
+        float disc = b_ * b_ - c;
+        if (disc < 0.0f) return false;
+        float tt = -b_ - sqrt(disc);
+        if (tt < 0.0f) tt = -b_ + sqrt(disc);
+        if (tt < 0.0f) return false;
+        out_t = tt;
+        return true;
+    };
+    
+    if (s < 0.0f) {
+        if (sphere_test(a)) return true;
+    }
+    if (s > 1.0f) {
+        if (sphere_test(b)) return true;
+    }
+    
     return false;
 }
 
