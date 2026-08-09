@@ -183,25 +183,71 @@ void VFXEditorNode::_update_godot_mesh() {
     _ensure_mesh_instance();
     if (mesh.is_null()) return;
 
-    Ref<Mesh> gm = mesh->to_godot_mesh();
-    if (gm.is_valid()) {
-        if (show_weights && skin.is_valid()) {
-            Ref<ArrayMesh> am = gm;
-            if (am.is_valid() && am->get_surface_count() > 0) {
-                PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
-                Array arrays = am->surface_get_arrays(0);
-                if (colors.size() == arrays[Mesh::ARRAY_VERTEX].operator PackedVector3Array().size()) {
-                    arrays[Mesh::ARRAY_COLOR] = colors;
-                    am->clear_surfaces();
-                    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    Ref<ArrayMesh> am;
+    am.instantiate();
+
+    Array arrays;
+    arrays.resize(Mesh::ARRAY_MAX);
+
+    // LIVE SKINNING: if we have skin + skeleton and are not painting weights,
+    // bake the current pose into the vertex positions so the user sees the bone move.
+    PackedVector3Array positions;
+    if (skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
+        positions = skin->compute_skinned_positions();
+    } else {
+        positions = mesh->get_positions();
+    }
+
+    arrays[Mesh::ARRAY_VERTEX] = positions;
+    arrays[Mesh::ARRAY_NORMAL] = mesh->get_normals();
+    arrays[Mesh::ARRAY_TEX_UV] = mesh->get_uvs();
+    arrays[Mesh::ARRAY_COLOR] = mesh->get_colors();
+    arrays[Mesh::ARRAY_INDEX] = mesh->get_indices();
+
+    // Only supply Godot skinning arrays when we are in bind-pose mode (weight paint).
+    // If we supplied them with pre-skinned positions, Godot would double-skin.
+    if (!show_weights && skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
+        // pre-skinned: omit bones/weights
+    } else {
+        int vc = mesh->get_vertex_count();
+        if (vc > 0) {
+            PackedInt32Array bones;
+            PackedFloat32Array weights;
+            bones.resize(vc * 4);
+            weights.resize(vc * 4);
+            for (int i = 0; i < vc; i++) {
+                int b[4];
+                float w[4];
+                mesh->get_vertex_skinning(i, b, w);
+                for (int j = 0; j < 4; j++) {
+                    bones[i * 4 + j] = b[j];
+                    weights[i * 4 + j] = w[j];
                 }
             }
-            mesh_instance->set_surface_override_material(0, weight_material);
-        } else {
-            mesh_instance->set_surface_override_material(0, base_material);
+            arrays[Mesh::ARRAY_BONES] = bones;
+            arrays[Mesh::ARRAY_WEIGHTS] = weights;
         }
-        mesh_instance->set_mesh(gm);
     }
+
+    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+
+    if (show_weights && skin.is_valid()) {
+        if (am->get_surface_count() > 0) {
+            PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
+            Array a = am->surface_get_arrays(0);
+            PackedVector3Array verts = a[Mesh::ARRAY_VERTEX];
+            if (colors.size() == verts.size()) {
+                a[Mesh::ARRAY_COLOR] = colors;
+                am->clear_surfaces();
+                am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, a);
+            }
+        }
+        mesh_instance->set_surface_override_material(0, weight_material);
+    } else {
+        mesh_instance->set_surface_override_material(0, base_material);
+    }
+
+    mesh_instance->set_mesh(am);
 }
 
 // ============================================================================
@@ -244,8 +290,8 @@ void VFXEditorNode::_build_gizmo_mesh() {
     _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
     _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
 
-    float p1 = s * 0.1f;
-    float p2 = s * 0.25f;
+    float p1 = s * 0.18f;
+    float p2 = s * 0.38f;
 
     Color cxy = (gizmo_hover_axis == GIZMO_XY) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 1.0f, 0.0f, 0.35f);
     _append_triangle(verts, cols, idx, Vector3(p1, p2, 0), Vector3(p2, p1, 0), Vector3(p1, p1, 0), cxy);
@@ -305,7 +351,7 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
 
     auto test_axis = [&](int axis, const Vector3& dir) {
         float t;
-        if (_ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.08f, t)) {
+        if (_ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.18f, t)) {
             if (t < best_t) { best_t = t; best = axis; }
         }
     };
@@ -396,6 +442,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         skeleton->set_bone_pose(selected_bone, local);
         skeleton->update_transforms();
         _build_skeleton_mesh();
+        _update_godot_mesh();
     }
 }
 
@@ -765,8 +812,8 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
         Vector3 tail = skeleton->get_bone_model_transform(i).get_origin();
 
         float t;
-        float radius = (tail - head).length() * 0.15f;
-        if (radius < 0.02f) radius = 0.02f;
+        float radius = (tail - head).length() * 0.35f;
+        if (radius < 0.08f) radius = 0.08f;
 
         if (_ray_vs_segment(ray_origin, rd, head, tail, radius, t)) {
             if (t < best_t) {
