@@ -24,6 +24,7 @@ void VFXSkeleton::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_bone_parent", "bone_id"), &VFXSkeleton::get_bone_parent);
     ClassDB::bind_method(D_METHOD("get_bone_children", "bone_id"), &VFXSkeleton::get_bone_children);
     ClassDB::bind_method(D_METHOD("set_bone_pose", "bone_id", "pose"), &VFXSkeleton::set_bone_pose);
+    ClassDB::bind_method(D_METHOD("set_bone_model_transform", "bone_id", "world_pose"), &VFXSkeleton::set_bone_model_transform);
     ClassDB::bind_method(D_METHOD("reset_to_bind_pose"), &VFXSkeleton::reset_to_bind_pose);
     ClassDB::bind_method(D_METHOD("solve_ik_two_bone", "root_bone", "mid_bone", "tip_bone", "target", "pole", "twist"), &VFXSkeleton::solve_ik_two_bone, DEFVAL(0.0f));
     ClassDB::bind_method(D_METHOD("solve_ik_ccd", "tip_bone", "target", "iterations", "threshold"), &VFXSkeleton::solve_ik_ccd, DEFVAL(10), DEFVAL(0.001f));
@@ -149,6 +150,17 @@ void VFXSkeleton::set_bone_pose(int bone_id, const Transform3D& pose) {
     }
 }
 
+void VFXSkeleton::set_bone_model_transform(int bone_id, const Transform3D& world_pose) {
+    if (bone_id < 0 || bone_id >= (int)bones.size()) return;
+    int p = bones[bone_id].parent_id;
+    Transform3D parent_inv = (p >= 0) ? bones[p].model_transform.affine_inverse() : Transform3D();
+    Transform3D local = parent_inv * world_pose;
+    bones[bone_id].local_position = local.get_origin();
+    bones[bone_id].local_rotation = local.get_basis().get_rotation_quaternion();
+    bones[bone_id].local_scale = local.get_basis().get_scale();
+    dirty = true;
+}
+
 void VFXSkeleton::reset_to_bind_pose() {
     for (auto& b : bones) {
         b.local_position = b.bind_pose.get_origin();
@@ -164,8 +176,6 @@ void VFXSkeleton::_update_transforms_recursive(int bone_idx, const Transform3D& 
 
     Bone& b = bones[bone_idx];
 
-    // Godot's Basis(Quaternion) constructor + scaled() avoids all manual
-    // Vector3*float math that Android NDK clang resolves ambiguously.
     Basis rot_basis(b.local_rotation);
     rot_basis = rot_basis.scaled(b.local_scale);
 
