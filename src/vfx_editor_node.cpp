@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include <algorithm>
 
 using namespace godot;
 
@@ -50,6 +51,54 @@ static void _append_triangle(PackedVector3Array& verts, PackedColorArray& cols, 
     idx.push_back(base); idx.push_back(base + 1); idx.push_back(base + 2);
 }
 
+// Ring / torus for rotation gizmo
+static void _append_ring(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Array& idx,
+                         const Vector3& center, const Vector3& normal, float radius, int segs, float tube_radius, const Color& col) {
+    Vector3 up = fabs(normal.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+    Vector3 right = normal.cross(up).normalized();
+    up = right.cross(normal).normalized();
+
+    Vector3 prev_pos;
+    bool has_prev = false;
+
+    for (int i = 0; i <= segs; i++) {
+        float ang = (float)i / (float)segs * 3.14159265f * 2.0f;
+        Vector3 pos = center + right * cosf(ang) * radius + up * sinf(ang) * radius;
+        if (has_prev) {
+            _append_cylinder(verts, cols, idx, prev_pos, pos, tube_radius, 4, col);
+        }
+        prev_pos = pos;
+        has_prev = true;
+    }
+}
+
+// Cube handle for scale gizmo
+static void _append_box(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Array& idx,
+                        const Vector3& center, float size, const Color& col) {
+    float h = size * 0.5f;
+    int base = verts.size();
+
+    verts.push_back(center + Vector3(-h, -h, -h)); cols.push_back(col);
+    verts.push_back(center + Vector3( h, -h, -h)); cols.push_back(col);
+    verts.push_back(center + Vector3( h,  h, -h)); cols.push_back(col);
+    verts.push_back(center + Vector3(-h,  h, -h)); cols.push_back(col);
+    verts.push_back(center + Vector3(-h, -h,  h)); cols.push_back(col);
+    verts.push_back(center + Vector3( h, -h,  h)); cols.push_back(col);
+    verts.push_back(center + Vector3( h,  h,  h)); cols.push_back(col);
+    verts.push_back(center + Vector3(-h,  h,  h)); cols.push_back(col);
+
+    const int faces[12][3] = {
+        {0,1,2}, {0,2,3}, {4,6,5}, {4,7,6},
+        {0,5,1}, {0,4,5}, {2,7,3}, {2,6,7},
+        {0,3,7}, {0,7,4}, {1,6,2}, {1,5,6}
+    };
+    for (int i = 0; i < 12; i++) {
+        idx.push_back(base + faces[i][0]);
+        idx.push_back(base + faces[i][1]);
+        idx.push_back(base + faces[i][2]);
+    }
+}
+
 // ============================================================================
 // BINDINGS
 // ============================================================================
@@ -89,7 +138,6 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("create_demo_cube"), &VFXEditorNode::create_demo_cube);
     ClassDB::bind_method(D_METHOD("create_demo_character"), &VFXEditorNode::create_demo_character);
 
-    // Gizmo
     ClassDB::bind_method(D_METHOD("set_gizmo_mode", "mode"), &VFXEditorNode::set_gizmo_mode);
     ClassDB::bind_method(D_METHOD("get_gizmo_mode"), &VFXEditorNode::get_gizmo_mode);
     ClassDB::bind_method(D_METHOD("set_gizmo_transform", "t"), &VFXEditorNode::set_gizmo_transform);
@@ -100,12 +148,10 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("gizmo_end_drag"), &VFXEditorNode::gizmo_end_drag);
     ClassDB::bind_method(D_METHOD("is_gizmo_dragging"), &VFXEditorNode::is_gizmo_dragging);
 
-    // Skeleton interaction
     ClassDB::bind_method(D_METHOD("set_selected_bone", "idx"), &VFXEditorNode::set_selected_bone);
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
     ClassDB::bind_method(D_METHOD("raycast_bone", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_bone);
 
-    // Unified touch API
     ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_down);
     ClassDB::bind_method(D_METHOD("on_touch_up"), &VFXEditorNode::on_touch_up);
     ClassDB::bind_method(D_METHOD("on_touch_drag", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_drag);
@@ -194,8 +240,6 @@ void VFXEditorNode::_update_godot_mesh() {
     Array arrays;
     arrays.resize(Mesh::ARRAY_MAX);
 
-    // LIVE SKINNING: if we have skin + skeleton and are not painting weights,
-    // bake the current pose into the vertex positions so the user sees the bone move.
     PackedVector3Array positions;
     if (skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
         positions = skin->compute_skinned_positions();
@@ -209,8 +253,6 @@ void VFXEditorNode::_update_godot_mesh() {
     arrays[Mesh::ARRAY_COLOR] = mesh->get_colors();
     arrays[Mesh::ARRAY_INDEX] = mesh->get_indices();
 
-    // Only supply Godot skinning arrays when we are in bind-pose mode (weight paint).
-    // If we supplied them with pre-skinned positions, Godot would double-skin.
     if (!show_weights && skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
         // pre-skinned: omit bones/weights
     } else {
@@ -287,25 +329,53 @@ void VFXEditorNode::_build_gizmo_mesh() {
     float s = gizmo_screen_scale;
     float r = s * 0.025f;
 
-    Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
-    Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
-    Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
+        Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
+        Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
 
-    _append_cylinder(verts, cols, idx, Vector3(), Vector3(s, 0, 0), r, 8, cx);
-    _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
-    _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
+        _append_cylinder(verts, cols, idx, Vector3(), Vector3(s, 0, 0), r, 8, cx);
+        _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
+        _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
 
-    float p1 = s * 0.18f;
-    float p2 = s * 0.38f;
+        float p1 = s * 0.18f;
+        float p2 = s * 0.38f;
 
-    Color cxy = (gizmo_hover_axis == GIZMO_XY) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 1.0f, 0.0f, 0.35f);
-    _append_triangle(verts, cols, idx, Vector3(p1, p2, 0), Vector3(p2, p1, 0), Vector3(p1, p1, 0), cxy);
+        Color cxy = (gizmo_hover_axis == GIZMO_XY) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 1.0f, 0.0f, 0.35f);
+        _append_triangle(verts, cols, idx, Vector3(p1, p2, 0), Vector3(p2, p1, 0), Vector3(p1, p1, 0), cxy);
 
-    Color cxz = (gizmo_hover_axis == GIZMO_XZ) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 0.0f, 1.0f, 0.35f);
-    _append_triangle(verts, cols, idx, Vector3(p1, 0, p2), Vector3(p2, 0, p1), Vector3(p1, 0, p1), cxz);
+        Color cxz = (gizmo_hover_axis == GIZMO_XZ) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 0.0f, 1.0f, 0.35f);
+        _append_triangle(verts, cols, idx, Vector3(p1, 0, p2), Vector3(p2, 0, p1), Vector3(p1, 0, p1), cxz);
 
-    Color cyz = (gizmo_hover_axis == GIZMO_YZ) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(0.0f, 1.0f, 1.0f, 0.35f);
-    _append_triangle(verts, cols, idx, Vector3(0, p1, p2), Vector3(0, p2, p1), Vector3(0, p1, p1), cyz);
+        Color cyz = (gizmo_hover_axis == GIZMO_YZ) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(0.0f, 1.0f, 1.0f, 0.35f);
+        _append_triangle(verts, cols, idx, Vector3(0, p1, p2), Vector3(0, p2, p1), Vector3(0, p1, p1), cyz);
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        float ring_r = s * 0.85f;
+        float tube = s * 0.02f;
+
+        Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
+        Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
+        Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
+
+        _append_ring(verts, cols, idx, Vector3(), Vector3(1,0,0), ring_r, 32, tube, cx);
+        _append_ring(verts, cols, idx, Vector3(), Vector3(0,1,0), ring_r, 32, tube, cy);
+        _append_ring(verts, cols, idx, Vector3(), Vector3(0,0,1), ring_r, 32, tube, cz);
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
+        Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
+        Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
+        Color cxyz = (gizmo_hover_axis == GIZMO_XYZ) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 1.0f, 1.0f, 0.8f);
+
+        _append_cylinder(verts, cols, idx, Vector3(), Vector3(s, 0, 0), r, 8, cx);
+        _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
+        _append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
+
+        float box = s * 0.08f;
+        _append_box(verts, cols, idx, Vector3(s, 0, 0), box, cx);
+        _append_box(verts, cols, idx, Vector3(0, s, 0), box, cy);
+        _append_box(verts, cols, idx, Vector3(0, 0, s), box, cz);
+        _append_box(verts, cols, idx, Vector3(), box * 0.8f, cxyz);
+    }
 
     if (verts.size() > 0) {
         Array arrays;
@@ -329,6 +399,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
 
 void VFXEditorNode::set_gizmo_mode(int mode) {
     gizmo_mode = mode;
+    gizmo_hover_axis = GIZMO_NONE;
     if (gizmo_node && gizmo_node->is_visible()) {
         _build_gizmo_mesh();
     }
@@ -354,34 +425,88 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
     float best_t = 1e20f;
     int best = GIZMO_NONE;
 
-    auto test_axis = [&](int axis, const Vector3& dir) {
-        float t;
-        if (_ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.18f, t)) {
-            if (t < best_t) { best_t = t; best = axis; }
-        }
-    };
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        auto test_axis = [&](int axis, const Vector3& dir) {
+            float t;
+            if (_ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.18f, t)) {
+                if (t < best_t) { best_t = t; best = axis; }
+            }
+        };
 
-    test_axis(GIZMO_X, Vector3(1, 0, 0));
-    test_axis(GIZMO_Y, Vector3(0, 1, 0));
-    test_axis(GIZMO_Z, Vector3(0, 0, 1));
+        test_axis(GIZMO_X, Vector3(1, 0, 0));
+        test_axis(GIZMO_Y, Vector3(0, 1, 0));
+        test_axis(GIZMO_Z, Vector3(0, 0, 1));
 
-    auto test_plane_axis = [&](int axis, const Plane& pl, float c1min, float c1max, float c2min, float c2max, int c1_axis, int c2_axis) {
-        Vector3 hit;
-        if (_ray_vs_plane(ro, rd, pl, hit)) {
-            float c1 = (c1_axis == 0) ? hit.x : (c1_axis == 1) ? hit.y : hit.z;
-            float c2 = (c2_axis == 0) ? hit.x : (c2_axis == 1) ? hit.y : hit.z;
-            if (c1 >= c1min && c1 <= c1max && c2 >= c2min && c2 <= c2max) {
+        auto test_plane_axis = [&](int axis, const Plane& pl, float c1min, float c1max, float c2min, float c2max, int c1_axis, int c2_axis) {
+            Vector3 hit;
+            if (_ray_vs_plane(ro, rd, pl, hit)) {
+                float c1 = (c1_axis == 0) ? hit.x : (c1_axis == 1) ? hit.y : hit.z;
+                float c2 = (c2_axis == 0) ? hit.x : (c2_axis == 1) ? hit.y : hit.z;
+                if (c1 >= c1min && c1 <= c1max && c2 >= c2min && c2 <= c2max) {
+                    float t = (hit - ro).dot(rd);
+                    if (t >= 0.0f && t < best_t) { best_t = t; best = axis; }
+                }
+            }
+        };
+
+        float p1 = s * 0.08f;
+        float p2 = s * 0.28f;
+        test_plane_axis(GIZMO_XY, Plane(Vector3(0, 0, 1), 0), p1, p2, p1, p2, 0, 1);
+        test_plane_axis(GIZMO_XZ, Plane(Vector3(0, 1, 0), 0), p1, p2, p1, p2, 0, 2);
+        test_plane_axis(GIZMO_YZ, Plane(Vector3(1, 0, 0), 0), p1, p2, p1, p2, 1, 2);
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        auto test_ring = [&](int axis, const Vector3& normal, float radius) {
+            Plane pl(normal, 0.0f);
+            Vector3 hit;
+            if (!_ray_vs_plane(ro, rd, pl, hit)) return;
+            float dist = hit.length();
+            float tol = s * 0.12f;
+            if (fabs(dist - radius) < tol) {
                 float t = (hit - ro).dot(rd);
                 if (t >= 0.0f && t < best_t) { best_t = t; best = axis; }
             }
-        }
-    };
+        };
+        float ring_r = s * 0.85f;
+        test_ring(GIZMO_X, Vector3(1,0,0), ring_r);
+        test_ring(GIZMO_Y, Vector3(0,1,0), ring_r);
+        test_ring(GIZMO_Z, Vector3(0,0,1), ring_r);
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        auto test_axis = [&](int axis, const Vector3& dir) {
+            float t;
+            if (_ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.18f, t)) {
+                if (t < best_t) { best_t = t; best = axis; }
+            }
+        };
+        test_axis(GIZMO_X, Vector3(1, 0, 0));
+        test_axis(GIZMO_Y, Vector3(0, 1, 0));
+        test_axis(GIZMO_Z, Vector3(0, 0, 1));
 
-    float p1 = s * 0.08f;
-    float p2 = s * 0.28f;
-    test_plane_axis(GIZMO_XY, Plane(Vector3(0, 0, 1), 0), p1, p2, p1, p2, 0, 1);
-    test_plane_axis(GIZMO_XZ, Plane(Vector3(0, 1, 0), 0), p1, p2, p1, p2, 0, 2);
-    test_plane_axis(GIZMO_YZ, Plane(Vector3(1, 0, 0), 0), p1, p2, p1, p2, 1, 2);
+        // Uniform scale box at origin
+        float box = s * 0.08f;
+        float h = box * 0.5f;
+        auto test_box = [&](int axis, const Vector3& center) {
+            for (int f = 0; f < 6; f++) {
+                Vector3 n;
+                switch (f) {
+                    case 0: n = Vector3( 1, 0, 0); break;
+                    case 1: n = Vector3(-1, 0, 0); break;
+                    case 2: n = Vector3(0,  1, 0); break;
+                    case 3: n = Vector3(0, -1, 0); break;
+                    case 4: n = Vector3(0, 0,  1); break;
+                    case 5: n = Vector3(0, 0, -1); break;
+                }
+                Plane pl(n, -n.dot(center));
+                Vector3 hit;
+                if (!_ray_vs_plane(ro, rd, pl, hit)) continue;
+                Vector3 local = hit - center;
+                if (fabs(local.x) <= h && fabs(local.y) <= h && fabs(local.z) <= h) {
+                    float t = (hit - ro).dot(rd);
+                    if (t >= 0.0f && t < best_t) { best_t = t; best = axis; }
+                }
+            }
+        };
+        test_box(GIZMO_XYZ, Vector3());
+    }
 
     if (best != gizmo_hover_axis) {
         gizmo_hover_axis = best;
@@ -395,31 +520,54 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
     gizmo_drag_start_transform = gizmo_transform;
 
     Vector3 origin = gizmo_transform.get_origin();
-    Vector3 normal;
 
-    if (axis <= GIZMO_Z) {
-        Vector3 cam_dir = ray_dir.normalized();
-        Vector3 axis_vec = gizmo_transform.basis.get_column(axis).normalized();
-        if (fabs(axis_vec.dot(cam_dir)) < 0.3f) {
-            normal = cam_dir;
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        Vector3 normal;
+        if (axis <= GIZMO_Z) {
+            Vector3 cam_dir = ray_dir.normalized();
+            Vector3 axis_vec = gizmo_transform.basis.get_column(axis).normalized();
+            if (fabs(axis_vec.dot(cam_dir)) < 0.3f) {
+                normal = cam_dir;
+            } else {
+                Vector3 alt = (fabs(axis_vec.dot(Vector3(0, 1, 0))) < 0.9f) ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+                normal = axis_vec.cross(alt).normalized();
+                if (fabs(normal.dot(cam_dir)) < 0.1f) normal = cam_dir;
+            }
+        } else if (axis == GIZMO_XY) {
+            normal = gizmo_transform.basis.xform(Vector3(0, 0, 1)).normalized();
+        } else if (axis == GIZMO_XZ) {
+            normal = gizmo_transform.basis.xform(Vector3(0, 1, 0)).normalized();
         } else {
-            Vector3 alt = (fabs(axis_vec.dot(Vector3(0, 1, 0))) < 0.9f) ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
-            normal = axis_vec.cross(alt).normalized();
-            if (fabs(normal.dot(cam_dir)) < 0.1f) normal = cam_dir;
+            normal = gizmo_transform.basis.xform(Vector3(1, 0, 0)).normalized();
         }
-    } else if (axis == GIZMO_XY) {
-        normal = gizmo_transform.basis.xform(Vector3(0, 0, 1)).normalized();
-    } else if (axis == GIZMO_XZ) {
-        normal = gizmo_transform.basis.xform(Vector3(0, 1, 0)).normalized();
-    } else {
-        normal = gizmo_transform.basis.xform(Vector3(1, 0, 0)).normalized();
+        gizmo_drag_plane = Plane(normal, origin);
+        Vector3 hit;
+        if (_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit))
+            gizmo_drag_start_point = hit;
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        Vector3 normal;
+        if (axis == GIZMO_X) normal = gizmo_transform.basis.xform(Vector3(1,0,0)).normalized();
+        else if (axis == GIZMO_Y) normal = gizmo_transform.basis.xform(Vector3(0,1,0)).normalized();
+        else normal = gizmo_transform.basis.xform(Vector3(0,0,1)).normalized();
+
+        gizmo_drag_plane = Plane(normal, origin);
+        Vector3 hit;
+        if (_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
+            gizmo_drag_start_point = hit;
+            gizmo_drag_start_rotation = gizmo_transform.basis.get_rotation_quaternion();
+        }
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        Vector3 cam_dir = ray_dir.normalized();
+        if (fabs(cam_dir.dot(Vector3(0,1,0))) < 0.9f)
+            gizmo_drag_plane = Plane(Vector3(0,1,0), origin);
+        else
+            gizmo_drag_plane = Plane(Vector3(1,0,0), origin);
+        Vector3 hit;
+        if (_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
+            gizmo_drag_start_point = hit;
+            gizmo_drag_start_scale = gizmo_transform.basis.get_scale();
+        }
     }
-
-    gizmo_drag_plane = Plane(normal, origin);
-
-    Vector3 hit;
-    if (_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit))
-        gizmo_drag_start_point = hit;
 }
 
 void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
@@ -427,18 +575,69 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
     Vector3 hit;
     if (!_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) return;
 
-    Vector3 delta = hit - gizmo_drag_start_point;
-    Transform3D t = gizmo_drag_start_transform;
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        Vector3 delta = hit - gizmo_drag_start_point;
+        Transform3D t = gizmo_drag_start_transform;
 
-    if (gizmo_drag_axis <= GIZMO_Z) {
-        Vector3 axis = t.basis.get_column(gizmo_drag_axis).normalized();
-        float proj = delta.dot(axis);
-        t.set_origin(t.get_origin() + axis * proj);
-    } else if (gizmo_drag_axis == GIZMO_XY || gizmo_drag_axis == GIZMO_XZ || gizmo_drag_axis == GIZMO_YZ) {
-        t.set_origin(t.get_origin() + delta);
+        if (gizmo_drag_axis <= GIZMO_Z) {
+            Vector3 axis = t.basis.get_column(gizmo_drag_axis).normalized();
+            float proj = delta.dot(axis);
+            t.set_origin(t.get_origin() + axis * proj);
+        } else if (gizmo_drag_axis == GIZMO_XY || gizmo_drag_axis == GIZMO_XZ || gizmo_drag_axis == GIZMO_YZ) {
+            t.set_origin(t.get_origin() + delta);
+        }
+        gizmo_transform = t;
+        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        Vector3 origin = gizmo_transform.get_origin();
+        Vector3 v0 = (gizmo_drag_start_point - origin).normalized();
+        Vector3 v1 = (hit - origin).normalized();
+        if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
+
+        float dot = v0.dot(v1);
+        dot = vfx::clampf(dot, -1.0f, 1.0f);
+        float angle = acosf(dot);
+        Vector3 cross = v0.cross(v1);
+        if (cross.dot(gizmo_drag_plane.normal) < 0.0f) angle = -angle;
+
+        Vector3 axis_local;
+        if (gizmo_drag_axis == GIZMO_X) axis_local = Vector3(1,0,0);
+        else if (gizmo_drag_axis == GIZMO_Y) axis_local = Vector3(0,1,0);
+        else axis_local = Vector3(0,0,1);
+
+        Quaternion rot(axis_local, angle);
+        Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
+        gizmo_transform.set_basis(new_basis);
+        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        Vector3 delta = hit - gizmo_drag_start_point;
+        Transform3D t = gizmo_drag_start_transform;
+        Vector3 scale = gizmo_drag_start_scale;
+
+        if (gizmo_drag_axis <= GIZMO_Z) {
+            Vector3 world_axis = t.basis.get_column(gizmo_drag_axis).normalized();
+            float proj = delta.dot(world_axis);
+            float base_len = t.basis.get_column(gizmo_drag_axis).length();
+            if (base_len > 0.0001f) {
+                float factor = 1.0f + proj / base_len;
+                factor = fmaxf(factor, 0.01f);
+                scale[gizmo_drag_axis] = gizmo_drag_start_scale[gizmo_drag_axis] * factor;
+            }
+        } else if (gizmo_drag_axis == GIZMO_XYZ) {
+            float proj = delta.length();
+            float sign = (delta.dot(ray_dir.normalized()) > 0.0f) ? 1.0f : -1.0f;
+            float factor = 1.0f + sign * proj / gizmo_screen_scale;
+            factor = fmaxf(factor, 0.01f);
+            scale = gizmo_drag_start_scale * factor;
+        }
+
+        Basis b = t.basis;
+        b.set_column(0, b.get_column(0).normalized() * scale.x);
+        b.set_column(1, b.get_column(1).normalized() * scale.y);
+        b.set_column(2, b.get_column(2).normalized() * scale.z);
+        gizmo_transform.set_basis(b);
+        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
     }
-    gizmo_transform = t;
-    if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
 
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
@@ -557,13 +756,12 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
     Vector3 u = rd.normalized();
     Vector3 v = b - a;
     Vector3 w0 = ro - a;
-    
+
     float uv = u.dot(v);
     float vv = v.length_squared();
     float uw0 = u.dot(w0);
     float vw0 = v.dot(w0);
-    
-    // Degenerate segment (point) → sphere test
+
     if (vv < 0.0001f) {
         Vector3 oc = ro - a;
         float b_ = u.dot(oc);
@@ -576,12 +774,11 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
         out_t = t;
         return true;
     }
-    
+
     float det = uv * uv - vv;
     float t, s;
-    
+
     if (fabs(det) < 0.0001f) {
-        // Ray is parallel to segment
         s = vfx::clampf(vw0 / vv, 0.0f, 1.0f);
         Vector3 closest_seg = a + v * s;
         t = u.dot(closest_seg - ro);
@@ -589,8 +786,7 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
         t = (uw0 * vv - uv * vw0) / det;
         s = (uv * uw0 - vw0) / det;
     }
-    
-    // Closest approach falls inside the segment and in front of the ray origin
+
     if (s >= 0.0f && s <= 1.0f && t >= 0.0f) {
         Vector3 closest_seg = a + v * s;
         Vector3 closest_ray = ro + u * t;
@@ -599,8 +795,7 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
             return true;
         }
     }
-    
-    // Ray origin is inside the capsule (closest approach is behind us)
+
     if (s >= 0.0f && s <= 1.0f && t < 0.0f) {
         Vector3 closest_seg = a + v * s;
         if ((closest_seg - ro).length_squared() < radius * radius) {
@@ -608,8 +803,7 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
             return true;
         }
     }
-    
-    // Closest point lies outside segment bounds → test endpoint spheres
+
     auto sphere_test = [&](const Vector3& center) -> bool {
         Vector3 oc = ro - center;
         float b_ = u.dot(oc);
@@ -622,14 +816,14 @@ bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
         out_t = tt;
         return true;
     };
-    
+
     if (s < 0.0f) {
         if (sphere_test(a)) return true;
     }
     if (s > 1.0f) {
         if (sphere_test(b)) return true;
     }
-    
+
     return false;
 }
 
@@ -866,15 +1060,13 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
 // UNIFIED TOUCH API
 // ============================================================================
 int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir) {
-    // Try gizmo first (only if a bone is already selected and gizmo is visible)
     if (skeleton.is_valid() && selected_bone >= 0) {
         int axis = raycast_gizmo(ray_origin, ray_dir);
         if (axis >= 0) {
             gizmo_begin_drag(axis, ray_origin, ray_dir);
-            return -2; // Gizmo grabbed
+            return -2;
         }
     }
-    // Try bone selection
     if (skeleton.is_valid() && skeleton->get_bone_count() > 0) {
         int bone = raycast_bone(ray_origin, ray_dir);
         if (bone >= 0) {
@@ -882,7 +1074,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             return bone;
         }
     }
-    return -1; // Nothing
+    return -1;
 }
 
 void VFXEditorNode::on_touch_up() {
