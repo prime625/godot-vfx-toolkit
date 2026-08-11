@@ -89,10 +89,6 @@ private:
 
 protected:
     static void _bind_methods();
-	ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_down);
-	ClassDB::bind_method(D_METHOD("on_touch_up"), &VFXEditorNode::on_touch_up);
-	ClassDB::bind_method(D_METHOD("on_touch_drag", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_drag);
-
     void _notification(int p_what);
 
 public:
@@ -122,10 +118,6 @@ public:
     int get_visualize_bone() const;
     void set_auto_update(bool auto_up);
     bool get_auto_update() const;
-	int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir);
-	void on_touch_up();
-	void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
-
 
     // Brush cursor
     void set_brush_cursor(const Vector3& world_pos, float radius);
@@ -155,7 +147,12 @@ public:
     // === SKELETON INTERACTION ===
     void set_selected_bone(int idx);
     int get_selected_bone() const;
-    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;  // <-- FIXED: added const
+    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;
+
+    // === NEW: Unified touch API for GDScript ===
+    int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir);
+    void on_touch_up();
+    void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
 };
 
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
