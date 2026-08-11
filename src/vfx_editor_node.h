@@ -32,7 +32,7 @@ public:
         GIZMO_XY,
         GIZMO_XZ,
         GIZMO_YZ,
-        GIZMO_XYZ
+        GIZMO_XYZ        // <-- now used for uniform scale
     };
 
 private:
