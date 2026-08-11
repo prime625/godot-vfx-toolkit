@@ -105,6 +105,11 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
     ClassDB::bind_method(D_METHOD("raycast_bone", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_bone);
 
+    // Unified touch API
+    ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_down);
+    ClassDB::bind_method(D_METHOD("on_touch_up"), &VFXEditorNode::on_touch_up);
+    ClassDB::bind_method(D_METHOD("on_touch_drag", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_drag);
+
     ClassDB::bind_integer_constant(get_class_static(), "", "GIZMO_TRANSLATE", GIZMO_TRANSLATE);
     ClassDB::bind_integer_constant(get_class_static(), "", "GIZMO_ROTATE", GIZMO_ROTATE);
     ClassDB::bind_integer_constant(get_class_static(), "", "GIZMO_SCALE", GIZMO_SCALE);
@@ -816,7 +821,7 @@ void VFXEditorNode::set_selected_bone(int idx) {
         gizmo_transform = skeleton->get_bone_model_transform(idx);
         if (gizmo_node) {
             gizmo_node->set_transform(gizmo_transform);
-            _build_gizmo_mesh(); // FORCE rebuild so it appears
+            _build_gizmo_mesh();
         }
     } else if (gizmo_node) {
         gizmo_node->set_visible(false);
@@ -855,4 +860,39 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
         }
     }
     return best;
+}
+
+// ============================================================================
+// UNIFIED TOUCH API
+// ============================================================================
+int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir) {
+    // Try gizmo first (only if a bone is already selected and gizmo is visible)
+    if (skeleton.is_valid() && selected_bone >= 0) {
+        int axis = raycast_gizmo(ray_origin, ray_dir);
+        if (axis >= 0) {
+            gizmo_begin_drag(axis, ray_origin, ray_dir);
+            return -2; // Gizmo grabbed
+        }
+    }
+    // Try bone selection
+    if (skeleton.is_valid() && skeleton->get_bone_count() > 0) {
+        int bone = raycast_bone(ray_origin, ray_dir);
+        if (bone >= 0) {
+            set_selected_bone(bone);
+            return bone;
+        }
+    }
+    return -1; // Nothing
+}
+
+void VFXEditorNode::on_touch_up() {
+    if (is_gizmo_dragging()) {
+        gizmo_end_drag();
+    }
+}
+
+void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
+    if (is_gizmo_dragging()) {
+        gizmo_drag(ray_origin, ray_dir);
+    }
 }
