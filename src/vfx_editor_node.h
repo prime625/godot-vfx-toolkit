@@ -32,7 +32,7 @@ public:
         GIZMO_XY,
         GIZMO_XZ,
         GIZMO_YZ,
-        GIZMO_XYZ        // <-- now used for uniform scale
+        GIZMO_XYZ
     };
 
 private:
@@ -62,6 +62,10 @@ private:
     Vector3 gizmo_drag_start_point;
     Transform3D gizmo_drag_start_transform;
     Plane gizmo_drag_plane;
+
+    // >>> ADD THESE TWO LINES
+    Quaternion gizmo_drag_start_rotation;
+    Vector3    gizmo_drag_start_scale;
 
     MeshInstance3D* gizmo_node = nullptr;
 
@@ -149,7 +153,7 @@ public:
     int get_selected_bone() const;
     int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;
 
-    // === NEW: Unified touch API for GDScript ===
+    // === Unified touch API for GDScript ===
     int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir);
     void on_touch_up();
     void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
