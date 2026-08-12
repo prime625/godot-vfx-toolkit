@@ -298,6 +298,19 @@ void VFXEditorNode::_update_godot_mesh() {
 }
 
 // ============================================================================
+// GIZMO — VISUAL TRANSFORM (strips bone scale so handles stay fixed size)
+// ============================================================================
+Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
+    Transform3D visual = gizmo_transform;
+    Basis b = visual.get_basis();
+    b.set_column(0, b.get_column(0).normalized());
+    b.set_column(1, b.get_column(1).normalized());
+    b.set_column(2, b.get_column(2).normalized());
+    visual.set_basis(b);
+    return visual;
+}
+
+// ============================================================================
 // GIZMO
 // ============================================================================
 void VFXEditorNode::_ensure_gizmo_node() {
@@ -394,7 +407,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
     mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
     gizmo_node->set_material_override(mat);
     gizmo_node->set_mesh(am);
-    gizmo_node->set_transform(gizmo_transform);
+    gizmo_node->set_transform(_get_visual_gizmo_transform());
 }
 
 void VFXEditorNode::set_gizmo_mode(int mode) {
@@ -409,7 +422,7 @@ int VFXEditorNode::get_gizmo_mode() const { return gizmo_mode; }
 
 void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
     gizmo_transform = t;
-    if (gizmo_node) gizmo_node->set_transform(t);
+    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
 }
 
 Transform3D VFXEditorNode::get_gizmo_transform() const { return gizmo_transform; }
@@ -417,7 +430,7 @@ Transform3D VFXEditorNode::get_gizmo_transform() const { return gizmo_transform;
 int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (!gizmo_node || !gizmo_node->is_visible()) return GIZMO_NONE;
 
-    Transform3D inv = gizmo_transform.affine_inverse();
+    Transform3D inv = _get_visual_gizmo_transform().affine_inverse();
     Vector3 ro = inv.xform(ray_origin);
     Vector3 rd = inv.basis.xform(ray_dir).normalized();
 
@@ -587,7 +600,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             t.set_origin(t.get_origin() + delta);
         }
         gizmo_transform = t;
-        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
+        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     } else if (gizmo_mode == GIZMO_ROTATE) {
         Vector3 origin = gizmo_transform.get_origin();
         Vector3 v0 = (gizmo_drag_start_point - origin).normalized();
@@ -608,7 +621,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         Quaternion rot(axis_local, angle);
         Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
         gizmo_transform.set_basis(new_basis);
-        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
+        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     } else if (gizmo_mode == GIZMO_SCALE) {
         Vector3 delta = hit - gizmo_drag_start_point;
         Transform3D t = gizmo_drag_start_transform;
@@ -636,7 +649,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         b.set_column(1, b.get_column(1).normalized() * scale.y);
         b.set_column(2, b.get_column(2).normalized() * scale.z);
         gizmo_transform.set_basis(b);
-        if (gizmo_node) gizmo_node->set_transform(gizmo_transform);
+        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     }
 
     if (selected_bone >= 0 && skeleton.is_valid()) {
@@ -1014,7 +1027,7 @@ void VFXEditorNode::set_selected_bone(int idx) {
     if (skeleton.is_valid() && idx >= 0) {
         gizmo_transform = skeleton->get_bone_model_transform(idx);
         if (gizmo_node) {
-            gizmo_node->set_transform(gizmo_transform);
+            gizmo_node->set_transform(_get_visual_gizmo_transform());
             _build_gizmo_mesh();
         }
     } else if (gizmo_node) {
