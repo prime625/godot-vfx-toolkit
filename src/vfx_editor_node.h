@@ -62,8 +62,6 @@ private:
     Vector3 gizmo_drag_start_point;
     Transform3D gizmo_drag_start_transform;
     Plane gizmo_drag_plane;
-
-    // >>> ADD THESE TWO LINES
     Quaternion gizmo_drag_start_rotation;
     Vector3    gizmo_drag_start_scale;
 
@@ -72,6 +70,7 @@ private:
     void _ensure_gizmo_node();
     void _build_gizmo_mesh();
     void _update_gizmo_visibility();
+    Transform3D _get_visual_gizmo_transform() const;  // strips bone scale
 
     // === SKELETON VISUAL ===
     int selected_bone = -1;
@@ -123,11 +122,9 @@ public:
     void set_auto_update(bool auto_up);
     bool get_auto_update() const;
 
-    // Brush cursor
     void set_brush_cursor(const Vector3& world_pos, float radius);
     void clear_brush_cursor();
 
-    // Raycast into mesh for painting. Returns Vector3 hit position, or null if miss.
     Variant raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, float max_dist = 1e20f);
 
     bool export_glb(const String& filepath);
@@ -137,7 +134,6 @@ public:
     void create_demo_cube();
     void create_demo_character();
 
-    // === GIZMO API ===
     void set_gizmo_mode(int mode);
     int get_gizmo_mode() const;
     void set_gizmo_transform(const Transform3D& t);
@@ -148,12 +144,10 @@ public:
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
 
-    // === SKELETON INTERACTION ===
     void set_selected_bone(int idx);
     int get_selected_bone() const;
     int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;
 
-    // === Unified touch API for GDScript ===
     int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir);
     void on_touch_up();
     void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
