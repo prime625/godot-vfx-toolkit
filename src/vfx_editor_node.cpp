@@ -298,9 +298,14 @@ void VFXEditorNode::_update_godot_mesh() {
 }
 
 // ============================================================================
-// GIZMO — VISUAL TRANSFORM (strips bone scale so handles stay fixed size)
+// GIZMO — VISUAL TRANSFORM
+// Scale mode: show actual bone scale so boxes stretch (visual feedback).
+// Translate / Rotate: normalize basis so handles stay fixed screen size.
 // ============================================================================
 Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
+    if (gizmo_mode == GIZMO_SCALE) {
+        return gizmo_transform;
+    }
     Transform3D visual = gizmo_transform;
     Basis b = visual.get_basis();
     b.set_column(0, b.get_column(0).normalized());
