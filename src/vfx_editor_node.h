@@ -70,7 +70,7 @@ private:
     void _ensure_gizmo_node();
     void _build_gizmo_mesh();
     void _update_gizmo_visibility();
-    Transform3D _get_visual_gizmo_transform() const;  // strips bone scale
+    Transform3D _get_visual_gizmo_transform() const;
 
     // === SKELETON VISUAL ===
     int selected_bone = -1;
