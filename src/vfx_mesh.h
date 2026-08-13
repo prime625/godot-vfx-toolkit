@@ -12,6 +12,7 @@
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <vector>
 #include <cstdint>
+#include <unordered_map>
 #include "vfx_math.h"
 
 using namespace godot;
@@ -32,6 +33,8 @@ struct HEVertex {
 
     int bone_indices[4] = {-1, -1, -1, -1};
     float bone_weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+    bool deleted = false;
 };
 
 struct HEEdge {
@@ -41,6 +44,7 @@ struct HEEdge {
     HEEdge* next = nullptr;
     HEFace* face = nullptr;
     bool is_boundary = false;
+    bool deleted = false;
 };
 
 struct HEFace {
@@ -48,6 +52,7 @@ struct HEFace {
     HEEdge* halfedge = nullptr;
     Vector3 normal;
     uint32_t vertex_count = 0;
+    bool deleted = false;
 };
 
 } // namespace vfx
@@ -66,15 +71,14 @@ private:
 
     vfx::AABB bounds;
     bool dirty = true;
+    bool remap_dirty = true;
 
-    PackedVector3Array godot_positions;
-    PackedVector3Array godot_normals;
-    PackedVector2Array godot_uvs;
-    PackedColorArray godot_colors;
-    PackedInt32Array godot_indices;
+    // Live remapping (internal id -> export id)
+    mutable std::vector<int> vert_remap;
+    mutable std::vector<int> face_remap;
 
     void _update_bounds();
-    void _rebuild_godot_arrays();
+    void _rebuild_remap() const;
     void _clear_mesh();
 
 protected:
@@ -92,6 +96,8 @@ public:
     int get_vertex_count() const;
     int get_face_count() const;
     int get_edge_count() const;
+    int get_live_vertex_count() const;
+    int get_live_face_count() const;
 
     Vector3 get_vertex_position(int idx) const;
     void set_vertex_position(int idx, const Vector3& pos);
@@ -100,31 +106,43 @@ public:
     Vector2 get_vertex_uv(int idx) const;
     void set_vertex_uv(int idx, const Vector2& uv);
 
+    // === MODELING ===
     void extrude_face(int face_idx, float distance);
     void inset_face(int face_idx, float amount);
     void delete_face(int face_idx);
+    void dissolve_face(int face_idx);
     void merge_vertices(int v0, int v1);
     void subdivide_face(int face_idx);
+    void loop_cut(int face_idx, int v0, int v1, float t);
+    void bevel_edge(int edge_idx, float amount);
+    void bevel_vertex(int vidx, float amount);
+    void dissolve_edge(int edge_idx);
+    void dissolve_vertex(int vidx);
+    void bridge_faces(int face_a, int face_b);
+    void flip_face_normals(int face_idx);
+    void flip_all_normals();
+    void recalculate_normals();
+    void cleanup(); // remove deleted elements and compact IDs
 
     // === TOPOLOGY ===
     void link_twins();
+    vfx::HEEdge* find_edge_between(int v0, int v1) const;
+    void get_face_vertices(int face_idx, std::vector<vfx::HEVertex*>& out) const;
+    void get_face_edges(int face_idx, std::vector<vfx::HEEdge*>& out) const;
+    void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
+    void get_vertex_faces(int vidx, std::vector<int>& out_faces) const;
 
     // === RAYCAST ===
     bool raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance = 1e20f) const;
-
-    // === ADJACENCY ===
-    void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
 
     // === SKINNING ===
     void set_vertex_bones(int vidx, int b0, int b1, int b2, int b3);
     void set_vertex_weights(int vidx, float w0, float w1, float w2, float w3);
     void normalize_weights(int vidx);
-
-    // FAST direct accessors — zero-copy, use these from C++
     void get_vertex_skinning(int idx, int out_bones[4], float out_weights[4]) const;
     void set_vertex_skinning(int idx, const int bones[4], const float weights[4]);
 
-    // === DATA EXPORT ===
+    // === DATA EXPORT (remaps deleted) ===
     PackedVector3Array get_positions() const;
     PackedVector3Array get_normals() const;
     PackedVector2Array get_uvs() const;
@@ -135,12 +153,18 @@ public:
     Ref<Mesh> to_godot_mesh() const;
     void from_godot_mesh(const Ref<Mesh>& mesh);
 
-    void recalculate_normals();
     void recalculate_bounds();
     PackedFloat32Array get_bounds() const;
 
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& data);
+
+    // === CURVE TO MESH (static builder) ===
+    static Ref<VFXMesh> create_from_curve(const PackedVector3Array& points,
+                                          const PackedVector3Array& handles_in,
+                                          const PackedVector3Array& handles_out,
+                                          float radius, int segments, int rings,
+                                          bool cap_start = true, bool cap_end = true);
 };
 
 #endif
