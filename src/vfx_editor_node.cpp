@@ -51,7 +51,6 @@ static void _append_triangle(PackedVector3Array& verts, PackedColorArray& cols, 
     idx.push_back(base); idx.push_back(base + 1); idx.push_back(base + 2);
 }
 
-// Ring / torus for rotation gizmo
 static void _append_ring(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Array& idx,
                          const Vector3& center, const Vector3& normal, float radius, int segs, float tube_radius, const Color& col) {
     Vector3 up = fabs(normal.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
@@ -72,7 +71,6 @@ static void _append_ring(PackedVector3Array& verts, PackedColorArray& cols, Pack
     }
 }
 
-// Cube handle for scale gizmo
 static void _append_box(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Array& idx,
                         const Vector3& center, float size, const Color& col) {
     float h = size * 0.5f;
@@ -138,6 +136,21 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("create_demo_cube"), &VFXEditorNode::create_demo_cube);
     ClassDB::bind_method(D_METHOD("create_demo_character"), &VFXEditorNode::create_demo_character);
 
+    // === MODELING ===
+    ClassDB::bind_method(D_METHOD("extrude_selected_face", "distance"), &VFXEditorNode::extrude_selected_face);
+    ClassDB::bind_method(D_METHOD("inset_selected_face", "amount"), &VFXEditorNode::inset_selected_face);
+    ClassDB::bind_method(D_METHOD("delete_selected_face"), &VFXEditorNode::delete_selected_face);
+    ClassDB::bind_method(D_METHOD("subdivide_selected_face"), &VFXEditorNode::subdivide_selected_face);
+    ClassDB::bind_method(D_METHOD("flip_normals"), &VFXEditorNode::flip_normals);
+    ClassDB::bind_method(D_METHOD("mesh_cleanup"), &VFXEditorNode::mesh_cleanup);
+
+    // === CURVE ===
+    ClassDB::bind_method(D_METHOD("create_curve_tube", "points", "radius", "segments", "rings"), &VFXEditorNode::create_curve_tube);
+    ClassDB::bind_method(D_METHOD("create_curve_ribbon", "points", "width", "segments"), &VFXEditorNode::create_curve_ribbon);
+    ClassDB::bind_method(D_METHOD("set_active_curve", "curve"), &VFXEditorNode::set_active_curve);
+    ClassDB::bind_method(D_METHOD("get_active_curve"), &VFXEditorNode::get_active_curve);
+    ClassDB::bind_method(D_METHOD("curve_to_mesh", "radius", "segments", "rings"), &VFXEditorNode::curve_to_mesh);
+
     ClassDB::bind_method(D_METHOD("set_gizmo_mode", "mode"), &VFXEditorNode::set_gizmo_mode);
     ClassDB::bind_method(D_METHOD("get_gizmo_mode"), &VFXEditorNode::get_gizmo_mode);
     ClassDB::bind_method(D_METHOD("set_gizmo_transform", "t"), &VFXEditorNode::set_gizmo_transform);
@@ -168,10 +181,15 @@ VFXEditorNode::VFXEditorNode() {
     base_material.instantiate();
     base_material->set_albedo(Color(0.8f, 0.8f, 0.8f, 1.0f));
     base_material->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    base_material->set_cull_mode(StandardMaterial3D::CULL_DISABLED); // FIX: see both sides
+    base_material->set_metallic(0.0f);
+    base_material->set_roughness(0.5f);
+    base_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, false);
 
     weight_material.instantiate();
     weight_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
     weight_material->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    weight_material->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
 }
 
 VFXEditorNode::~VFXEditorNode() {}
@@ -248,7 +266,15 @@ void VFXEditorNode::_update_godot_mesh() {
     }
 
     arrays[Mesh::ARRAY_VERTEX] = positions;
-    arrays[Mesh::ARRAY_NORMAL] = mesh->get_normals();
+
+    // FIX: validate normals so mesh never goes black
+    PackedVector3Array normals = mesh->get_normals();
+    for (int i = 0; i < normals.size(); i++) {
+        if (normals[i].length_squared() < 0.0001f) normals[i] = Vector3(0, 1, 0);
+        else normals[i] = normals[i].normalized();
+    }
+    arrays[Mesh::ARRAY_NORMAL] = normals;
+
     arrays[Mesh::ARRAY_TEX_UV] = mesh->get_uvs();
     arrays[Mesh::ARRAY_COLOR] = mesh->get_colors();
     arrays[Mesh::ARRAY_INDEX] = mesh->get_indices();
@@ -256,7 +282,7 @@ void VFXEditorNode::_update_godot_mesh() {
     if (!show_weights && skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
         // pre-skinned: omit bones/weights
     } else {
-        int vc = mesh->get_vertex_count();
+        int vc = positions.size();
         if (vc > 0) {
             PackedInt32Array bones;
             PackedFloat32Array weights;
@@ -299,8 +325,6 @@ void VFXEditorNode::_update_godot_mesh() {
 
 // ============================================================================
 // GIZMO — VISUAL TRANSFORM
-// Scale mode: show actual bone scale so boxes stretch (visual feedback).
-// Translate / Rotate: normalize basis so handles stay fixed screen size.
 // ============================================================================
 Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     if (gizmo_mode == GIZMO_SCALE) {
@@ -499,7 +523,6 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
         test_axis(GIZMO_Y, Vector3(0, 1, 0));
         test_axis(GIZMO_Z, Vector3(0, 0, 1));
 
-        // Uniform scale box at origin
         float box = s * 0.08f;
         float h = box * 0.5f;
         auto test_box = [&](int axis, const Vector3& center) {
@@ -534,7 +557,7 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
 }
 
 // ============================================================================
-// GIZMO DRAG BEGIN — Scale uses camera-facing plane + stores distance ratios
+// GIZMO DRAG BEGIN
 // ============================================================================
 void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const Vector3& ray_dir) {
     gizmo_drag_axis = axis;
@@ -578,7 +601,6 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
             gizmo_drag_start_rotation = gizmo_transform.basis.get_rotation_quaternion();
         }
     } else if (gizmo_mode == GIZMO_SCALE) {
-        // Camera-facing plane for stable drag
         Vector3 cam_dir = ray_dir.normalized();
         Vector3 normal = cam_dir;
         gizmo_drag_plane = Plane(normal, origin);
@@ -586,7 +608,6 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
         if (_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
             gizmo_drag_start_point = hit;
             gizmo_drag_start_scale = gizmo_transform.basis.get_scale();
-            // Store initial distance from origin along the chosen axis (or total distance for uniform)
             if (axis <= GIZMO_Z) {
                 Vector3 world_axis = gizmo_transform.basis.get_column(axis).normalized();
                 gizmo_drag_start_point = Vector3((hit - origin).dot(world_axis), 0, 0);
@@ -598,7 +619,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
 }
 
 // ============================================================================
-// GIZMO DRAG — Scale uses distance RATIOS (stable, no exploding deltas)
+// GIZMO DRAG
 // ============================================================================
 void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (gizmo_drag_axis == GIZMO_NONE) return;
@@ -646,7 +667,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         if (gizmo_drag_axis <= GIZMO_Z) {
             Vector3 world_axis = gizmo_drag_start_transform.basis.get_column(gizmo_drag_axis).normalized();
             float current_proj = (hit - origin).dot(world_axis);
-            float start_proj = gizmo_drag_start_point.x;  // stored in x component
+            float start_proj = gizmo_drag_start_point.x;
             if (fabs(start_proj) > 0.0001f) {
                 float ratio = current_proj / start_proj;
                 ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
@@ -662,7 +683,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             }
         }
 
-        // Clamp to prevent gizmo vanishing
         scale.x = vfx::clampf(scale.x, 0.001f, 1000.0f);
         scale.y = vfx::clampf(scale.y, 0.001f, 1000.0f);
         scale.z = vfx::clampf(scale.z, 0.001f, 1000.0f);
@@ -675,14 +695,12 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     }
 
-    // Apply to bone and sync back
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
         Transform3D local = parent_world.affine_inverse() * gizmo_transform;
         skeleton->set_bone_pose(selected_bone, local);
         skeleton->update_transforms();
-        // CRITICAL: re-sync gizmo_transform from the bone so it follows
         gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
         _build_skeleton_mesh();
@@ -788,7 +806,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
 }
 
 // ============================================================================
-// MATH HELPERS — CORRECTED ray-vs-segment (capsule)
+// MATH HELPERS
 // ============================================================================
 bool VFXEditorNode::_ray_vs_segment(const Vector3& ro, const Vector3& rd,
                                     const Vector3& a, const Vector3& b,
@@ -1043,6 +1061,83 @@ void VFXEditorNode::create_demo_character() {
     anim->add_keyframe_vector(clip, hips_curve, 2.0f, Vector3(0, 1.0f, 0), VFXAnimator::INTERP_LINEAR);
 
     set_vfx_animator(anim);
+}
+
+// ============================================================================
+// MODELING
+// ============================================================================
+void VFXEditorNode::extrude_selected_face(float distance) {
+    // TODO: implement face selection tracking; for now extrudes face 0
+    if (mesh.is_null()) return;
+    mesh->extrude_face(0, distance);
+    if (auto_update) _update_godot_mesh();
+}
+
+void VFXEditorNode::inset_selected_face(float amount) {
+    if (mesh.is_null()) return;
+    mesh->inset_face(0, amount);
+    if (auto_update) _update_godot_mesh();
+}
+
+void VFXEditorNode::delete_selected_face() {
+    if (mesh.is_null()) return;
+    mesh->delete_face(0);
+    if (auto_update) _update_godot_mesh();
+}
+
+void VFXEditorNode::subdivide_selected_face() {
+    if (mesh.is_null()) return;
+    mesh->subdivide_face(0);
+    if (auto_update) _update_godot_mesh();
+}
+
+void VFXEditorNode::flip_normals() {
+    if (mesh.is_null()) return;
+    mesh->flip_all_normals();
+    if (auto_update) _update_godot_mesh();
+}
+
+void VFXEditorNode::mesh_cleanup() {
+    if (mesh.is_null()) return;
+    mesh->cleanup();
+    if (auto_update) _update_godot_mesh();
+}
+
+// ============================================================================
+// CURVE
+// ============================================================================
+void VFXEditorNode::create_curve_tube(const PackedVector3Array& points, float radius, int segments, int rings) {
+    Ref<VFXCurve> curve;
+    curve.instantiate();
+    for (int i = 0; i < points.size(); i++) {
+        curve->add_point(points[i]);
+    }
+    Ref<VFXMesh> m = curve->to_tube_mesh(radius, segments, rings);
+    set_vfx_mesh(m);
+}
+
+void VFXEditorNode::create_curve_ribbon(const PackedVector3Array& points, float width, int segments) {
+    Ref<VFXCurve> curve;
+    curve.instantiate();
+    for (int i = 0; i < points.size(); i++) {
+        curve->add_point(points[i]);
+    }
+    Ref<VFXMesh> m = curve->to_ribbon_mesh(width, segments);
+    set_vfx_mesh(m);
+}
+
+void VFXEditorNode::set_active_curve(const Ref<VFXCurve>& curve) {
+    active_curve = curve;
+}
+
+Ref<VFXCurve> VFXEditorNode::get_active_curve() const {
+    return active_curve;
+}
+
+void VFXEditorNode::curve_to_mesh(float radius, int segments, int rings) {
+    if (active_curve.is_null()) return;
+    Ref<VFXMesh> m = active_curve->to_tube_mesh(radius, segments, rings);
+    set_vfx_mesh(m);
 }
 
 // ============================================================================
