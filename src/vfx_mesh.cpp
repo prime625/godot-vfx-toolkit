@@ -65,7 +65,8 @@ void VFXMesh::_bind_methods() {
    ClassDB::bind_method(D_METHOD("serialize"), &VFXMesh::serialize);
    ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXMesh::deserialize);
 
-   ClassDB::bind_method(D_METHOD("create_from_curve", "points", "handles_in", "handles_out", "radius", "segments", "rings", "cap_start", "cap_end"), &VFXMesh::create_from_curve, DEFVAL(true), DEFVAL(true));
+   // create_from_curve is a static C++ helper, not bound to GDScript.
+   // Use VFXCurve.to_tube_mesh() or VFXEditorNode.create_curve_tube() from GDScript.
 }
 
 VFXMesh::VFXMesh() {}
