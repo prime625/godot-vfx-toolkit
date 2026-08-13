@@ -11,6 +11,7 @@
 #include "vfx_skeleton.h"
 #include "vfx_skin.h"
 #include "vfx_animator.h"
+#include "vfx_curve.h"
 
 using namespace godot;
 
@@ -40,6 +41,7 @@ private:
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
     Ref<VFXAnimator> animator;
+    Ref<VFXCurve> active_curve;
 
     MeshInstance3D* mesh_instance = nullptr;
     MeshInstance3D* brush_cursor = nullptr;
@@ -133,6 +135,21 @@ public:
 
     void create_demo_cube();
     void create_demo_character();
+
+    // === MODELING ===
+    void extrude_selected_face(float distance);
+    void inset_selected_face(float amount);
+    void delete_selected_face();
+    void subdivide_selected_face();
+    void flip_normals();
+    void mesh_cleanup();
+
+    // === CURVE ===
+    void create_curve_tube(const PackedVector3Array& points, float radius, int segments, int rings);
+    void create_curve_ribbon(const PackedVector3Array& points, float width, int segments);
+    void set_active_curve(const Ref<VFXCurve>& curve);
+    Ref<VFXCurve> get_active_curve() const;
+    void curve_to_mesh(float radius, int segments, int rings);
 
     void set_gizmo_mode(int mode);
     int get_gizmo_mode() const;
