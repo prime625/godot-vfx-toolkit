@@ -27,18 +27,33 @@ inline Quaternion slerp_quat(const Quaternion& a, const Quaternion& b, float t) 
     return a.slerp(b, t);
 }
 
+inline Vector3 project_on_plane(const Vector3& v, const Vector3& normal) {
+    return v - normal * v.dot(normal);
+}
+
+inline Basis look_at_safe(const Vector3& direction, const Vector3& up = Vector3(0, 1, 0)) {
+    Vector3 z = direction.normalized();
+    Vector3 x = up.cross(z).normalized();
+    if (x.length_squared() < 0.0001f) {
+        x = Vector3(1, 0, 0).cross(z).normalized();
+        if (x.length_squared() < 0.0001f) {
+            x = Vector3(0, 0, 1).cross(z).normalized();
+        }
+    }
+    Vector3 y = z.cross(x);
+    return Basis(x, y, z);
+}
+
 // 4x4 matrix for skinning (stored as Transform3D + scale in Godot)
 struct SkinMatrix {
     Transform3D transform;
 
     Vector3 transform_point(const Vector3& p) const {
-        // Use xform() instead of operator* to avoid Android NDK ambiguity
         return transform.xform(p);
     }
 
     Vector3 transform_vector(const Vector3& v) const {
         Basis b = transform.get_basis();
-        // Use xform() instead of operator* to avoid Android NDK ambiguity
         return b.xform(v);
     }
 };
