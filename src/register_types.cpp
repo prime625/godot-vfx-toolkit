@@ -6,6 +6,7 @@
 #include "vfx_skin.h"
 #include "vfx_animator.h"
 #include "vfx_gltf_exporter.h"
+#include "vfx_curve.h"
 
 void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -15,6 +16,7 @@ void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
         ClassDB::register_class<VFXSkin>();
         ClassDB::register_class<VFXAnimator>();
         ClassDB::register_class<VFXGLTFExporter>();
+        ClassDB::register_class<VFXCurve>();
     }
 }
 
