@@ -7,11 +7,6 @@ env = SConscript("godot-cpp/SConstruct")
 # Add our source files
 env.Append(CPPPATH=["src/"])
 sources = Glob("src/*.cpp")
-sources += Glob("src/mesh/*.cpp")
-sources += Glob("src/skeleton/*.cpp")
-sources += Glob("src/io/*.cpp")
-sources += Glob("src/math/*.cpp")
-sources += Glob("src/anim/*.cpp")
 
 # Platform-specific flags
 if env["platform"] == "android":
@@ -41,4 +36,4 @@ else:
         source=sources,
     )
 
-Default(library) 
+Default(library)
