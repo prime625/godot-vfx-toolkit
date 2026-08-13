@@ -533,6 +533,9 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
     return best;
 }
 
+// ============================================================================
+// GIZMO DRAG BEGIN — Scale uses camera-facing plane + stores distance ratios
+// ============================================================================
 void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const Vector3& ray_dir) {
     gizmo_drag_axis = axis;
     gizmo_drag_start_transform = gizmo_transform;
@@ -575,23 +578,34 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
             gizmo_drag_start_rotation = gizmo_transform.basis.get_rotation_quaternion();
         }
     } else if (gizmo_mode == GIZMO_SCALE) {
+        // Camera-facing plane for stable drag
         Vector3 cam_dir = ray_dir.normalized();
-        if (fabs(cam_dir.dot(Vector3(0,1,0))) < 0.9f)
-            gizmo_drag_plane = Plane(Vector3(0,1,0), origin);
-        else
-            gizmo_drag_plane = Plane(Vector3(1,0,0), origin);
+        Vector3 normal = cam_dir;
+        gizmo_drag_plane = Plane(normal, origin);
         Vector3 hit;
         if (_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
             gizmo_drag_start_point = hit;
             gizmo_drag_start_scale = gizmo_transform.basis.get_scale();
+            // Store initial distance from origin along the chosen axis (or total distance for uniform)
+            if (axis <= GIZMO_Z) {
+                Vector3 world_axis = gizmo_transform.basis.get_column(axis).normalized();
+                gizmo_drag_start_point = Vector3((hit - origin).dot(world_axis), 0, 0);
+            } else {
+                gizmo_drag_start_point = Vector3((hit - origin).length(), 0, 0);
+            }
         }
     }
 }
 
+// ============================================================================
+// GIZMO DRAG — Scale uses distance RATIOS (stable, no exploding deltas)
+// ============================================================================
 void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (gizmo_drag_axis == GIZMO_NONE) return;
     Vector3 hit;
     if (!_ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) return;
+
+    Vector3 origin = gizmo_transform.get_origin();
 
     if (gizmo_mode == GIZMO_TRANSLATE) {
         Vector3 delta = hit - gizmo_drag_start_point;
@@ -607,7 +621,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         gizmo_transform = t;
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     } else if (gizmo_mode == GIZMO_ROTATE) {
-        Vector3 origin = gizmo_transform.get_origin();
         Vector3 v0 = (gizmo_drag_start_point - origin).normalized();
         Vector3 v1 = (hit - origin).normalized();
         if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
@@ -628,28 +641,33 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         gizmo_transform.set_basis(new_basis);
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     } else if (gizmo_mode == GIZMO_SCALE) {
-        Vector3 delta = hit - gizmo_drag_start_point;
-        Transform3D t = gizmo_drag_start_transform;
         Vector3 scale = gizmo_drag_start_scale;
 
         if (gizmo_drag_axis <= GIZMO_Z) {
-            Vector3 world_axis = t.basis.get_column(gizmo_drag_axis).normalized();
-            float proj = delta.dot(world_axis);
-            float base_len = t.basis.get_column(gizmo_drag_axis).length();
-            if (base_len > 0.0001f) {
-                float factor = 1.0f + proj / base_len;
-                factor = fmaxf(factor, 0.01f);
-                scale[gizmo_drag_axis] = gizmo_drag_start_scale[gizmo_drag_axis] * factor;
+            Vector3 world_axis = gizmo_drag_start_transform.basis.get_column(gizmo_drag_axis).normalized();
+            float current_proj = (hit - origin).dot(world_axis);
+            float start_proj = gizmo_drag_start_point.x;  // stored in x component
+            if (fabs(start_proj) > 0.0001f) {
+                float ratio = current_proj / start_proj;
+                ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
+                scale[gizmo_drag_axis] = gizmo_drag_start_scale[gizmo_drag_axis] * ratio;
             }
         } else if (gizmo_drag_axis == GIZMO_XYZ) {
-            float proj = delta.length();
-            float sign = (delta.dot(ray_dir.normalized()) > 0.0f) ? 1.0f : -1.0f;
-            float factor = 1.0f + sign * proj / gizmo_screen_scale;
-            factor = fmaxf(factor, 0.01f);
-            scale = gizmo_drag_start_scale * factor;
+            float current_dist = (hit - origin).length();
+            float start_dist = gizmo_drag_start_point.x;
+            if (start_dist > 0.0001f) {
+                float ratio = current_dist / start_dist;
+                ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
+                scale = gizmo_drag_start_scale * ratio;
+            }
         }
 
-        Basis b = t.basis;
+        // Clamp to prevent gizmo vanishing
+        scale.x = vfx::clampf(scale.x, 0.001f, 1000.0f);
+        scale.y = vfx::clampf(scale.y, 0.001f, 1000.0f);
+        scale.z = vfx::clampf(scale.z, 0.001f, 1000.0f);
+
+        Basis b = gizmo_drag_start_transform.basis;
         b.set_column(0, b.get_column(0).normalized() * scale.x);
         b.set_column(1, b.get_column(1).normalized() * scale.y);
         b.set_column(2, b.get_column(2).normalized() * scale.z);
@@ -657,12 +675,16 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     }
 
+    // Apply to bone and sync back
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
         Transform3D local = parent_world.affine_inverse() * gizmo_transform;
         skeleton->set_bone_pose(selected_bone, local);
         skeleton->update_transforms();
+        // CRITICAL: re-sync gizmo_transform from the bone so it follows
+        gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
+        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
         _build_skeleton_mesh();
         _update_godot_mesh();
     }
