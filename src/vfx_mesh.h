@@ -70,8 +70,8 @@ private:
     uint32_t next_face_id = 0;
 
     vfx::AABB bounds;
-    bool dirty = true;
-    bool remap_dirty = true;
+    mutable bool dirty = true;
+    mutable bool remap_dirty = true;
 
     // Live remapping (internal id -> export id)
     mutable std::vector<int> vert_remap;
