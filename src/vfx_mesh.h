@@ -73,6 +73,7 @@ private:
     mutable bool dirty = true;
     mutable bool remap_dirty = true;
 
+    // Live remapping (internal id -> export id)
     mutable std::vector<int> vert_remap;
     mutable std::vector<int> face_remap;
 
@@ -121,7 +122,7 @@ public:
     void flip_face_normals(int face_idx);
     void flip_all_normals();
     void recalculate_normals();
-    void cleanup();
+    void cleanup(); // remove deleted elements and compact IDs
 
     // === TOPOLOGY ===
     void link_twins();
@@ -131,11 +132,8 @@ public:
     void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
     void get_vertex_faces(int vidx, std::vector<int>& out_faces) const;
 
-    // === RAYCAST (selection) ===
+    // === RAYCAST ===
     bool raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance = 1e20f) const;
-    int raycast_face(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance = 1e20f) const;
-    int raycast_vertex(const Vector3& ray_origin, const Vector3& ray_dir, float radius, float& out_t) const;
-    int raycast_edge(const Vector3& ray_origin, const Vector3& ray_dir, float radius, float& out_t) const;
 
     // === SKINNING ===
     void set_vertex_bones(int vidx, int b0, int b1, int b2, int b3);
@@ -144,16 +142,13 @@ public:
     void get_vertex_skinning(int idx, int out_bones[4], float out_weights[4]) const;
     void set_vertex_skinning(int idx, const int bones[4], const float weights[4]);
 
-    // === DATA EXPORT ===
+    // === DATA EXPORT (remaps deleted) ===
     PackedVector3Array get_positions() const;
     PackedVector3Array get_normals() const;
     PackedVector2Array get_uvs() const;
     PackedColorArray get_colors() const;
     PackedInt32Array get_indices() const;
     PackedFloat32Array get_skinning_data() const;
-
-    // Wireframe line segments [v0, v1, v2, v3, ...] for every unique edge
-    PackedVector3Array get_wireframe_lines() const;
 
     Ref<Mesh> to_godot_mesh() const;
     void from_godot_mesh(const Ref<Mesh>& mesh);
@@ -164,7 +159,7 @@ public:
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& data);
 
-    // C++ helper only — not bound to GDScript
+    // === CURVE TO MESH (static builder) ===
     static Ref<VFXMesh> create_from_curve(const PackedVector3Array& points,
                                           const PackedVector3Array& handles_in,
                                           const PackedVector3Array& handles_out,
