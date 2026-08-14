@@ -62,10 +62,6 @@ private:
     bool show_skeleton = true;
     bool show_weights = false;
     bool show_wireframe = true;
-    bool show_face_normals = false;
-    bool show_vertex_normals = false;
-    bool show_face_centers = false;
-    MeshInstance3D* normal_visual_instance = nullptr;
     int visualize_bone = 0;
     bool auto_update = true;
 
@@ -103,8 +99,6 @@ private:
     void _build_wireframe_mesh();
     void _ensure_selection_highlight();
     void _build_selection_highlight();
-    void _ensure_normal_visual();
-    void _build_normal_visual_mesh();
 
     // === SKELETON VISUAL ===
     int selected_bone = -1;
@@ -153,12 +147,6 @@ public:
     bool get_show_weights() const;
     void set_show_wireframe(bool show);
     bool get_show_wireframe() const;
-    void set_show_face_normals(bool show);
-    bool get_show_face_normals() const;
-    void set_show_vertex_normals(bool show);
-    bool get_show_vertex_normals() const;
-    void set_show_face_centers(bool show);
-    bool get_show_face_centers() const;
     void set_visualize_bone(int idx);
     int get_visualize_bone() const;
     void set_auto_update(bool auto_up);
