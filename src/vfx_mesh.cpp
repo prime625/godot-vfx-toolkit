@@ -720,6 +720,22 @@ void VFXMesh::cleanup() {
     remap_dirty = true;
 }
 
+
+Vector3 VFXMesh::get_face_normal(int idx) const {
+    if (idx >= 0 && idx < (int)faces.size() && !faces[idx]->deleted) return faces[idx]->normal;
+    return Vector3();
+}
+
+void VFXMesh::get_edge_vertices(int edge_idx, Vector3& out_a, Vector3& out_b) const {
+    out_a = Vector3();
+    out_b = Vector3();
+    if (edge_idx < 0 || edge_idx >= (int)edges.size() || edges[edge_idx]->deleted) return;
+    vfx::HEEdge* e = edges[edge_idx];
+    if (!e->next || !e->next->vertex || !e->vertex) return;
+    out_a = e->next->vertex->position;
+    out_b = e->vertex->position;
+}
+
 // ============================================================================
 // TOPOLOGY
 // ============================================================================
@@ -803,6 +819,138 @@ bool VFXMesh::raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3
         }
     }
     return hit;
+}
+
+// ============================================================================
+// RAYCAST SELECTION (face / vertex / edge)
+// ============================================================================
+int VFXMesh::raycast_face(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance) const {
+    int best_face = -1;
+    float closest = max_distance;
+    Vector3 dir = ray_dir.normalized();
+
+    for (auto* face : faces) {
+        if (face->deleted || !face->halfedge) continue;
+        vfx::HEEdge* start = face->halfedge;
+        vfx::HEEdge* e = start;
+        std::vector<Vector3> fverts;
+        do {
+            if (!e || !e->vertex) break;
+            fverts.push_back(e->vertex->position);
+            e = e->next;
+        } while (e && e != start);
+
+        if (fverts.size() < 3) continue;
+
+        for (size_t i = 1; i + 1 < fverts.size(); i++) {
+            const Vector3& v0 = fverts[0];
+            const Vector3& v1 = fverts[i];
+            const Vector3& v2 = fverts[i+1];
+
+            Vector3 edge1 = v1 - v0;
+            Vector3 edge2 = v2 - v0;
+            Vector3 h = dir.cross(edge2);
+            float a = edge1.dot(h);
+            if (a > -0.00001f && a < 0.00001f) continue;
+
+            float f = 1.0f / a;
+            Vector3 s = ray_origin - v0;
+            float u = f * s.dot(h);
+            if (u < 0.0f || u > 1.0f) continue;
+
+            Vector3 q = s.cross(edge1);
+            float v = f * dir.dot(q);
+            if (v < 0.0f || u + v > 1.0f) continue;
+
+            float t = f * edge2.dot(q);
+            if (t > 0.00001f && t < closest) {
+                closest = t;
+                out_hit = ray_origin + dir * t;
+                best_face = face->id;
+            }
+        }
+    }
+    return best_face;
+}
+
+int VFXMesh::raycast_vertex(const Vector3& ray_origin, const Vector3& ray_dir, float radius, float& out_t) const {
+    int best = -1;
+    float best_t = 1e20f;
+    Vector3 dir = ray_dir.normalized();
+
+    for (auto* v : vertices) {
+        if (v->deleted) continue;
+        Vector3 to_vert = v->position - ray_origin;
+        float proj = to_vert.dot(dir);
+        if (proj < 0.0f || proj > best_t) continue;
+        Vector3 closest = ray_origin + dir * proj;
+        float dist_sq = closest.distance_squared_to(v->position);
+        if (dist_sq < radius * radius && proj < best_t) {
+            best_t = proj;
+            best = v->id;
+        }
+    }
+    out_t = best_t;
+    return best;
+}
+
+int VFXMesh::raycast_edge(const Vector3& ray_origin, const Vector3& ray_dir, float radius, float& out_t) const {
+    int best = -1;
+    float best_t = 1e20f;
+    Vector3 dir = ray_dir.normalized();
+
+    for (auto* e : edges) {
+        if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+        Vector3 a = e->next->vertex->position;
+        Vector3 b = e->vertex->position;
+        float t;
+        // Reuse capsule raycast logic inline
+        Vector3 u = dir;
+        Vector3 v = b - a;
+        Vector3 w0 = ray_origin - a;
+        float uv = u.dot(v);
+        float vv = v.length_squared();
+        float uw0 = u.dot(w0);
+        float vw0 = v.dot(w0);
+        if (vv < 0.0001f) continue;
+        float det = uv * uv - vv;
+        float tt, s;
+        if (fabs(det) < 0.0001f) {
+            s = vfx::clampf(vw0 / vv, 0.0f, 1.0f);
+            Vector3 closest_seg = a + v * s;
+            tt = u.dot(closest_seg - ray_origin);
+        } else {
+            tt = (uw0 * vv - uv * vw0) / det;
+            s = (uv * uw0 - vw0) / det;
+        }
+        if (s >= 0.0f && s <= 1.0f && tt >= 0.0f) {
+            Vector3 closest_seg = a + v * s;
+            Vector3 closest_ray = ray_origin + u * tt;
+            if ((closest_seg - closest_ray).length_squared() < radius * radius && tt < best_t) {
+                best_t = tt;
+                best = e->id;
+            }
+        }
+    }
+    out_t = best_t;
+    return best;
+}
+
+PackedVector3Array VFXMesh::get_wireframe_lines() const {
+    PackedVector3Array lines;
+    std::set<std::pair<int,int>> seen;
+    for (auto* e : edges) {
+        if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+        int a = e->vertex->id;
+        int b = e->next->vertex->id;
+        if (a == b) continue;
+        std::pair<int,int> key = (a < b) ? std::make_pair(a,b) : std::make_pair(b,a);
+        if (seen.insert(key).second) {
+            lines.push_back(e->next->vertex->position);
+            lines.push_back(e->vertex->position);
+        }
+    }
+    return lines;
 }
 
 // ============================================================================
