@@ -1,3 +1,4 @@
+
 #include "vfx_mesh.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -157,6 +158,14 @@ int VFXMesh::get_live_face_count() const {
     int c = 0;
     for (auto* f : faces) if (!f->deleted) c++;
     return c;
+}
+
+bool VFXMesh::is_vertex_deleted(int idx) const {
+    return idx < 0 || idx >= (int)vertices.size() || vertices[idx]->deleted;
+}
+
+bool VFXMesh::is_face_deleted(int idx) const {
+    return idx < 0 || idx >= (int)faces.size() || faces[idx]->deleted;
 }
 
 Vector3 VFXMesh::get_vertex_position(int idx) const {
@@ -1365,3 +1374,6 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
     m->link_twins();
     return m;
 }
+
+
+
