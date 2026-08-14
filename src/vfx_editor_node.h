@@ -1,3 +1,4 @@
+
 #ifndef VFX_EDITOR_NODE_H
 #define VFX_EDITOR_NODE_H
 
@@ -36,6 +37,12 @@ public:
         GIZMO_XYZ
     };
 
+    enum SelectMode {
+        SELECT_VERTEX = 0,
+        SELECT_EDGE = 1,
+        SELECT_FACE = 2
+    };
+
 private:
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
@@ -44,15 +51,33 @@ private:
     Ref<VFXCurve> active_curve;
 
     MeshInstance3D* mesh_instance = nullptr;
+    MeshInstance3D* wireframe_instance = nullptr;
+    MeshInstance3D* selection_highlight_instance = nullptr;
     MeshInstance3D* brush_cursor = nullptr;
 
     Ref<StandardMaterial3D> base_material;
     Ref<StandardMaterial3D> weight_material;
+    Ref<StandardMaterial3D> wireframe_material;
+    Ref<StandardMaterial3D> selection_material;
 
     bool show_skeleton = true;
     bool show_weights = false;
+    bool show_wireframe = true;
+    bool show_face_normals = false;
+    bool show_vertex_normals = false;
+    bool show_face_centers = false;
+    MeshInstance3D* normal_visual_instance = nullptr;
     int visualize_bone = 0;
     bool auto_update = true;
+
+    // === SELECTION ===
+    int select_mode = SELECT_FACE;
+    int selected_face = -1;
+    int selected_vertex = -1;
+    int selected_edge = -1;
+    int hovered_face = -1;
+    int hovered_vertex = -1;
+    int hovered_edge = -1;
 
     // === GIZMO STATE ===
     int gizmo_mode = GIZMO_TRANSLATE;
@@ -73,6 +98,14 @@ private:
     void _build_gizmo_mesh();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
+
+    // === WIREFRAME / SELECTION VISUALS ===
+    void _ensure_wireframe_instance();
+    void _build_wireframe_mesh();
+    void _ensure_selection_highlight();
+    void _build_selection_highlight();
+    void _ensure_normal_visual();
+    void _build_normal_visual_mesh();
 
     // === SKELETON VISUAL ===
     int selected_bone = -1;
@@ -119,6 +152,14 @@ public:
     bool get_show_skeleton() const;
     void set_show_weights(bool show);
     bool get_show_weights() const;
+    void set_show_wireframe(bool show);
+    bool get_show_wireframe() const;
+    void set_show_face_normals(bool show);
+    bool get_show_face_normals() const;
+    void set_show_vertex_normals(bool show);
+    bool get_show_vertex_normals() const;
+    void set_show_face_centers(bool show);
+    bool get_show_face_centers() const;
     void set_visualize_bone(int idx);
     int get_visualize_bone() const;
     void set_auto_update(bool auto_up);
@@ -136,11 +177,20 @@ public:
     void create_demo_cube();
     void create_demo_character();
 
+    // === SELECTION ===
+    void set_select_mode(int mode);
+    int get_select_mode() const;
+    int get_selected_face() const;
+    int get_selected_vertex() const;
+    int get_selected_edge() const;
+    void clear_selection();
+    int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
+
     // === MODELING ===
-    void extrude_selected_face(float distance);
-    void inset_selected_face(float amount);
-    void delete_selected_face();
-    void subdivide_selected_face();
+    void extrude_selected(float distance);
+    void inset_selected(float amount);
+    void delete_selected();
+    void subdivide_selected();
     void flip_normals();
     void mesh_cleanup();
 
@@ -172,5 +222,9 @@ public:
 
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
+VARIANT_ENUM_CAST(VFXEditorNode::SelectMode);
 
 #endif
+
+
+
