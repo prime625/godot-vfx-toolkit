@@ -1,4 +1,3 @@
-
 #ifndef VFX_EDITOR_NODE_H
 #define VFX_EDITOR_NODE_H
 
@@ -225,6 +224,3 @@ VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
 VARIANT_ENUM_CAST(VFXEditorNode::SelectMode);
 
 #endif
-
-
-
