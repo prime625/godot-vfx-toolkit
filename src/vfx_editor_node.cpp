@@ -481,16 +481,17 @@ void VFXEditorNode::_build_normal_visual_mesh() {
     // Face normals (blue lines)
     if (show_face_normals) {
         Color col = Color(0.2f, 0.5f, 1.0f, 0.9f);
-        for (auto* f : mesh->faces) {
-            if (f->deleted || !f->halfedge) continue;
+        int fc = mesh->get_face_count();
+        for (int i = 0; i < fc; i++) {
+            if (mesh->is_face_deleted(i)) continue;
+            Vector3 n = mesh->get_face_normal(i);
+            if (n.length_squared() < 0.0001f) continue;
             std::vector<vfx::HEVertex*> fv;
-            mesh->get_face_vertices(f->id, fv);
+            mesh->get_face_vertices(i, fv);
             if (fv.size() < 3) continue;
             Vector3 center;
             for (auto* v : fv) center += v->position;
             center /= fv.size();
-            Vector3 n = f->normal;
-            if (n.length_squared() < 0.0001f) continue;
             int base = verts.size();
             verts.push_back(center); cols.push_back(col);
             verts.push_back(center + n * 0.15f); cols.push_back(col);
@@ -501,13 +502,15 @@ void VFXEditorNode::_build_normal_visual_mesh() {
     // Vertex normals (green lines)
     if (show_vertex_normals) {
         Color col = Color(0.2f, 1.0f, 0.4f, 0.9f);
-        for (auto* v : mesh->vertices) {
-            if (v->deleted) continue;
-            Vector3 n = v->normal;
+        int vc = mesh->get_vertex_count();
+        for (int i = 0; i < vc; i++) {
+            if (mesh->is_vertex_deleted(i)) continue;
+            Vector3 n = mesh->get_vertex_normal(i);
             if (n.length_squared() < 0.0001f) continue;
+            Vector3 p = mesh->get_vertex_position(i);
             int base = verts.size();
-            verts.push_back(v->position); cols.push_back(col);
-            verts.push_back(v->position + n * 0.08f); cols.push_back(col);
+            verts.push_back(p); cols.push_back(col);
+            verts.push_back(p + n * 0.08f); cols.push_back(col);
             idx.push_back(base); idx.push_back(base + 1);
         }
     }
@@ -515,10 +518,11 @@ void VFXEditorNode::_build_normal_visual_mesh() {
     // Face centers (yellow dots)
     if (show_face_centers) {
         Color col = Color(1.0f, 0.9f, 0.2f, 1.0f);
-        for (auto* f : mesh->faces) {
-            if (f->deleted || !f->halfedge) continue;
+        int fc = mesh->get_face_count();
+        for (int i = 0; i < fc; i++) {
+            if (mesh->is_face_deleted(i)) continue;
             std::vector<vfx::HEVertex*> fv;
-            mesh->get_face_vertices(f->id, fv);
+            mesh->get_face_vertices(i, fv);
             if (fv.size() < 3) continue;
             Vector3 center;
             for (auto* v : fv) center += v->position;
