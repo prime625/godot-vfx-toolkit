@@ -97,8 +97,6 @@ public:
     int get_edge_count() const;
     int get_live_vertex_count() const;
     int get_live_face_count() const;
-    bool is_vertex_deleted(int idx) const;
-    bool is_face_deleted(int idx) const;
 
     Vector3 get_vertex_position(int idx) const;
     void set_vertex_position(int idx, const Vector3& pos);
@@ -123,8 +121,6 @@ public:
     void flip_face_normals(int face_idx);
     void flip_all_normals();
     void recalculate_normals();
-    Vector3 get_face_normal(int idx) const;
-    void get_edge_vertices(int edge_idx, Vector3& out_a, Vector3& out_b) const;
     void cleanup();
 
     // === TOPOLOGY ===
