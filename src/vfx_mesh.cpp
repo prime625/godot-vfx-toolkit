@@ -1,4 +1,3 @@
-
 #include "vfx_mesh.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -158,14 +157,6 @@ int VFXMesh::get_live_face_count() const {
     int c = 0;
     for (auto* f : faces) if (!f->deleted) c++;
     return c;
-}
-
-bool VFXMesh::is_vertex_deleted(int idx) const {
-    return idx < 0 || idx >= (int)vertices.size() || vertices[idx]->deleted;
-}
-
-bool VFXMesh::is_face_deleted(int idx) const {
-    return idx < 0 || idx >= (int)faces.size() || faces[idx]->deleted;
 }
 
 Vector3 VFXMesh::get_vertex_position(int idx) const {
@@ -729,22 +720,6 @@ void VFXMesh::cleanup() {
     remap_dirty = true;
 }
 
-
-Vector3 VFXMesh::get_face_normal(int idx) const {
-    if (idx >= 0 && idx < (int)faces.size() && !faces[idx]->deleted) return faces[idx]->normal;
-    return Vector3();
-}
-
-void VFXMesh::get_edge_vertices(int edge_idx, Vector3& out_a, Vector3& out_b) const {
-    out_a = Vector3();
-    out_b = Vector3();
-    if (edge_idx < 0 || edge_idx >= (int)edges.size() || edges[edge_idx]->deleted) return;
-    vfx::HEEdge* e = edges[edge_idx];
-    if (!e->next || !e->next->vertex || !e->vertex) return;
-    out_a = e->next->vertex->position;
-    out_b = e->vertex->position;
-}
-
 // ============================================================================
 // TOPOLOGY
 // ============================================================================
@@ -827,8 +802,6 @@ bool VFXMesh::raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3
             }
         }
     }
-    return hit;
-}
 
 // ============================================================================
 // RAYCAST SELECTION (face / vertex / edge)
@@ -960,6 +933,9 @@ PackedVector3Array VFXMesh::get_wireframe_lines() const {
         }
     }
     return lines;
+}
+
+    return hit;
 }
 
 // ============================================================================
@@ -1374,6 +1350,3 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
     m->link_twins();
     return m;
 }
-
-
-
