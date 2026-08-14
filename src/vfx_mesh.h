@@ -97,6 +97,8 @@ public:
     int get_edge_count() const;
     int get_live_vertex_count() const;
     int get_live_face_count() const;
+    bool is_vertex_deleted(int idx) const;
+    bool is_face_deleted(int idx) const;
 
     Vector3 get_vertex_position(int idx) const;
     void set_vertex_position(int idx, const Vector3& pos);
