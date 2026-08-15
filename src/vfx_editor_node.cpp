@@ -306,12 +306,13 @@ void VFXEditorNode::_update_godot_mesh() {
         positions = skin->compute_skinned_positions();
 
         // DEBUG: verify skinning is actually producing different positions
-        // Uncomment these lines to print skinning info:
-        // PackedVector3Array bind_pos = mesh->get_positions();
-        // if (bind_pos.size() > 0 && positions.size() > 0) {
-        //     float diff = bind_pos[0].distance_to(positions[0]);
-        //     UtilityFunctions::print("Skinned pos[0] diff: ", diff);
-        // }
+        PackedVector3Array bind_pos = mesh->get_positions();
+        if (bind_pos.size() > 0 && positions.size() > 0) {
+            float diff = bind_pos[0].distance_to(positions[0]);
+            UtilityFunctions::print("Skinned pos[0] diff: ", diff,
+                " bone0_pos: ", skeleton->get_bone_model_transform(0).get_origin(),
+                " bind0_pos: ", skeleton->get_bone_bind_pose(0).get_origin());
+        }
     } else {
         positions = mesh->get_positions();
     }
@@ -476,9 +477,14 @@ void VFXEditorNode::_ensure_gizmo_node() {
 }
 
 void VFXEditorNode::_update_gizmo_visibility() {
-    if (gizmo_node) {
-        gizmo_node->set_visible(selected_bone >= 0);
+    if (!gizmo_node) return;
+    bool show = false;
+    if (edit_mode == MODE_OBJECT) {
+        show = (selected_bone >= 0);
+    } else {
+        show = (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0);
     }
+    gizmo_node->set_visible(show);
 }
 
 void VFXEditorNode::_build_gizmo_mesh() {
@@ -856,6 +862,10 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
         _build_skeleton_mesh();
+
+        // DEBUG: verify bone actually moved
+        Vector3 bone_pos = skeleton->get_bone_model_transform(selected_bone).get_origin();
+        UtilityFunctions::print("Bone ", selected_bone, " pos: ", bone_pos);
         _update_godot_mesh();
     }
 }
@@ -1132,8 +1142,10 @@ void VFXEditorNode::clear_selection() {
     selected_face = -1;
     selected_edge = -1;
     selected_vertex = -1;
+    selected_bone = -1;
     _update_gizmo_for_selection();
     if (selection_visual) _build_selection_mesh();
+    _build_skeleton_mesh();
 }
 
 int VFXEditorNode::get_selected_face() const { return selected_face; }
@@ -1473,6 +1485,12 @@ void VFXEditorNode::curve_to_mesh(float radius, int segments, int rings) {
 // ============================================================================
 void VFXEditorNode::set_selected_bone(int idx) {
     selected_bone = idx;
+    // Clear mesh selection when selecting a bone
+    selected_face = -1;
+    selected_edge = -1;
+    selected_vertex = -1;
+    if (selection_visual) _build_selection_mesh();
+
     _update_gizmo_visibility();
     if (skeleton.is_valid() && idx >= 0) {
         gizmo_transform = skeleton->get_bone_model_transform(idx);
