@@ -232,6 +232,12 @@ void VFXEditorNode::_notification(int p_what) {
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
         }
+
+        // Refresh skinned mesh when skeleton is posed/animated
+        if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
+            _update_godot_mesh();
+        }
+
         if (show_skeleton && skeleton.is_valid()) {
             _build_skeleton_mesh();
             if (skel_visual) skel_visual->set_visible(true);
@@ -295,7 +301,17 @@ void VFXEditorNode::_update_godot_mesh() {
 
     PackedVector3Array positions;
     if (skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
+        skeleton->update_transforms();
+        if (skin.is_valid()) skin->set_mesh_transform(get_global_transform());
         positions = skin->compute_skinned_positions();
+
+        // DEBUG: verify skinning is actually producing different positions
+        // Uncomment these lines to print skinning info:
+        // PackedVector3Array bind_pos = mesh->get_positions();
+        // if (bind_pos.size() > 0 && positions.size() > 0) {
+        //     float diff = bind_pos[0].distance_to(positions[0]);
+        //     UtilityFunctions::print("Skinned pos[0] diff: ", diff);
+        // }
     } else {
         positions = mesh->get_positions();
     }
