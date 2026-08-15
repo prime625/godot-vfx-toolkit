@@ -65,6 +65,11 @@ private:
     std::vector<vfx::HEEdge*> edges;
     std::vector<vfx::HEFace*> faces;
 
+public:
+    const std::vector<vfx::HEVertex*>& get_vertices() const { return vertices; }
+    const std::vector<vfx::HEEdge*>& get_edges() const { return edges; }
+    const std::vector<vfx::HEFace*>& get_faces() const { return faces; }
+
     uint32_t next_vertex_id = 0;
     uint32_t next_edge_id = 0;
     uint32_t next_face_id = 0;
