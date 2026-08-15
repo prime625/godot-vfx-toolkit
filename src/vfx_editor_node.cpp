@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <algorithm>
+#include <vector>
 
 using namespace godot;
 
@@ -172,6 +173,31 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_integer_constant(get_class_static(), "", "GIZMO_TRANSLATE", GIZMO_TRANSLATE);
     ClassDB::bind_integer_constant(get_class_static(), "", "GIZMO_ROTATE", GIZMO_ROTATE);
     ClassDB::bind_integer_constant(get_class_static(), "", "GIZMO_SCALE", GIZMO_SCALE);
+
+    // === EDIT MODE ===
+    ClassDB::bind_method(D_METHOD("set_edit_mode", "mode"), &VFXEditorNode::set_edit_mode);
+    ClassDB::bind_method(D_METHOD("get_edit_mode"), &VFXEditorNode::get_edit_mode);
+    ClassDB::bind_method(D_METHOD("set_show_wireframe", "show"), &VFXEditorNode::set_show_wireframe);
+    ClassDB::bind_method(D_METHOD("get_show_wireframe"), &VFXEditorNode::get_show_wireframe);
+    ClassDB::bind_method(D_METHOD("clear_selection"), &VFXEditorNode::clear_selection);
+    ClassDB::bind_method(D_METHOD("get_selected_face"), &VFXEditorNode::get_selected_face);
+    ClassDB::bind_method(D_METHOD("get_selected_edge"), &VFXEditorNode::get_selected_edge);
+    ClassDB::bind_method(D_METHOD("get_selected_vertex"), &VFXEditorNode::get_selected_vertex);
+    ClassDB::bind_method(D_METHOD("raycast_select", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_select);
+
+    // === MODELING (selection-aware) ===
+    ClassDB::bind_method(D_METHOD("extrude_selection", "distance"), &VFXEditorNode::extrude_selection);
+    ClassDB::bind_method(D_METHOD("inset_selection", "amount"), &VFXEditorNode::inset_selection);
+    ClassDB::bind_method(D_METHOD("delete_selection"), &VFXEditorNode::delete_selection);
+    ClassDB::bind_method(D_METHOD("subdivide_selection"), &VFXEditorNode::subdivide_selection);
+    ClassDB::bind_method(D_METHOD("bevel_selection", "amount"), &VFXEditorNode::bevel_selection);
+    ClassDB::bind_method(D_METHOD("knife_selection", "p0", "p1"), &VFXEditorNode::knife_selection);
+
+    // === ENUMS ===
+    ClassDB::bind_integer_constant(get_class_static(), "", "MODE_OBJECT", MODE_OBJECT);
+    ClassDB::bind_integer_constant(get_class_static(), "", "MODE_VERTEX", MODE_VERTEX);
+    ClassDB::bind_integer_constant(get_class_static(), "", "MODE_EDGE", MODE_EDGE);
+    ClassDB::bind_integer_constant(get_class_static(), "", "MODE_FACE", MODE_FACE);
 }
 
 // ============================================================================
@@ -200,6 +226,7 @@ void VFXEditorNode::_notification(int p_what) {
         _ensure_brush_cursor();
         _ensure_gizmo_node();
         _ensure_skeleton_visual();
+        _ensure_selection_visual(); // NEW
     }
     if (p_what == NOTIFICATION_PROCESS) {
         if (animator.is_valid() && animator->is_clip_playing()) {
@@ -210,6 +237,14 @@ void VFXEditorNode::_notification(int p_what) {
             if (skel_visual) skel_visual->set_visible(true);
         } else if (skel_visual) {
             skel_visual->set_visible(false);
+        }
+
+        // NEW: selection overlay
+        if (mesh.is_valid() && show_wireframe) {
+            _build_selection_mesh();
+            if (selection_visual) selection_visual->set_visible(true);
+        } else if (selection_visual) {
+            selection_visual->set_visible(false);
         }
     }
 }
@@ -321,6 +356,78 @@ void VFXEditorNode::_update_godot_mesh() {
     }
 
     mesh_instance->set_mesh(am);
+}
+
+void VFXEditorNode::_ensure_selection_visual() {
+    if (!selection_visual) {
+        selection_visual = memnew(MeshInstance3D);
+        selection_visual->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+        add_child(selection_visual);
+        selection_visual->set_owner(this);
+    }
+}
+
+void VFXEditorNode::_build_selection_mesh() {
+    if (!selection_visual) _ensure_selection_visual();
+    if (mesh.is_null() || !show_wireframe) {
+        selection_visual->set_mesh(Ref<Mesh>());
+        return;
+    }
+
+    Ref<ArrayMesh> am;
+    am.instantiate();
+
+    PackedVector3Array verts;
+    PackedColorArray cols;
+    PackedInt32Array idx;
+
+    // Wireframe edges
+    for (auto* e : mesh->edges) {
+        if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+        Vector3 a = e->next->vertex->position;
+        Vector3 b = e->vertex->position;
+        bool is_sel = (edit_mode == MODE_EDGE && selected_edge == (int)e->id);
+        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.4f);
+        float r = is_sel ? 0.012f : 0.004f;
+        _append_cylinder(verts, cols, idx, a, b, r, 4, col);
+    }
+
+    // Vertices
+    for (auto* v : mesh->vertices) {
+        if (v->deleted) continue;
+        bool is_sel = (edit_mode == MODE_VERTEX && selected_vertex == (int)v->id);
+        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.7f, 0.7f, 0.7f, 0.8f);
+        float s = is_sel ? 0.035f : 0.018f;
+        _append_box(verts, cols, idx, v->position, s, col);
+    }
+
+    // Face centers
+    for (auto* f : mesh->faces) {
+        if (f->deleted || !f->halfedge) continue;
+        Vector3 c = mesh->get_face_center(f->id);
+        bool is_sel = (edit_mode == MODE_FACE && selected_face == (int)f->id);
+        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.3f, 0.6f, 1.0f, 0.6f);
+        float s = is_sel ? 0.045f : 0.028f;
+        _append_box(verts, cols, idx, c, s, col);
+    }
+
+    if (verts.size() > 0) {
+        Array arrays;
+        arrays.resize(Mesh::ARRAY_MAX);
+        arrays[Mesh::ARRAY_VERTEX] = verts;
+        arrays[Mesh::ARRAY_COLOR] = cols;
+        arrays[Mesh::ARRAY_INDEX] = idx;
+        am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    }
+
+    Ref<StandardMaterial3D> mat;
+    mat.instantiate();
+    mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
+    selection_visual->set_material_override(mat);
+    selection_visual->set_mesh(am);
 }
 
 // ============================================================================
@@ -563,6 +670,28 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
     gizmo_drag_axis = axis;
     gizmo_drag_start_transform = gizmo_transform;
 
+    // NEW: cache mesh element positions for T/R/S
+    mesh_edit_verts.clear();
+    mesh_edit_initial_positions.clear();
+    if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
+        if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+            mesh_edit_verts.push_back(selected_vertex);
+            mesh_edit_initial_positions.push_back(mesh->get_vertex_position(selected_vertex));
+        } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+            int v0, v1;
+            mesh->get_edge_endpoints(selected_edge, v0, v1);
+            if (v0 >= 0) { mesh_edit_verts.push_back(v0); mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v0)); }
+            if (v1 >= 0) { mesh_edit_verts.push_back(v1); mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v1)); }
+        } else if (edit_mode == MODE_FACE && selected_face >= 0) {
+            std::vector<vfx::HEVertex*> verts;
+            mesh->get_face_vertices(selected_face, verts);
+            for (auto* v : verts) {
+                mesh_edit_verts.push_back((int)v->id);
+                mesh_edit_initial_positions.push_back(v->position);
+            }
+        }
+    }
+
     Vector3 origin = gizmo_transform.get_origin();
 
     if (gizmo_mode == GIZMO_TRANSLATE) {
@@ -628,10 +757,10 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
     Vector3 origin = gizmo_transform.get_origin();
 
+    // === EXISTING TRANSLATE / ROTATE / SCALE LOGIC ===
     if (gizmo_mode == GIZMO_TRANSLATE) {
         Vector3 delta = hit - gizmo_drag_start_point;
         Transform3D t = gizmo_drag_start_transform;
-
         if (gizmo_drag_axis <= GIZMO_Z) {
             Vector3 axis = t.basis.get_column(gizmo_drag_axis).normalized();
             float proj = delta.dot(axis);
@@ -640,30 +769,24 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             t.set_origin(t.get_origin() + delta);
         }
         gizmo_transform = t;
-        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     } else if (gizmo_mode == GIZMO_ROTATE) {
         Vector3 v0 = (gizmo_drag_start_point - origin).normalized();
         Vector3 v1 = (hit - origin).normalized();
         if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
-
         float dot = v0.dot(v1);
         dot = vfx::clampf(dot, -1.0f, 1.0f);
         float angle = acosf(dot);
         Vector3 cross = v0.cross(v1);
         if (cross.dot(gizmo_drag_plane.normal) < 0.0f) angle = -angle;
-
         Vector3 axis_local;
         if (gizmo_drag_axis == GIZMO_X) axis_local = Vector3(1,0,0);
         else if (gizmo_drag_axis == GIZMO_Y) axis_local = Vector3(0,1,0);
         else axis_local = Vector3(0,0,1);
-
         Quaternion rot(axis_local, angle);
         Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
         gizmo_transform.set_basis(new_basis);
-        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     } else if (gizmo_mode == GIZMO_SCALE) {
         Vector3 scale = gizmo_drag_start_scale;
-
         if (gizmo_drag_axis <= GIZMO_Z) {
             Vector3 world_axis = gizmo_drag_start_transform.basis.get_column(gizmo_drag_axis).normalized();
             float current_proj = (hit - origin).dot(world_axis);
@@ -682,19 +805,32 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
                 scale = gizmo_drag_start_scale * ratio;
             }
         }
-
         scale.x = vfx::clampf(scale.x, 0.001f, 1000.0f);
         scale.y = vfx::clampf(scale.y, 0.001f, 1000.0f);
         scale.z = vfx::clampf(scale.z, 0.001f, 1000.0f);
-
         Basis b = gizmo_drag_start_transform.basis;
         b.set_column(0, b.get_column(0).normalized() * scale.x);
         b.set_column(1, b.get_column(1).normalized() * scale.y);
         b.set_column(2, b.get_column(2).normalized() * scale.z);
         gizmo_transform.set_basis(b);
-        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
     }
 
+    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+
+    // === NEW: APPLY TO MESH ELEMENTS ===
+    if (edit_mode != MODE_OBJECT && !mesh_edit_verts.empty() && mesh.is_valid()) {
+        Transform3D delta = gizmo_transform * gizmo_drag_start_transform.affine_inverse();
+        for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
+            Vector3 new_pos = delta.xform(mesh_edit_initial_positions[i]);
+            mesh->set_vertex_position(mesh_edit_verts[i], new_pos);
+        }
+        if (auto_update) _update_godot_mesh();
+        _build_selection_mesh();
+        _update_gizmo_for_selection();
+        return;
+    }
+
+    // === EXISTING BONE GIZMO LOGIC ===
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
@@ -961,6 +1097,102 @@ int VFXEditorNode::get_visualize_bone() const { return visualize_bone; }
 void VFXEditorNode::set_auto_update(bool auto_up) { auto_update = auto_up; }
 bool VFXEditorNode::get_auto_update() const { return auto_update; }
 
+void VFXEditorNode::set_edit_mode(int mode) {
+    edit_mode = mode;
+    clear_selection();
+    _build_selection_mesh();
+}
+
+int VFXEditorNode::get_edit_mode() const { return edit_mode; }
+
+void VFXEditorNode::set_show_wireframe(bool show) {
+    show_wireframe = show;
+    if (!show_wireframe && selection_visual) selection_visual->set_visible(false);
+}
+
+bool VFXEditorNode::get_show_wireframe() const { return show_wireframe; }
+
+void VFXEditorNode::clear_selection() {
+    selected_face = -1;
+    selected_edge = -1;
+    selected_vertex = -1;
+    _update_gizmo_for_selection();
+    if (selection_visual) _build_selection_mesh();
+}
+
+int VFXEditorNode::get_selected_face() const { return selected_face; }
+int VFXEditorNode::get_selected_edge() const { return selected_edge; }
+int VFXEditorNode::get_selected_vertex() const { return selected_vertex; }
+
+int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_dir) {
+    if (mesh.is_null()) return -1;
+    Transform3D inv = get_global_transform().affine_inverse();
+    Vector3 ro = inv.xform(ray_origin);
+    Vector3 rd = inv.basis.xform(ray_dir).normalized();
+
+    if (edit_mode == MODE_FACE) {
+        Vector3 hit;
+        int face_idx;
+        if (mesh->raycast_select_face(ro, rd, hit, face_idx)) {
+            selected_face = face_idx;
+            selected_edge = -1;
+            selected_vertex = -1;
+            _build_selection_mesh();
+            _update_gizmo_for_selection();
+            return face_idx;
+        }
+    } else if (edit_mode == MODE_EDGE) {
+        int edge_idx;
+        if (mesh->raycast_select_edge(ro, rd, edge_idx)) {
+            selected_edge = edge_idx;
+            selected_face = -1;
+            selected_vertex = -1;
+            _build_selection_mesh();
+            _update_gizmo_for_selection();
+            return edge_idx;
+        }
+    } else if (edit_mode == MODE_VERTEX) {
+        int vert_idx;
+        if (mesh->raycast_select_vertex(ro, rd, vert_idx)) {
+            selected_vertex = vert_idx;
+            selected_face = -1;
+            selected_edge = -1;
+            _build_selection_mesh();
+            _update_gizmo_for_selection();
+            return vert_idx;
+        }
+    }
+    return -1;
+}
+
+void VFXEditorNode::_update_gizmo_for_selection() {
+    Vector3 center;
+    bool has = false;
+    if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+        center = mesh->get_vertex_position(selected_vertex);
+        has = true;
+    } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+        center = mesh->get_edge_midpoint(selected_edge);
+        has = true;
+    } else if (edit_mode == MODE_FACE && selected_face >= 0) {
+        center = mesh->get_face_center(selected_face);
+        has = true;
+    }
+
+    if (has) {
+        gizmo_transform.set_origin(center);
+        gizmo_transform.basis = Basis();
+        if (gizmo_node) {
+            gizmo_node->set_transform(_get_visual_gizmo_transform());
+            gizmo_node->set_visible(true);
+            _build_gizmo_mesh();
+        }
+    } else {
+        if (gizmo_node) gizmo_node->set_visible(false);
+    }
+    _update_gizmo_visibility();
+}
+
 // ============================================================================
 // BRUSH CURSOR
 // ============================================================================
@@ -1103,6 +1335,86 @@ void VFXEditorNode::mesh_cleanup() {
     if (auto_update) _update_godot_mesh();
 }
 
+// === MODELING (selection-aware) ===
+void VFXEditorNode::extrude_selection(float distance) {
+    if (mesh.is_null()) return;
+    if (edit_mode == MODE_FACE && selected_face >= 0) {
+        mesh->extrude_face(selected_face, distance);
+        selected_face = -1;
+    } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+        mesh->bevel_edge(selected_edge, distance);
+        selected_edge = -1;
+    }
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::inset_selection(float amount) {
+    if (mesh.is_null()) return;
+    if (edit_mode == MODE_FACE && selected_face >= 0) {
+        mesh->inset_face(selected_face, amount);
+        selected_face = -1;
+    }
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::delete_selection() {
+    if (mesh.is_null()) return;
+    if (edit_mode == MODE_FACE && selected_face >= 0) {
+        mesh->delete_face(selected_face);
+        selected_face = -1;
+    } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+        mesh->dissolve_edge(selected_edge);
+        selected_edge = -1;
+    } else if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+        mesh->dissolve_vertex(selected_vertex);
+        selected_vertex = -1;
+    }
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::subdivide_selection() {
+    if (mesh.is_null()) return;
+    if (edit_mode == MODE_FACE && selected_face >= 0) {
+        mesh->subdivide_face(selected_face);
+        selected_face = -1;
+    }
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::bevel_selection(float amount) {
+    if (mesh.is_null()) return;
+    if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+        mesh->bevel_edge(selected_edge, amount);
+        selected_edge = -1;
+    } else if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+        mesh->bevel_vertex(selected_vertex, amount);
+        selected_vertex = -1;
+    }
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::knife_selection(const Vector3& p0, const Vector3& p1) {
+    if (mesh.is_null()) return;
+    if (edit_mode == MODE_FACE && selected_face >= 0) {
+        Transform3D inv = get_global_transform().affine_inverse();
+        mesh->knife_cut_face(selected_face, inv.xform(p0), inv.xform(p1));
+        selected_face = -1;
+    }
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
 // ============================================================================
 // CURVE
 // ============================================================================
@@ -1195,6 +1507,23 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
 // UNIFIED TOUCH API
 // ============================================================================
 int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir) {
+    // === MESH EDIT MODE (priority when active) ===
+    if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
+        // Gizmo takes precedence if active
+        if ((selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
+            int axis = raycast_gizmo(ray_origin, ray_dir);
+            if (axis >= 0) {
+                gizmo_begin_drag(axis, ray_origin, ray_dir);
+                return -2;
+            }
+        }
+        int hit = raycast_select(ray_origin, ray_dir);
+        if (hit >= 0) return hit;
+        clear_selection();
+        return -1;
+    }
+
+    // === SKELETON MODE (existing logic) ===
     if (skeleton.is_valid() && selected_bone >= 0) {
         int axis = raycast_gizmo(ray_origin, ray_dir);
         if (axis >= 0) {
