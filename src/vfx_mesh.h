@@ -160,6 +160,11 @@ public:
     void get_vertex_skinning(int idx, int out_bones[4], float out_weights[4]) const;
     void set_vertex_skinning(int idx, const int bones[4], const float weights[4]);
 
+    // GDScript-friendly wrappers (PackedArray)
+    PackedInt32Array get_vertex_bones(int idx) const;
+    PackedFloat32Array get_vertex_weights(int idx) const;
+    void set_vertex_skinning_arrays(int idx, const PackedInt32Array& bones, const PackedFloat32Array& weights);
+
     // === DATA EXPORT (remaps deleted) ===
     PackedVector3Array get_positions() const;
     PackedVector3Array get_normals() const;
