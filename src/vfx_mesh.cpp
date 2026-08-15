@@ -47,6 +47,9 @@ void VFXMesh::_bind_methods() {
    ClassDB::bind_method(D_METHOD("set_vertex_bones", "vidx", "b0", "b1", "b2", "b3"), &VFXMesh::set_vertex_bones);
    ClassDB::bind_method(D_METHOD("set_vertex_weights", "vidx", "w0", "w1", "w2", "w3"), &VFXMesh::set_vertex_weights);
    ClassDB::bind_method(D_METHOD("normalize_weights", "vidx"), &VFXMesh::normalize_weights);
+   ClassDB::bind_method(D_METHOD("get_vertex_bones", "vidx"), &VFXMesh::get_vertex_bones);
+   ClassDB::bind_method(D_METHOD("get_vertex_weights", "vidx"), &VFXMesh::get_vertex_weights);
+   ClassDB::bind_method(D_METHOD("set_vertex_skinning_arrays", "vidx", "bones", "weights"), &VFXMesh::set_vertex_skinning_arrays);
 
    ClassDB::bind_method(D_METHOD("get_positions"), &VFXMesh::get_positions);
    ClassDB::bind_method(D_METHOD("get_normals"), &VFXMesh::get_normals);
@@ -1219,6 +1222,33 @@ void VFXMesh::set_vertex_skinning(int idx, const int bones[4], const float weigh
        v->bone_indices[i] = bones[i];
        v->bone_weights[i] = weights[i];
    }
+}
+
+PackedInt32Array VFXMesh::get_vertex_bones(int idx) const {
+    PackedInt32Array arr;
+    arr.resize(4);
+    if (idx >= 0 && idx < (int)vertices.size() && !vertices[idx]->deleted) {
+        for (int i = 0; i < 4; i++) arr[i] = vertices[idx]->bone_indices[i];
+    } else {
+        arr[0] = arr[1] = arr[2] = arr[3] = -1;
+    }
+    return arr;
+}
+
+PackedFloat32Array VFXMesh::get_vertex_weights(int idx) const {
+    PackedFloat32Array arr;
+    arr.resize(4);
+    if (idx >= 0 && idx < (int)vertices.size() && !vertices[idx]->deleted) {
+        for (int i = 0; i < 4; i++) arr[i] = vertices[idx]->bone_weights[i];
+    }
+    return arr;
+}
+
+void VFXMesh::set_vertex_skinning_arrays(int idx, const PackedInt32Array& bones, const PackedFloat32Array& weights) {
+    if (idx < 0 || idx >= (int)vertices.size() || vertices[idx]->deleted) return;
+    vfx::HEVertex* v = vertices[idx];
+    for (int i = 0; i < 4 && i < bones.size(); i++) v->bone_indices[i] = bones[i];
+    for (int i = 0; i < 4 && i < weights.size(); i++) v->bone_weights[i] = weights[i];
 }
 
 // ============================================================================
