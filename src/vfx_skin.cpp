@@ -665,6 +665,7 @@ PackedVector3Array VFXSkin::compute_skinned_positions() const {
 
         Vector3 skinned;
         Vector3 pos = mesh->get_vertex_position(vi);
+        float total_w = 0.0f;
 
         for (int j = 0; j < 4; j++) {
             int bidx = bones[j];
@@ -673,8 +674,10 @@ PackedVector3Array VFXSkin::compute_skinned_positions() const {
 
             Transform3D skin_mat = skeleton->get_bone_model_transform(bidx) * skeleton->get_bone_bind_pose(bidx).affine_inverse();
             skinned += skin_mat.xform(pos) * w;
+            total_w += w;
         }
-        result[vi] = skinned;
+        // If no valid weights, keep original position (don't snap to origin)
+        result[vi] = (total_w > 0.0001f) ? skinned : pos;
     }
     return result;
 }
