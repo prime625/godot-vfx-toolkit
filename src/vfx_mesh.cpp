@@ -267,6 +267,58 @@ void VFXMesh::get_vertex_faces(int vidx, std::vector<int>& out_faces) const {
 }
 
 // ============================================================================
+// SELECTION QUERIES
+// ============================================================================
+Vector3 VFXMesh::get_face_center(int face_idx) const {
+    std::vector<vfx::HEVertex*> verts;
+    get_face_vertices(face_idx, verts);
+    Vector3 c;
+    for (auto* v : verts) c += v->position;
+    if (!verts.empty()) c /= (float)verts.size();
+    return c;
+}
+
+Vector3 VFXMesh::get_face_normal(int face_idx) const {
+    if (face_idx < 0 || face_idx >= (int)faces.size() || faces[face_idx]->deleted) return Vector3(0, 1, 0);
+    return faces[face_idx]->normal;
+}
+
+int VFXMesh::get_face_vertex_count(int face_idx) const {
+    std::vector<vfx::HEVertex*> verts;
+    get_face_vertices(face_idx, verts);
+    return (int)verts.size();
+}
+
+void VFXMesh::get_edge_endpoints(int edge_idx, int& out_v0, int& out_v1) const {
+    out_v0 = out_v1 = -1;
+    if (edge_idx < 0 || edge_idx >= (int)edges.size() || edges[edge_idx]->deleted) return;
+    vfx::HEEdge* e = edges[edge_idx];
+    if (!e->vertex) return;
+    out_v1 = (int)e->vertex->id; // head
+    if (e->twin && e->twin->vertex) {
+        out_v0 = (int)e->twin->vertex->id; // tail via twin
+    } else if (e->face && !e->face->deleted) {
+        // boundary edge: walk face to find edge whose next is e
+        vfx::HEEdge* start = e->face->halfedge;
+        vfx::HEEdge* cur = start;
+        do {
+            if (cur->next == e && cur->vertex) {
+                out_v0 = (int)cur->vertex->id;
+                return;
+            }
+            cur = cur->next;
+        } while (cur && cur != start);
+    }
+}
+
+Vector3 VFXMesh::get_edge_midpoint(int edge_idx) const {
+    int v0, v1;
+    get_edge_endpoints(edge_idx, v0, v1);
+    if (v0 < 0) return Vector3();
+    return (vertices[v0]->position + vertices[v1]->position) * 0.5f;
+}
+
+// ============================================================================
 // MODELING OPERATIONS
 // ============================================================================
 void VFXMesh::extrude_face(int face_idx, float distance) {
@@ -508,36 +560,207 @@ void VFXMesh::loop_cut(int face_idx, int va, int vb, float t) {
     link_twins();
 }
 
+
 void VFXMesh::bevel_edge(int edge_idx, float amount) {
     if (edge_idx < 0 || edge_idx >= (int)edges.size() || edges[edge_idx]->deleted) return;
     vfx::HEEdge* e = edges[edge_idx];
     if (!e->vertex || !e->next || !e->next->vertex) return;
-    int v0 = e->next->vertex->id;
-    int v1 = e->vertex->id;
 
-    Vector3 p0 = vertices[v0]->position;
-    Vector3 p1 = vertices[v1]->position;
-    Vector3 dir = (p1 - p0).normalized();
-    Vector3 offset = dir * amount;
+    int va, vb;
+    get_edge_endpoints(edge_idx, va, vb);
+    if (va < 0 || vb < 0) return;
 
-    int nv0 = add_vertex(p0 + offset, vertices[v0]->uv, vertices[v0]->color);
-    int nv1 = add_vertex(p1 - offset, vertices[v1]->uv, vertices[v1]->color);
+    Vector3 pa = vertices[va]->position;
+    Vector3 pb = vertices[vb]->position;
+    Vector3 edir = (pb - pa).normalized();
+
+    // Find faces using this edge and their "other" vertices
+    std::vector<int> face_ids;
+    std::vector<int> other_verts;
+    for (auto* f : faces) {
+        if (f->deleted || !f->halfedge) continue;
+        std::vector<vfx::HEVertex*> fverts;
+        get_face_vertices(f->id, fverts);
+        bool has_a = false, has_b = false;
+        int other = -1;
+        for (auto* v : fverts) {
+            if ((int)v->id == va) has_a = true;
+            else if ((int)v->id == vb) has_b = true;
+            else other = (int)v->id;
+        }
+        if (has_a && has_b) {
+            face_ids.push_back(f->id);
+            other_verts.push_back(other);
+        }
+    }
+    if (face_ids.empty()) return;
+
+    // Compute offset directions at va and vb (into face interiors)
+    Vector3 off_a, off_b;
+    for (size_t i = 0; i < face_ids.size(); i++) {
+        int ov = other_verts[i];
+        if (ov < 0) continue;
+        Vector3 va_to_ov = vertices[ov]->position - pa;
+        Vector3 vb_to_ov = vertices[ov]->position - pb;
+        Vector3 perp_a = va_to_ov - edir * va_to_ov.dot(edir);
+        Vector3 perp_b = vb_to_ov - edir * vb_to_ov.dot(edir);
+        if (perp_a.length_squared() > 0.0001f) off_a += perp_a.normalized();
+        if (perp_b.length_squared() > 0.0001f) off_b += perp_b.normalized();
+    }
+    if (off_a.length_squared() < 0.0001f || off_b.length_squared() < 0.0001f) return;
+    off_a = off_a.normalized() * amount;
+    off_b = off_b.normalized() * amount;
+
+    int nva = add_vertex(pa + off_a, vertices[va]->uv, vertices[va]->color);
+    int nvb = add_vertex(pb + off_b, vertices[vb]->uv, vertices[vb]->color);
+
     int b[4]; float w[4];
-    get_vertex_skinning(v0, b, w); set_vertex_skinning(nv0, b, w);
-    get_vertex_skinning(v1, b, w); set_vertex_skinning(nv1, b, w);
+    get_vertex_skinning(va, b, w); set_vertex_skinning(nva, b, w);
+    get_vertex_skinning(vb, b, w); set_vertex_skinning(nvb, b, w);
 
-    // Replace edge with quad
-    add_quad(v0, v1, nv1, nv0);
+    bool bevel_face_added = false;
+    for (size_t fi = 0; fi < face_ids.size(); fi++) {
+        int fidx = face_ids[fi];
+        std::vector<vfx::HEVertex*> fverts;
+        get_face_vertices(fidx, fverts);
+        int n = (int)fverts.size();
 
-    // Mark old edge's face deleted (naive: we should only replace this edge)
-    // For simplicity, user should dissolve the edge first or this creates overlap
-    // Proper bevel requires more topology work. This is a stub that adds the bevel geometry.
+        // Build new inner polygon by replacing va->nva and vb->nvb
+        std::vector<int> inner_ids;
+        for (auto* v : fverts) {
+            if ((int)v->id == va) inner_ids.push_back(nva);
+            else if ((int)v->id == vb) inner_ids.push_back(nvb);
+            else inner_ids.push_back((int)v->id);
+        }
+
+        delete_face(fidx);
+        for (int i = 1; i + 1 < (int)inner_ids.size(); i++)
+            add_triangle(inner_ids[0], inner_ids[i], inner_ids[i + 1]);
+
+        if (!bevel_face_added) {
+            add_quad(va, vb, nvb, nva);
+            bevel_face_added = true;
+        }
+    }
+
     dirty = true;
     remap_dirty = true;
     recalculate_normals();
     link_twins();
 }
 
+// ============================================================================
+// KNIFE CUT — slice a single face with a line segment (local space)
+// ============================================================================
+void VFXMesh::knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1) {
+    if (face_idx < 0 || face_idx >= (int)faces.size() || faces[face_idx]->deleted) return;
+    std::vector<vfx::HEVertex*> fverts;
+    get_face_vertices(face_idx, fverts);
+    int n = (int)fverts.size();
+    if (n < 3) return;
+
+    // Build orthonormal basis on face plane
+    Vector3 fn = get_face_normal(face_idx);
+    Vector3 up = fabsf(fn.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+    Vector3 right = fn.cross(up).normalized();
+    up = right.cross(fn).normalized();
+
+    auto to_2d = [&](const Vector3& p) -> Vector2 {
+        Vector3 local = p - fverts[0]->position;
+        return Vector2(local.dot(right), local.dot(up));
+    };
+    auto to_3d = [&](const Vector2& p) -> Vector3 {
+        return fverts[0]->position + right * p.x + up * p.y;
+    };
+
+    Vector2 k0 = to_2d(p0);
+    Vector2 k1 = to_2d(p1);
+    Vector2 kdir = k1 - k0;
+    float klen_sq = kdir.length_squared();
+    if (klen_sq < 0.0001f) return;
+
+    std::vector<Vector2> poly2d;
+    for (auto* v : fverts) poly2d.push_back(to_2d(v->position));
+
+    struct CutHit { int edge; Vector2 pt; float kt; };
+    std::vector<CutHit> hits;
+
+    for (int i = 0; i < n; i++) {
+        int j = (i + 1) % n;
+        Vector2 a = poly2d[i];
+        Vector2 b = poly2d[j];
+        Vector2 e = b - a;
+        float denom = kdir.x * e.y - kdir.y * e.x;
+        if (fabsf(denom) < 0.0001f) continue;
+        float t = ((a.x - k0.x) * e.y - (a.y - k0.y) * e.x) / denom;
+        float s = ((a.x - k0.x) * kdir.y - (a.y - k0.y) * kdir.x) / denom;
+        if (t >= -0.001f && t <= 1.001f && s >= -0.001f && s <= 1.001f) {
+            Vector2 pt = k0 + kdir * t;
+            float kt = (pt - k0).dot(kdir) / klen_sq;
+            hits.push_back({i, pt, kt});
+        }
+    }
+    if (hits.size() != 2) return; // only clean bisections supported
+
+    std::sort(hits.begin(), hits.end(), [](const CutHit& a, const CutHit& b) {
+        return a.kt < b.kt;
+    });
+
+    // Create new vertices on the two hit edges
+    int e0 = hits[0].edge;
+    int e1 = hits[1].edge;
+    int v0 = (int)fverts[e0]->id;
+    int v1 = (int)fverts[(e0 + 1) % n]->id;
+    int v2 = (int)fverts[e1]->id;
+    int v3 = (int)fverts[(e1 + 1) % n]->id;
+
+    float t0 = vfx::clampf((hits[0].pt - poly2d[e0]).length() / (poly2d[(e0 + 1) % n] - poly2d[e0]).length(), 0.0f, 1.0f);
+    float t1 = vfx::clampf((hits[1].pt - poly2d[e1]).length() / (poly2d[(e1 + 1) % n] - poly2d[e1]).length(), 0.0f, 1.0f);
+
+    Vector3 pos0 = to_3d(hits[0].pt);
+    Vector3 pos1 = to_3d(hits[1].pt);
+    Vector2 uv0 = vertices[v0]->uv.lerp(vertices[v1]->uv, t0);
+    Vector2 uv1 = vertices[v2]->uv.lerp(vertices[v3]->uv, t1);
+
+    int nv0 = add_vertex(pos0, uv0, vertices[v0]->color);
+    int nv1 = add_vertex(pos1, uv1, vertices[v2]->color);
+
+    int b[4]; float w[4];
+    get_vertex_skinning(v0, b, w); set_vertex_skinning(nv0, b, w);
+    get_vertex_skinning(v2, b, w); set_vertex_skinning(nv1, b, w);
+
+    // Build two new polygons by walking the original ring
+    std::vector<int> ring;
+    for (int i = 0; i < n; i++) ring.push_back((int)fverts[i]->id);
+
+    std::vector<int> face_a, face_b;
+    int idx = (e0 + 1) % n;
+    face_a.push_back(nv0);
+    while (true) {
+        face_a.push_back(ring[idx]);
+        if (idx == e1) break;
+        idx = (idx + 1) % n;
+    }
+    face_a.push_back(nv1);
+
+    idx = (e1 + 1) % n;
+    face_b.push_back(nv1);
+    while (true) {
+        face_b.push_back(ring[idx]);
+        if (idx == e0) break;
+        idx = (idx + 1) % n;
+    }
+    face_b.push_back(nv0);
+
+    delete_face(face_idx);
+    for (int i = 1; i + 1 < (int)face_a.size(); i++) add_triangle(face_a[0], face_a[i], face_a[i + 1]);
+    for (int i = 1; i + 1 < (int)face_b.size(); i++) add_triangle(face_b[0], face_b[i], face_b[i + 1]);
+
+    dirty = true;
+    remap_dirty = true;
+    recalculate_normals();
+    link_twins();
+}
 void VFXMesh::bevel_vertex(int vidx, float amount) {
     if (vidx < 0 || vidx >= (int)vertices.size() || vertices[vidx]->deleted) return;
     std::vector<int> nbrs;
@@ -803,6 +1026,147 @@ bool VFXMesh::raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3
         }
     }
     return hit;
+}
+
+// ============================================================================
+// RAYCAST SELECTION (static helpers)
+// ============================================================================
+static bool _ray_vs_segment_mesh(const Vector3& ro, const Vector3& rd,
+                                 const Vector3& a, const Vector3& b,
+                                 float radius, float& out_t) {
+    Vector3 ab = b - a;
+    Vector3 ao = ro - a;
+    float ab_len_sq = ab.length_squared();
+    if (ab_len_sq < 0.0001f) {
+        float b_ = rd.dot(ao);
+        float c = ao.dot(ao) - radius * radius;
+        float disc = b_ * b_ - c;
+        if (disc < 0.0f) return false;
+        float t = -b_ - sqrtf(disc);
+        if (t < 0.0f) t = -b_ + sqrtf(disc);
+        if (t < 0.0f) return false;
+        out_t = t;
+        return true;
+    }
+    Vector3 u = rd;
+    Vector3 v = ab;
+    Vector3 w0 = ro - a;
+    float uv = u.dot(v);
+    float vv = v.length_squared();
+    float uw0 = u.dot(w0);
+    float vw0 = v.dot(w0);
+    float det = uv * uv - vv;
+    float t, s;
+    if (fabsf(det) < 0.0001f) {
+        s = vfx::clampf(vw0 / vv, 0.0f, 1.0f);
+        Vector3 closest_seg = a + v * s;
+        t = u.dot(closest_seg - ro);
+    } else {
+        t = (uw0 * vv - uv * vw0) / det;
+        s = (uv * uw0 - vw0) / det;
+    }
+    if (s >= 0.0f && s <= 1.0f && t >= 0.0f) {
+        Vector3 closest_seg = a + v * s;
+        Vector3 closest_ray = ro + u * t;
+        if ((closest_seg - closest_ray).length_squared() < radius * radius) {
+            out_t = t;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool VFXMesh::raycast_select_face(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, int& out_face_idx, float max_distance) const {
+    bool hit = false;
+    float closest = max_distance;
+    Vector3 dir = ray_dir.normalized();
+    out_face_idx = -1;
+
+    for (auto* face : faces) {
+        if (face->deleted || !face->halfedge) continue;
+        vfx::HEEdge* start = face->halfedge;
+        vfx::HEEdge* e = start;
+        std::vector<Vector3> fverts;
+        do {
+            if (!e || !e->vertex) break;
+            fverts.push_back(e->vertex->position);
+            e = e->next;
+        } while (e && e != start);
+
+        if (fverts.size() < 3) continue;
+        for (size_t i = 1; i + 1 < fverts.size(); i++) {
+            const Vector3& v0 = fverts[0];
+            const Vector3& v1 = fverts[i];
+            const Vector3& v2 = fverts[i+1];
+
+            Vector3 edge1 = v1 - v0;
+            Vector3 edge2 = v2 - v0;
+            Vector3 h = dir.cross(edge2);
+            float a = edge1.dot(h);
+            if (a > -0.00001f && a < 0.00001f) continue;
+
+            float f = 1.0f / a;
+            Vector3 s = ray_origin - v0;
+            float u = f * s.dot(h);
+            if (u < 0.0f || u > 1.0f) continue;
+
+            Vector3 q = s.cross(edge1);
+            float v = f * dir.dot(q);
+            if (v < 0.0f || u + v > 1.0f) continue;
+
+            float t = f * edge2.dot(q);
+            if (t > 0.00001f && t < closest) {
+                closest = t;
+                out_hit = ray_origin + dir * t;
+                out_face_idx = (int)face->id;
+                hit = true;
+            }
+        }
+    }
+    return hit;
+}
+
+bool VFXMesh::raycast_select_edge(const Vector3& ray_origin, const Vector3& ray_dir, int& out_edge_idx, float max_distance) const {
+    float closest = max_distance;
+    Vector3 rd = ray_dir.normalized();
+    out_edge_idx = -1;
+
+    for (auto* e : edges) {
+        if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+        Vector3 a = e->next->vertex->position;
+        Vector3 b = e->vertex->position;
+        float t;
+        if (_ray_vs_segment_mesh(ray_origin, rd, a, b, 0.04f, t)) {
+            if (t < closest) {
+                closest = t;
+                out_edge_idx = (int)e->id;
+            }
+        }
+    }
+    return out_edge_idx >= 0;
+}
+
+bool VFXMesh::raycast_select_vertex(const Vector3& ray_origin, const Vector3& ray_dir, int& out_vertex_idx, float max_distance) const {
+    float closest = max_distance;
+    Vector3 rd = ray_dir.normalized();
+    out_vertex_idx = -1;
+
+    for (auto* v : vertices) {
+        if (v->deleted) continue;
+        Vector3 oc = ray_origin - v->position;
+        float b_ = rd.dot(oc);
+        float c = oc.dot(oc) - 0.025f * 0.025f;
+        float disc = b_ * b_ - c;
+        if (disc < 0.0f) continue;
+        float t = -b_ - sqrtf(disc);
+        if (t < 0.0f) t = -b_ + sqrtf(disc);
+        if (t < 0.0f) continue;
+        if (t < closest) {
+            closest = t;
+            out_vertex_idx = (int)v->id;
+        }
+    }
+    return out_vertex_idx >= 0;
 }
 
 // ============================================================================
