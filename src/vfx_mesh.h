@@ -73,11 +73,9 @@ private:
     mutable bool dirty = true;
     mutable bool remap_dirty = true;
 
-    // Live remapping (internal id -> export id)
     mutable std::vector<int> vert_remap;
     mutable std::vector<int> face_remap;
 
-    void _update_bounds();
     void _rebuild_remap() const;
     void _clear_mesh();
 
@@ -106,6 +104,18 @@ public:
     Vector2 get_vertex_uv(int idx) const;
     void set_vertex_uv(int idx, const Vector2& uv);
 
+    // === SELECTION QUERIES ===
+    Vector3 get_face_center(int face_idx) const;
+    Vector3 get_face_normal(int face_idx) const;
+    int get_face_vertex_count(int face_idx) const;
+    void get_edge_endpoints(int edge_idx, int& out_v0, int& out_v1) const;
+    Vector3 get_edge_midpoint(int edge_idx) const;
+
+    // === RAYCAST SELECTION ===
+    bool raycast_select_face(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, int& out_face_idx, float max_distance = 1e20f) const;
+    bool raycast_select_edge(const Vector3& ray_origin, const Vector3& ray_dir, int& out_edge_idx, float max_distance = 1e20f) const;
+    bool raycast_select_vertex(const Vector3& ray_origin, const Vector3& ray_dir, int& out_vertex_idx, float max_distance = 1e20f) const;
+
     // === MODELING ===
     void extrude_face(int face_idx, float distance);
     void inset_face(int face_idx, float amount);
@@ -122,7 +132,10 @@ public:
     void flip_face_normals(int face_idx);
     void flip_all_normals();
     void recalculate_normals();
-    void cleanup(); // remove deleted elements and compact IDs
+    void cleanup();
+
+    // === KNIFE ===
+    void knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1);
 
     // === TOPOLOGY ===
     void link_twins();
