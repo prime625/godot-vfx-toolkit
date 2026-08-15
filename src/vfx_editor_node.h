@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/immediate_mesh.hpp>
 #include <godot_cpp/classes/sphere_mesh.hpp>
 #include <godot_cpp/variant/variant.hpp>
+#include <vector>
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
 #include "vfx_skin.h"
@@ -36,6 +37,13 @@ public:
         GIZMO_XYZ
     };
 
+    enum EditMode {
+        MODE_OBJECT = 0,
+        MODE_VERTEX = 1,
+        MODE_EDGE = 2,
+        MODE_FACE = 3
+    };
+
 private:
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
@@ -53,6 +61,22 @@ private:
     bool show_weights = false;
     int visualize_bone = 0;
     bool auto_update = true;
+
+    // === EDIT MODE & SELECTION ===
+    int edit_mode = MODE_OBJECT;
+    int selected_face = -1;
+    int selected_edge = -1;
+    int selected_vertex = -1;
+    bool show_wireframe = true;
+    MeshInstance3D* selection_visual = nullptr;
+
+    void _ensure_selection_visual();
+    void _build_selection_mesh();
+    void _update_gizmo_for_selection();
+
+    // Mesh gizmo drag state
+    std::vector<int> mesh_edit_verts;
+    std::vector<Vector3> mesh_edit_initial_positions;
 
     // === GIZMO STATE ===
     int gizmo_mode = GIZMO_TRANSLATE;
@@ -136,13 +160,32 @@ public:
     void create_demo_cube();
     void create_demo_character();
 
-    // === MODELING ===
+    // === EDIT MODE ===
+    void set_edit_mode(int mode);
+    int get_edit_mode() const;
+    void set_show_wireframe(bool show);
+    bool get_show_wireframe() const;
+    void clear_selection();
+    int get_selected_face() const;
+    int get_selected_edge() const;
+    int get_selected_vertex() const;
+    int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
+
+    // === MODELING (legacy face-0) ===
     void extrude_selected_face(float distance);
     void inset_selected_face(float amount);
     void delete_selected_face();
     void subdivide_selected_face();
     void flip_normals();
     void mesh_cleanup();
+
+    // === MODELING (selection-aware) ===
+    void extrude_selection(float distance);
+    void inset_selection(float amount);
+    void delete_selection();
+    void subdivide_selection();
+    void bevel_selection(float amount);
+    void knife_selection(const Vector3& p0, const Vector3& p1);
 
     // === CURVE ===
     void create_curve_tube(const PackedVector3Array& points, float radius, int segments, int rings);
@@ -172,5 +215,6 @@ public:
 
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
+VARIANT_ENUM_CAST(VFXEditorNode::EditMode);
 
 #endif
