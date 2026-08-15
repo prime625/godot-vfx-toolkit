@@ -382,7 +382,7 @@ void VFXEditorNode::_build_selection_mesh() {
     PackedInt32Array idx;
 
     // Wireframe edges
-    for (auto* e : mesh->edges) {
+    for (auto* e : mesh->get_edges()) {
         if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
         Vector3 a = e->next->vertex->position;
         Vector3 b = e->vertex->position;
@@ -393,7 +393,7 @@ void VFXEditorNode::_build_selection_mesh() {
     }
 
     // Vertices
-    for (auto* v : mesh->vertices) {
+    for (auto* v : mesh->get_vertices()) {
         if (v->deleted) continue;
         bool is_sel = (edit_mode == MODE_VERTEX && selected_vertex == (int)v->id);
         Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.7f, 0.7f, 0.7f, 0.8f);
@@ -402,7 +402,7 @@ void VFXEditorNode::_build_selection_mesh() {
     }
 
     // Face centers
-    for (auto* f : mesh->faces) {
+    for (auto* f : mesh->get_faces()) {
         if (f->deleted || !f->halfedge) continue;
         Vector3 c = mesh->get_face_center(f->id);
         bool is_sel = (edit_mode == MODE_FACE && selected_face == (int)f->id);
