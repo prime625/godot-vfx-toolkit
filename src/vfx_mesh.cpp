@@ -1712,3 +1712,280 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
     m->link_twins();
     return m;
 }
+
+// ============================================================================
+// TOPOLOGY EDITING (for retopology)
+// ============================================================================
+
+bool VFXMesh::get_edge_vertices(int edge_id, int& out_v0, int& out_v1) const {
+    if (edge_id < 0 || edge_id >= (int)edges.size()) return false;
+    vfx::HEEdge* e = edges[edge_id];
+    if (!e || !e->vertex) return false;
+
+    out_v1 = e->vertex->id;  // head
+
+    // Find tail by walking the face
+    if (e->face && e->face->halfedge) {
+        vfx::HEEdge* start = e->face->halfedge;
+        vfx::HEEdge* cur = start;
+        do {
+            if (cur->next == e) {
+                out_v0 = cur->vertex->id;
+                return true;
+            }
+            cur = cur->next;
+        } while (cur && cur != start);
+    }
+    return false;
+}
+
+int VFXMesh::get_edge_faces(int edge_id, int out_faces[2]) const {
+    if (edge_id < 0 || edge_id >= (int)edges.size()) return 0;
+    vfx::HEEdge* e = edges[edge_id];
+    if (!e) return 0;
+
+    int count = 0;
+    if (e->face) out_faces[count++] = e->face->id;
+    if (e->twin && e->twin->face) out_faces[count++] = e->twin->face->id;
+    return count;
+}
+
+bool VFXMesh::is_edge_boundary(int edge_id) const {
+    if (edge_id < 0 || edge_id >= (int)edges.size()) return true;
+    vfx::HEEdge* e = edges[edge_id];
+    return !e || !e->twin || e->is_boundary;
+}
+
+// === COMPACT: Remove deleted elements and rebuild clean arrays ===
+static void _compact_mesh(VFXMesh* mesh) {
+    // This is a heavy operation - use sparingly (e.g., after a batch of collapses)
+    // For now, we implement a simpler "rebuild from triangles" approach
+}
+
+// === COLLAPSE EDGE ===
+// Merges the two vertices of an edge, removes the two adjacent faces.
+// keep_vertex: which vertex to keep (must be one of the edge endpoints)
+bool VFXMesh::collapse_edge(int edge_id, int keep_vertex) {
+    if (edge_id < 0 || edge_id >= (int)edges.size()) return false;
+    vfx::HEEdge* e = edges[edge_id];
+    if (!e || e->is_boundary) return false;
+
+    vfx::HEEdge* twin = e->twin;
+
+    // Identify edge endpoints
+    int v_head = e->vertex->id;
+    int v_tail = -1;
+
+    // Walk face to find tail (the vertex whose next->next points to e)
+    if (e->face && e->face->halfedge) {
+        vfx::HEEdge* start = e->face->halfedge;
+        vfx::HEEdge* cur = start;
+        do {
+            if (cur->next == e) {
+                v_tail = cur->vertex->id;
+                break;
+            }
+            cur = cur->next;
+        } while (cur && cur != start);
+    }
+
+    if (v_tail < 0) return false;
+
+    int v_remove = (keep_vertex == v_head) ? v_tail :
+                   (keep_vertex == v_tail) ? v_head : -1;
+    if (v_remove < 0) return false;
+
+    // Don't collapse if it would create a non-manifold condition
+    // Simple check: don't collapse boundary edges unless explicitly allowed
+    if (!twin) return false;
+
+    // Get adjacent faces
+    vfx::HEFace* f1 = e->face;
+    vfx::HEFace* f2 = twin->face;
+
+    // Collect edges in f1 (excluding e)
+    std::vector<vfx::HEEdge*> f1_edges;
+    if (f1) {
+        vfx::HEEdge* start = f1->halfedge;
+        vfx::HEEdge* cur = start;
+        do {
+            if (cur != e) f1_edges.push_back(cur);
+            cur = cur->next;
+        } while (cur && cur != start);
+    }
+
+    // Collect edges in f2 (excluding twin)
+    std::vector<vfx::HEEdge*> f2_edges;
+    if (f2) {
+        vfx::HEEdge* start = f2->halfedge;
+        vfx::HEEdge* cur = start;
+        do {
+            if (cur != twin) f2_edges.push_back(cur);
+            cur = cur->next;
+        } while (cur && cur != start);
+    }
+
+    // Redirect all edges pointing to v_remove to v_keep
+    for (auto* edge : edges) {
+        if (edge && edge->vertex && edge->vertex->id == v_remove) {
+            edge->vertex = vertices[keep_vertex];
+        }
+    }
+
+    // Mark removed elements
+    e->is_boundary = true;
+    e->face = nullptr;
+    e->next = nullptr;
+    if (twin) {
+        twin->is_boundary = true;
+        twin->face = nullptr;
+        twin->next = nullptr;
+    }
+    if (f1) f1->halfedge = nullptr;
+    if (f2) f2->halfedge = nullptr;
+    vertices[v_remove]->halfedge = nullptr;
+
+    // Move keep_vertex to midpoint for shape preservation
+    vertices[keep_vertex]->position = (vertices[keep_vertex]->position + vertices[v_remove]->position) * 0.5f;
+
+    dirty = true;
+    return true;
+}
+
+// === FLIP EDGE ===
+// Robust approach: extract two triangles, delete them, add flipped triangles, rebuild twins
+bool VFXMesh::flip_edge(int edge_id) {
+    if (edge_id < 0 || edge_id >= (int)edges.size()) return false;
+    vfx::HEEdge* e = edges[edge_id];
+    if (!e || !e->twin || !e->face || !e->twin->face) return false;
+
+    // Extract the four vertices of the two triangles
+    // f1 edges: e, e1, e2
+    vfx::HEEdge* e1 = e->next;
+    vfx::HEEdge* e2 = e1->next;
+    if (e2->next != e) return false;  // Not a triangle
+
+    int v0 = e2->vertex->id;   // tail of e
+    int v1 = e->vertex->id;    // head of e
+    int v2 = e1->vertex->id;   // opposite in f1
+
+    // f2 edges: twin, t1, t2
+    vfx::HEEdge* twin = e->twin;
+    vfx::HEEdge* t1 = twin->next;
+    vfx::HEEdge* t2 = t1->next;
+    if (t2->next != twin) return false;  // Not a triangle
+
+    int v3 = t1->vertex->id;   // opposite in f2
+
+    // Verify it's actually a quad (v2 and v3 should be different)
+    if (v2 == v3) return false;
+
+    // Check if flip would create degenerate or inverted faces
+    Vector3 p0 = vertices[v0]->position;
+    Vector3 p1 = vertices[v1]->position;
+    Vector3 p2 = vertices[v2]->position;
+    Vector3 p3 = vertices[v3]->position;
+
+    Vector3 n1_new = (p2 - p0).cross(p3 - p0);
+    Vector3 n2_new = (p3 - p1).cross(p2 - p1);
+    if (n1_new.dot(n2_new) > 0.0f) {
+        // Flipped normals - don't do it
+        return false;
+    }
+
+    // Mark old faces and edges as deleted
+    e->face->halfedge = nullptr;
+    twin->face->halfedge = nullptr;
+    e->is_boundary = true; e->face = nullptr; e->next = nullptr;
+    twin->is_boundary = true; twin->face = nullptr; twin->next = nullptr;
+    e1->is_boundary = true; e1->face = nullptr; e1->next = nullptr;
+    e2->is_boundary = true; e2->face = nullptr; e2->next = nullptr;
+    t1->is_boundary = true; t1->face = nullptr; t1->next = nullptr;
+    t2->is_boundary = true; t2->face = nullptr; t2->next = nullptr;
+
+    // Add new faces with flipped diagonal
+    add_triangle(v0, v2, v3);
+    add_triangle(v1, v3, v2);
+
+    // Rebuild twin relationships
+    link_twins();
+
+    dirty = true;
+    return true;
+}
+
+// === SPLIT EDGE ===
+// Insert vertex at midpoint, subdividing two adjacent triangles into four
+int VFXMesh::split_edge(int edge_id) {
+    if (edge_id < 0 || edge_id >= (int)edges.size()) return false;
+    vfx::HEEdge* e = edges[edge_id];
+    if (!e || !e->face) return -1;
+
+    // Get edge endpoints
+    int v0, v1;
+    if (!get_edge_vertices(edge_id, v0, v1)) return -1;
+
+    Vector3 mid = (vertices[v0]->position + vertices[v1]->position) * 0.5f;
+    Vector2 uv_mid = (vertices[v0]->uv + vertices[v1]->uv) * 0.5f;
+
+    int vmid = add_vertex(mid, uv_mid);
+
+    vfx::HEEdge* twin = e->twin;
+    vfx::HEFace* f1 = e->face;
+    vfx::HEFace* f2 = twin ? twin->face : nullptr;
+
+    // Get opposite vertices
+    int v2 = -1, v3 = -1;
+    if (f1) {
+        vfx::HEEdge* e1 = e->next;
+        vfx::HEEdge* e2 = e1->next;
+        v2 = e1->vertex->id;
+
+        // Mark old face/edges deleted
+        f1->halfedge = nullptr;
+        e->is_boundary = true; e->face = nullptr; e->next = nullptr;
+        e1->is_boundary = true; e1->face = nullptr; e1->next = nullptr;
+        e2->is_boundary = true; e2->face = nullptr; e2->next = nullptr;
+
+        // Add two new faces: (v0, vmid, v2) and (vmid, v1, v2)
+        add_triangle(v0, vmid, v2);
+        add_triangle(vmid, v1, v2);
+    }
+
+    if (f2 && twin) {
+        vfx::HEEdge* t1 = twin->next;
+        vfx::HEEdge* t2 = t1->next;
+        v3 = t1->vertex->id;
+
+        f2->halfedge = nullptr;
+        twin->is_boundary = true; twin->face = nullptr; twin->next = nullptr;
+        t1->is_boundary = true; t1->face = nullptr; t1->next = nullptr;
+        t2->is_boundary = true; t2->face = nullptr; t2->next = nullptr;
+
+        add_triangle(v1, vmid, v3);
+        add_triangle(vmid, v0, v3);
+    }
+
+    link_twins();
+    dirty = true;
+    return vmid;
+}
+
+void VFXMesh::remove_face(int face_id) {
+    if (face_id < 0 || face_id >= (int)faces.size()) return;
+    vfx::HEFace* f = faces[face_id];
+    if (!f || !f->halfedge) return;
+
+    vfx::HEEdge* start = f->halfedge;
+    vfx::HEEdge* cur = start;
+    do {
+        vfx::HEEdge* next = cur->next;
+        cur->is_boundary = true;
+        cur->face = nullptr;
+        cur->next = nullptr;
+        cur = next;
+    } while (cur && cur != start);
+
+    f->halfedge = nullptr;
+    dirty = true;
+}
