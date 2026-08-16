@@ -13,6 +13,7 @@
 #include "vfx_skin.h"
 #include "vfx_animator.h"
 #include "vfx_curve.h"
+#include "vfx_texture_painter.h"
 
 using namespace godot;
 
@@ -50,6 +51,7 @@ private:
     Ref<VFXSkin> skin;
     Ref<VFXAnimator> animator;
     Ref<VFXCurve> active_curve;
+    Ref<VFXTexturePainter> painter;
 
     MeshInstance3D* mesh_instance = nullptr;
     MeshInstance3D* brush_cursor = nullptr;
@@ -193,6 +195,11 @@ public:
     void set_active_curve(const Ref<VFXCurve>& curve);
     Ref<VFXCurve> get_active_curve() const;
     void curve_to_mesh(float radius, int segments, int rings);
+
+    // === TEXTURE PAINTER ===
+    void set_texture_painter(const Ref<VFXTexturePainter>& p_painter);
+    Ref<VFXTexturePainter> get_texture_painter() const;
+    void paint_at(const Vector3& ray_origin, const Vector3& ray_dir);
 
     void set_gizmo_mode(int mode);
     int get_gizmo_mode() const;
