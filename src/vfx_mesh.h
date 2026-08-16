@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -57,6 +58,12 @@ struct HEFace {
 
 } // namespace vfx
 
+// Per-face-corner UV layer (supports seams)
+struct VFXUVLayer {
+    std::vector<Vector2> coords;
+    std::vector<std::vector<int>> face_corners;
+};
+
 class VFXMesh : public RefCounted {
     GDCLASS(VFXMesh, RefCounted)
 
@@ -80,6 +87,8 @@ public:
 
     mutable std::vector<int> vert_remap;
     mutable std::vector<int> face_remap;
+
+    std::vector<VFXUVLayer> uv_layers;
 
     void _rebuild_remap() const;
     void _clear_mesh();
@@ -108,6 +117,18 @@ public:
     void set_vertex_normal(int idx, const Vector3& n);
     Vector2 get_vertex_uv(int idx) const;
     void set_vertex_uv(int idx, const Vector2& uv);
+
+    // === UV LAYER API ===
+    int add_uv_layer();
+    void remove_uv_layer(int idx);
+    int get_uv_layer_count() const;
+    void clear_uv_layers();
+    void set_face_uv(int layer, int face_idx, int corner, const Vector2& uv);
+    Vector2 get_face_uv(int layer, int face_idx, int corner) const;
+    PackedVector2Array get_face_uvs(int layer, int face_idx) const;
+    void set_face_uvs(int layer, int face_idx, const PackedVector2Array& uvs);
+    void sync_uv_layers();
+    PackedVector2Array get_uvs_from_layer(int layer) const;
 
     // === SELECTION QUERIES ===
     Vector3 get_face_center(int face_idx) const;
@@ -160,7 +181,6 @@ public:
     void get_vertex_skinning(int idx, int out_bones[4], float out_weights[4]) const;
     void set_vertex_skinning(int idx, const int bones[4], const float weights[4]);
 
-    // GDScript-friendly wrappers (PackedArray)
     PackedInt32Array get_vertex_bones(int idx) const;
     PackedFloat32Array get_vertex_weights(int idx) const;
     void set_vertex_skinning_arrays(int idx, const PackedInt32Array& bones, const PackedFloat32Array& weights);
