@@ -9,6 +9,7 @@
 #include "vfx_curve.h"
 #include "vfx_uv_editor.h"
 #include "vfx_retopology.h"
+#include "vfx_texture_painter.h"
 
 void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -21,6 +22,7 @@ void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
         ClassDB::register_class<VFXCurve>();
         ClassDB::register_class<VFXUVEditor>();
         ClassDB::register_class<VFXRetopology>();
+        ClassDB::register_class<VFXTexturePainter>();
     }
 }
 
