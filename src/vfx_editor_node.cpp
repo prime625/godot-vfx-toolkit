@@ -1,5 +1,6 @@
 #include "vfx_editor_node.h"
 #include "vfx_gltf_exporter.h"
+#include "vfx_texture_painter.h"
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/immediate_mesh.hpp>
@@ -198,6 +199,11 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_VERTEX", MODE_VERTEX);
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_EDGE", MODE_EDGE);
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_FACE", MODE_FACE);
+
+    // === TEXTURE PAINTER ===
+    ClassDB::bind_method(D_METHOD("set_texture_painter", "p"), &VFXEditorNode::set_texture_painter);
+    ClassDB::bind_method(D_METHOD("get_texture_painter"), &VFXEditorNode::get_texture_painter);
+    ClassDB::bind_method(D_METHOD("paint_at", "ray_origin", "ray_dir"), &VFXEditorNode::paint_at);
 }
 
 // ============================================================================
@@ -1063,6 +1069,7 @@ bool VFXEditorNode::_ray_vs_plane(const Vector3& ro, const Vector3& rd,
 void VFXEditorNode::set_vfx_mesh(const Ref<VFXMesh>& p_mesh) {
     mesh = p_mesh;
     if (skin.is_valid()) skin->set_mesh(mesh);
+    if (painter.is_valid()) painter->set_mesh(mesh);
     if (auto_update) _update_godot_mesh();
 }
 
@@ -1594,3 +1601,24 @@ void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_
         gizmo_drag(ray_origin, ray_dir);
     }
 }
+
+// ============================================================================
+// TEXTURE PAINTER
+// ============================================================================
+void VFXEditorNode::set_texture_painter(const Ref<VFXTexturePainter>& p_painter) {
+    painter = p_painter;
+    if (painter.is_valid() && mesh.is_valid()) {
+        painter->set_mesh(mesh);
+    }
+}
+
+Ref<VFXTexturePainter> VFXEditorNode::get_texture_painter() const {
+    return painter;
+}
+
+void VFXEditorNode::paint_at(const Vector3& ray_origin, const Vector3& ray_dir) {
+    if (painter.is_valid()) {
+        painter->paint_at(ray_origin, ray_dir);
+    }
+}
+
