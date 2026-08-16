@@ -149,7 +149,7 @@ public:
     void dissolve_face(int face_idx);
     void merge_vertices(int v0, int v1);
     void subdivide_face(int face_idx);
-    void loop_cut(int face_idx, int v0, int v1, float t);
+    void loop_cut(int face_idx, int va, int vb, float t);
     void bevel_edge(int edge_idx, float amount);
     void bevel_vertex(int vidx, float amount);
     void dissolve_edge(int edge_idx);
@@ -162,6 +162,15 @@ public:
 
     // === KNIFE ===
     void knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1);
+
+    // === TOPOLOGY EDITING (for retopology) ===
+    bool collapse_edge(int edge_id, int keep_vertex);
+    bool flip_edge(int edge_id);
+    int split_edge(int edge_id);
+    bool get_edge_vertices(int edge_id, int& out_v0, int& out_v1) const;
+    int get_edge_faces(int edge_id, int out_faces[2]) const;
+    bool is_edge_boundary(int edge_id) const;
+    void remove_face(int face_id);
 
     // === TOPOLOGY ===
     void link_twins();
