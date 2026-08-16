@@ -28,6 +28,18 @@ void VFXMesh::_bind_methods() {
    ClassDB::bind_method(D_METHOD("get_vertex_uv", "idx"), &VFXMesh::get_vertex_uv);
    ClassDB::bind_method(D_METHOD("set_vertex_uv", "idx", "uv"), &VFXMesh::set_vertex_uv);
 
+   // === UV LAYER API ===
+   ClassDB::bind_method(D_METHOD("add_uv_layer"), &VFXMesh::add_uv_layer);
+   ClassDB::bind_method(D_METHOD("remove_uv_layer", "idx"), &VFXMesh::remove_uv_layer);
+   ClassDB::bind_method(D_METHOD("get_uv_layer_count"), &VFXMesh::get_uv_layer_count);
+   ClassDB::bind_method(D_METHOD("clear_uv_layers"), &VFXMesh::clear_uv_layers);
+   ClassDB::bind_method(D_METHOD("set_face_uv", "layer", "face_idx", "corner", "uv"), &VFXMesh::set_face_uv);
+   ClassDB::bind_method(D_METHOD("get_face_uv", "layer", "face_idx", "corner"), &VFXMesh::get_face_uv);
+   ClassDB::bind_method(D_METHOD("get_face_uvs", "layer", "face_idx"), &VFXMesh::get_face_uvs);
+   ClassDB::bind_method(D_METHOD("set_face_uvs", "layer", "face_idx", "uvs"), &VFXMesh::set_face_uvs);
+   ClassDB::bind_method(D_METHOD("sync_uv_layers"), &VFXMesh::sync_uv_layers);
+   ClassDB::bind_method(D_METHOD("get_uvs_from_layer", "layer"), &VFXMesh::get_uvs_from_layer);
+
    ClassDB::bind_method(D_METHOD("extrude_face", "face_idx", "distance"), &VFXMesh::extrude_face);
    ClassDB::bind_method(D_METHOD("inset_face", "face_idx", "amount"), &VFXMesh::inset_face);
    ClassDB::bind_method(D_METHOD("delete_face", "face_idx"), &VFXMesh::delete_face);
@@ -67,9 +79,6 @@ void VFXMesh::_bind_methods() {
 
    ClassDB::bind_method(D_METHOD("serialize"), &VFXMesh::serialize);
    ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXMesh::deserialize);
-
-   // create_from_curve is a static C++ helper, not bound to GDScript.
-   // Use VFXCurve.to_tube_mesh() or VFXEditorNode.create_curve_tube() from GDScript.
 }
 
 VFXMesh::VFXMesh() {}
@@ -91,6 +100,7 @@ void VFXMesh::_clear_mesh() {
    remap_dirty = true;
    vert_remap.clear();
    face_remap.clear();
+   uv_layers.clear();
 }
 
 void VFXMesh::clear() {
@@ -139,6 +149,7 @@ void VFXMesh::add_triangle(int v0, int v1, int v2) {
 
    dirty = true;
    remap_dirty = true;
+   sync_uv_layers();
 }
 
 void VFXMesh::add_quad(int v0, int v1, int v2, int v3) {
@@ -190,6 +201,144 @@ Vector2 VFXMesh::get_vertex_uv(int idx) const {
 
 void VFXMesh::set_vertex_uv(int idx, const Vector2& uv) {
    if (idx >= 0 && idx < (int)vertices.size()) vertices[idx]->uv = uv;
+}
+
+// ============================================================================
+// UV LAYERS
+// ============================================================================
+int VFXMesh::add_uv_layer() {
+    VFXUVLayer layer;
+    layer.face_corners.resize(next_face_id);
+    uv_layers.push_back(layer);
+    sync_uv_layers();
+    return uv_layers.size() - 1;
+}
+
+void VFXMesh::remove_uv_layer(int idx) {
+    if (idx >= 0 && idx < (int)uv_layers.size()) {
+        uv_layers.erase(uv_layers.begin() + idx);
+    }
+}
+
+int VFXMesh::get_uv_layer_count() const {
+    return uv_layers.size();
+}
+
+void VFXMesh::clear_uv_layers() {
+    uv_layers.clear();
+}
+
+void VFXMesh::sync_uv_layers() {
+    for (auto& layer : uv_layers) {
+        if (layer.face_corners.size() < next_face_id) {
+            layer.face_corners.resize(next_face_id);
+        }
+        for (auto* face : faces) {
+            if (face->deleted || !face->halfedge) continue;
+            if (face->id >= layer.face_corners.size()) continue;
+            auto& corners = layer.face_corners[face->id];
+            int n = get_face_vertex_count((int)face->id);
+            if ((int)corners.size() != n) {
+                corners.resize(n);
+                std::vector<vfx::HEVertex*> fverts;
+                get_face_vertices((int)face->id, fverts);
+                for (int i = 0; i < n; i++) {
+                    int coord_idx = layer.coords.size();
+                    corners[i] = coord_idx;
+                    layer.coords.push_back(fverts[i]->uv);
+                }
+            }
+        }
+    }
+}
+
+void VFXMesh::set_face_uv(int layer, int face_idx, int corner, const Vector2& uv) {
+    if (layer < 0 || layer >= (int)uv_layers.size()) return;
+    if (face_idx < 0 || face_idx >= (int)uv_layers[layer].face_corners.size()) return;
+    auto& corners = uv_layers[layer].face_corners[face_idx];
+    if (corner < 0 || corner >= (int)corners.size()) return;
+    int coord_idx = corners[corner];
+    if (coord_idx >= 0 && coord_idx < (int)uv_layers[layer].coords.size()) {
+        uv_layers[layer].coords[coord_idx] = uv;
+    }
+}
+
+Vector2 VFXMesh::get_face_uv(int layer, int face_idx, int corner) const {
+    if (layer < 0 || layer >= (int)uv_layers.size()) return Vector2();
+    if (face_idx < 0 || face_idx >= (int)uv_layers[layer].face_corners.size()) return Vector2();
+    const auto& corners = uv_layers[layer].face_corners[face_idx];
+    if (corner < 0 || corner >= (int)corners.size()) return Vector2();
+    int coord_idx = corners[corner];
+    if (coord_idx >= 0 && coord_idx < (int)uv_layers[layer].coords.size()) {
+        return uv_layers[layer].coords[coord_idx];
+    }
+    return Vector2();
+}
+
+PackedVector2Array VFXMesh::get_face_uvs(int layer, int face_idx) const {
+    PackedVector2Array result;
+    if (layer < 0 || layer >= (int)uv_layers.size()) return result;
+    if (face_idx < 0 || face_idx >= (int)uv_layers[layer].face_corners.size()) return result;
+    const auto& corners = uv_layers[layer].face_corners[face_idx];
+    for (int idx : corners) {
+        if (idx >= 0 && idx < (int)uv_layers[layer].coords.size()) {
+            result.push_back(uv_layers[layer].coords[idx]);
+        } else {
+            result.push_back(Vector2());
+        }
+    }
+    return result;
+}
+
+void VFXMesh::set_face_uvs(int layer, int face_idx, const PackedVector2Array& uvs) {
+    if (layer < 0 || layer >= (int)uv_layers.size()) return;
+    if (face_idx < 0 || face_idx >= (int)uv_layers[layer].face_corners.size()) return;
+    auto& corners = uv_layers[layer].face_corners[face_idx];
+    int n = MIN(corners.size(), (size_t)uvs.size());
+    for (int i = 0; i < n; i++) {
+        int coord_idx = corners[i];
+        if (coord_idx >= 0 && coord_idx < (int)uv_layers[layer].coords.size()) {
+            uv_layers[layer].coords[coord_idx] = uvs[i];
+        }
+    }
+}
+
+PackedVector2Array VFXMesh::get_uvs_from_layer(int layer) const {
+    if (layer < 0 || layer >= (int)uv_layers.size()) return get_uvs();
+    if (remap_dirty) _rebuild_remap();
+
+    int live = 0;
+    for (int i = 0; i < (int)vertices.size(); i++) if (vert_remap[i] >= 0) live++;
+    PackedVector2Array arr;
+    arr.resize(live);
+    std::vector<int> counts;
+    counts.resize(live, 0);
+
+    for (auto* face : faces) {
+        if (face->deleted || !face->halfedge) continue;
+        if (face->id >= uv_layers[layer].face_corners.size()) continue;
+        const auto& corners = uv_layers[layer].face_corners[face->id];
+        vfx::HEEdge* e = face->halfedge;
+        int c = 0;
+        do {
+            if (!e || !e->vertex) break;
+            int rv = vert_remap[e->vertex->id];
+            if (rv >= 0 && c < (int)corners.size()) {
+                int ci = corners[c];
+                if (ci >= 0 && ci < (int)uv_layers[layer].coords.size()) {
+                    arr[rv] += uv_layers[layer].coords[ci];
+                    counts[rv]++;
+                }
+            }
+            e = e->next;
+            c++;
+        } while (e && e != face->halfedge);
+    }
+
+    for (int i = 0; i < live; i++) {
+        if (counts[i] > 0) arr[i] /= counts[i];
+    }
+    return arr;
 }
 
 // ============================================================================
@@ -297,11 +446,10 @@ void VFXMesh::get_edge_endpoints(int edge_idx, int& out_v0, int& out_v1) const {
     if (edge_idx < 0 || edge_idx >= (int)edges.size() || edges[edge_idx]->deleted) return;
     vfx::HEEdge* e = edges[edge_idx];
     if (!e->vertex) return;
-    out_v1 = (int)e->vertex->id; // head
+    out_v1 = (int)e->vertex->id;
     if (e->twin && e->twin->vertex) {
-        out_v0 = (int)e->twin->vertex->id; // tail via twin
+        out_v0 = (int)e->twin->vertex->id;
     } else if (e->face && !e->face->deleted) {
-        // boundary edge: walk face to find edge whose next is e
         vfx::HEEdge* start = e->face->halfedge;
         vfx::HEEdge* cur = start;
         do {
@@ -331,7 +479,6 @@ void VFXMesh::extrude_face(int face_idx, float distance) {
     int n = verts.size();
     if (n < 3) return;
 
-    // Compute face normal
     Vector3 normal = faces[face_idx]->normal;
     if (normal.length_squared() < 0.0001f) {
         Vector3 e1 = verts[1]->position - verts[0]->position;
@@ -339,7 +486,6 @@ void VFXMesh::extrude_face(int face_idx, float distance) {
         normal = e1.cross(e2).normalized();
     }
 
-    // Create new vertices
     std::vector<int> new_ids;
     new_ids.reserve(n);
     for (int i = 0; i < n; i++) {
@@ -351,21 +497,17 @@ void VFXMesh::extrude_face(int face_idx, float distance) {
         set_vertex_skinning(nid, b, w);
     }
 
-    // Side faces
     for (int i = 0; i < n; i++) {
         int next = (i + 1) % n;
-        // Winding: old_i, old_next, new_next, new_i
         add_quad(verts[i]->id, verts[next]->id, new_ids[next], new_ids[i]);
     }
 
-    // Top face (reverse winding so normal points same way)
     std::vector<int> top;
     top.reserve(n);
     for (int i = n - 1; i >= 0; i--) top.push_back(new_ids[i]);
     for (size_t i = 1; i + 1 < top.size(); i++)
         add_triangle(top[0], top[i], top[i + 1]);
 
-    // Remove original face (Blender-style extrude replaces it)
     delete_face(face_idx);
 
     dirty = true;
@@ -397,13 +539,11 @@ void VFXMesh::inset_face(int face_idx, float amount) {
         set_vertex_skinning(nid, b, w);
     }
 
-    // Side quads
     for (int i = 0; i < n; i++) {
         int next = (i + 1) % n;
         add_quad(verts[i]->id, verts[next]->id, inset_ids[next], inset_ids[i]);
     }
 
-    // Inset face
     for (int i = 1; i + 1 < (int)inset_ids.size(); i++)
         add_triangle(inset_ids[0], inset_ids[i], inset_ids[i + 1]);
 
@@ -436,8 +576,6 @@ void VFXMesh::delete_face(int face_idx) {
 }
 
 void VFXMesh::dissolve_face(int face_idx) {
-    // Merge face into neighbors by collapsing its edges
-    // Simplified: just delete for now
     delete_face(face_idx);
 }
 
@@ -451,17 +589,14 @@ void VFXMesh::merge_vertices(int v0, int v1) {
 
     keep->position = (keep->position + discard->position) * 0.5f;
 
-    // Redirect all edges that point to discard to keep
     for (auto* e : edges) {
         if (e->deleted) continue;
         if (e->vertex == discard) e->vertex = keep;
     }
 
-    // Mark discard deleted
     discard->deleted = true;
     discard->halfedge = nullptr;
 
-    // Delete degenerate faces (faces with repeated vertex or < 3 unique verts)
     for (auto* f : faces) {
         if (f->deleted || !f->halfedge) continue;
         std::vector<vfx::HEVertex*> fv;
@@ -515,9 +650,8 @@ void VFXMesh::loop_cut(int face_idx, int va, int vb, float t) {
     std::vector<vfx::HEVertex*> verts;
     get_face_vertices(face_idx, verts);
     int n = verts.size();
-    if (n < 4) return; // need at least quad for meaningful loop cut on one face
+    if (n < 4) return;
 
-    // Find edge between va and vb
     int a = -1, b = -1;
     for (int i = 0; i < n; i++) {
         if (verts[i]->id == (uint32_t)va) a = i;
@@ -525,27 +659,14 @@ void VFXMesh::loop_cut(int face_idx, int va, int vb, float t) {
     }
     if (a < 0 || b < 0) return;
 
-    // Insert point on edge va-vb
     Vector3 mid = vertices[va]->position.lerp(vertices[vb]->position, t);
     Vector2 mid_uv = vertices[va]->uv.lerp(vertices[vb]->uv, t);
     int mid_id = add_vertex(mid, mid_uv, vertices[va]->color);
     int b0[4], b1[4]; float w0[4], w1[4];
     get_vertex_skinning(va, b0, w0); get_vertex_skinning(vb, b1, w1);
     int mb[4] = {b0[0], b0[1], b0[2], b0[3]}; float mw[4] = {w0[0], w0[1], w0[2], w0[3]};
-    // simple lerp weights not correct for bones, but acceptable for tool
     set_vertex_skinning(mid_id, mb, mw);
 
-    // Triangulate the two resulting polygons (simplified: fan from mid)
-    // This is a naive implementation; full loop-cut needs edge-ring traversal
-    std::vector<int> poly_a, poly_b;
-    for (int i = a; i != b; i = (i + 1) % n) poly_a.push_back(verts[i]->id);
-    poly_a.push_back(vb);
-    poly_b.push_back(mid_id);
-    for (int i = b; i != a; i = (i + 1) % n) poly_b.push_back(verts[i]->id);
-    poly_b.push_back(va);
-    poly_b.push_back(mid_id);
-
-    // Actually simpler: just split face into triangle fan from mid_id
     delete_face(face_idx);
     for (int i = 0; i < n; i++) {
         int cur = verts[i]->id;
@@ -563,7 +684,6 @@ void VFXMesh::loop_cut(int face_idx, int va, int vb, float t) {
     link_twins();
 }
 
-
 void VFXMesh::bevel_edge(int edge_idx, float amount) {
     if (edge_idx < 0 || edge_idx >= (int)edges.size() || edges[edge_idx]->deleted) return;
     vfx::HEEdge* e = edges[edge_idx];
@@ -577,7 +697,6 @@ void VFXMesh::bevel_edge(int edge_idx, float amount) {
     Vector3 pb = vertices[vb]->position;
     Vector3 edir = (pb - pa).normalized();
 
-    // Find faces using this edge and their "other" vertices
     std::vector<int> face_ids;
     std::vector<int> other_verts;
     for (auto* f : faces) {
@@ -598,7 +717,6 @@ void VFXMesh::bevel_edge(int edge_idx, float amount) {
     }
     if (face_ids.empty()) return;
 
-    // Compute offset directions at va and vb (into face interiors)
     Vector3 off_a, off_b;
     for (size_t i = 0; i < face_ids.size(); i++) {
         int ov = other_verts[i];
@@ -628,7 +746,6 @@ void VFXMesh::bevel_edge(int edge_idx, float amount) {
         get_face_vertices(fidx, fverts);
         int n = (int)fverts.size();
 
-        // Build new inner polygon by replacing va->nva and vb->nvb
         std::vector<int> inner_ids;
         for (auto* v : fverts) {
             if ((int)v->id == va) inner_ids.push_back(nva);
@@ -652,9 +769,6 @@ void VFXMesh::bevel_edge(int edge_idx, float amount) {
     link_twins();
 }
 
-// ============================================================================
-// KNIFE CUT — slice a single face with a line segment (local space)
-// ============================================================================
 void VFXMesh::knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1) {
     if (face_idx < 0 || face_idx >= (int)faces.size() || faces[face_idx]->deleted) return;
     std::vector<vfx::HEVertex*> fverts;
@@ -662,7 +776,6 @@ void VFXMesh::knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1)
     int n = (int)fverts.size();
     if (n < 3) return;
 
-    // Build orthonormal basis on face plane
     Vector3 fn = get_face_normal(face_idx);
     Vector3 up = fabsf(fn.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
     Vector3 right = fn.cross(up).normalized();
@@ -703,13 +816,12 @@ void VFXMesh::knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1)
             hits.push_back({i, pt, kt});
         }
     }
-    if (hits.size() != 2) return; // only clean bisections supported
+    if (hits.size() != 2) return;
 
     std::sort(hits.begin(), hits.end(), [](const CutHit& a, const CutHit& b) {
         return a.kt < b.kt;
     });
 
-    // Create new vertices on the two hit edges
     int e0 = hits[0].edge;
     int e1 = hits[1].edge;
     int v0 = (int)fverts[e0]->id;
@@ -732,7 +844,6 @@ void VFXMesh::knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1)
     get_vertex_skinning(v0, b, w); set_vertex_skinning(nv0, b, w);
     get_vertex_skinning(v2, b, w); set_vertex_skinning(nv1, b, w);
 
-    // Build two new polygons by walking the original ring
     std::vector<int> ring;
     for (int i = 0; i < n; i++) ring.push_back((int)fverts[i]->id);
 
@@ -764,6 +875,7 @@ void VFXMesh::knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1)
     recalculate_normals();
     link_twins();
 }
+
 void VFXMesh::bevel_vertex(int vidx, float amount) {
     if (vidx < 0 || vidx >= (int)vertices.size() || vertices[vidx]->deleted) return;
     std::vector<int> nbrs;
@@ -781,7 +893,6 @@ void VFXMesh::bevel_vertex(int vidx, float amount) {
         get_vertex_skinning(vidx, b, w); set_vertex_skinning(nid, b, w);
     }
 
-    // Create fan from original vertex to new verts
     for (size_t i = 0; i < new_verts.size(); i++) {
         int next = (i + 1) % new_verts.size();
         add_triangle(vidx, new_verts[i], new_verts[next]);
@@ -807,7 +918,6 @@ void VFXMesh::dissolve_vertex(int vidx) {
         vertices[vidx]->deleted = true;
         return;
     }
-    // Merge into first neighbor
     merge_vertices(nbrs[0], vidx);
 }
 
@@ -819,7 +929,7 @@ void VFXMesh::bridge_faces(int face_a, int face_b) {
     std::vector<vfx::HEVertex*> a_verts, b_verts;
     get_face_vertices(face_a, a_verts);
     get_face_vertices(face_b, b_verts);
-    if (a_verts.size() != b_verts.size()) return; // require same edge count
+    if (a_verts.size() != b_verts.size()) return;
 
     int n = a_verts.size();
     for (int i = 0; i < n; i++) {
@@ -859,12 +969,11 @@ void VFXMesh::flip_all_normals() {
         get_face_vertices(f->id, verts);
         int n = verts.size();
         if (n < 3) continue;
-        f->deleted = true; // mark old
+        f->deleted = true;
         for (int i = n - 1; i >= 2; i--) {
             add_triangle(verts[0]->id, verts[i]->id, verts[i - 1]->id);
         }
     }
-    // Clean up deleted faces
     std::vector<vfx::HEFace*> new_faces;
     for (auto* f : faces) {
         if (f->deleted) delete f;
@@ -881,7 +990,6 @@ void VFXMesh::flip_all_normals() {
 }
 
 void VFXMesh::cleanup() {
-    // Compact vertices
     std::vector<vfx::HEVertex*> new_verts;
     std::unordered_map<uint32_t, uint32_t> vmap;
     for (auto* v : vertices) {
@@ -895,7 +1003,6 @@ void VFXMesh::cleanup() {
     }
     vertices = new_verts;
 
-    // Compact edges
     std::vector<vfx::HEEdge*> new_edges;
     std::unordered_map<uint32_t, uint32_t> emap;
     for (auto* e : edges) {
@@ -909,7 +1016,6 @@ void VFXMesh::cleanup() {
     }
     edges = new_edges;
 
-    // Compact faces
     std::vector<vfx::HEFace*> new_faces;
     for (auto* f : faces) {
         if (!f->deleted && f->halfedge) {
@@ -920,7 +1026,6 @@ void VFXMesh::cleanup() {
     }
     faces = new_faces;
 
-    // Fix pointers
     for (auto* v : vertices) {
         if (v->halfedge) {
             auto it = emap.find(v->halfedge->id);
@@ -980,7 +1085,7 @@ void VFXMesh::link_twins() {
 }
 
 // ============================================================================
-// RAYCAST (Möller–Trumbore)
+// RAYCAST (Moller-Trumbore)
 // ============================================================================
 bool VFXMesh::raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance) const {
     bool hit = false;
@@ -1541,7 +1646,6 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
     samples.push_back(points[points.size() - 1]);
     tangents.push_back((points[points.size() - 1] - points[points.size() - 2]).normalized());
 
-    // Parallel transport frame
     std::vector<Basis> frames;
     frames.reserve(samples.size());
     Vector3 ref = (fabs(tangents[0].dot(Vector3(0, 1, 0))) < 0.99f) ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
@@ -1563,7 +1667,6 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
         frames.push_back(new_basis);
     }
 
-    // Generate vertices
     std::vector<std::vector<int>> ring_verts;
     ring_verts.resize(samples.size());
 
@@ -1579,7 +1682,6 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
         }
     }
 
-    // Side faces
     for (size_t i = 0; i + 1 < samples.size(); i++) {
         for (int r = 0; r < rings; r++) {
             int r_next = (r + 1) % rings;
@@ -1591,7 +1693,6 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
         }
     }
 
-    // Caps
     if (cap_start) {
         int center = m->add_vertex(samples[0], Vector2(0.5f, 0.5f));
         for (int r = 0; r < rings; r++) {
