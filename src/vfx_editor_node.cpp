@@ -238,7 +238,7 @@ void VFXEditorNode::_notification(int p_what) {
             _update_godot_mesh();
         }
 
-        if (show_skeleton && skeleton.is_valid()) {
+        if (show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
             _build_skeleton_mesh();
             if (skel_visual) skel_visual->set_visible(true);
         } else if (skel_visual) {
@@ -1114,7 +1114,15 @@ Ref<VFXAnimator> VFXEditorNode::get_vfx_animator() const { return animator; }
 // ============================================================================
 // VISIBILITY / STATE
 // ============================================================================
-void VFXEditorNode::set_show_skeleton(bool show) { show_skeleton = show; }
+void VFXEditorNode::set_show_skeleton(bool show) { 
+    show_skeleton = show; 
+    if (skel_visual) {
+        skel_visual->set_visible(show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0);
+    }
+    if (show_skeleton && skeleton.is_valid()) {
+        _build_skeleton_mesh();
+    }
+}
 bool VFXEditorNode::get_show_skeleton() const { return show_skeleton; }
 void VFXEditorNode::set_show_weights(bool show) { show_weights = show; if (auto_update) _update_godot_mesh(); }
 bool VFXEditorNode::get_show_weights() const { return show_weights; }
