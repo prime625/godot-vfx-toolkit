@@ -197,7 +197,7 @@ int VFXUVEditor::get_uv_vert_count() const {
 
 Vector2 VFXUVEditor::get_uv_vert(int uv_idx) const {
     if (mesh.is_null()) return Vector2();
-    if (active_layer < 0 || active_layer >= mesh->get_uv_layer_count()) return 0;
+    if (active_layer < 0 || active_layer >= mesh->get_uv_layer_count()) return Vector2();
     const auto& layer = mesh->uv_layers[active_layer];
     if (uv_idx < 0 || uv_idx >= (int)layer.coords.size()) return Vector2();
     return layer.coords[uv_idx];
@@ -272,8 +272,8 @@ void VFXUVEditor::deselect_all() {
 
 void VFXUVEditor::invert_selection() {
     _ensure_selection_size();
-    for (auto& s : sel_verts) s = !s;
-    for (auto& s : sel_faces) s = !s;
+    for (size_t i = 0; i < sel_verts.size(); i++) sel_verts[i] = !sel_verts[i];
+    for (size_t i = 0; i < sel_faces.size(); i++) sel_faces[i] = !sel_faces[i];
 }
 
 void VFXUVEditor::select_at(const Vector2& uv_pos, float radius, bool add) {
