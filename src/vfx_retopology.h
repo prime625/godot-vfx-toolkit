@@ -70,9 +70,7 @@ private:
 
     // === OPERATORS ===
     bool _can_collapse_edge(int edge_id) const;
-    bool _collapse_edge(int edge_id);
-    bool _flip_edge(int edge_id);
-    bool _split_edge(int edge_id);
+    bool _can_flip_edge(int edge_id) const;
     void _relax_vertices(int iterations);
     void _remesh_pass();
     void _simplify_pass(int target_faces);
