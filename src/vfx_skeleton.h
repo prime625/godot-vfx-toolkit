@@ -12,7 +12,6 @@
 
 using namespace godot;
 
-// Mixamo-standard humanoid bone names
 namespace vfx {
     static const char* MIXAMO_BONES[] = {
         "Hips",
@@ -31,19 +30,15 @@ struct Bone {
     String name;
     int parent_id = -1;
 
-    // Local transform (relative to parent)
     Vector3 local_position;
     Quaternion local_rotation;
     Vector3 local_scale = Vector3(1, 1, 1);
 
-    // Bind pose (model space, for skinning)
     Transform3D bind_pose;
     Transform3D inverse_bind_pose;
 
-    // Runtime transform
-    Transform3D model_transform;  // computed each frame
+    Transform3D model_transform;
 
-    // IK targets (optional)
     bool has_ik_target = false;
     Vector3 ik_target_position;
 
@@ -69,7 +64,6 @@ public:
     VFXSkeleton();
     ~VFXSkeleton();
 
-    // === SETUP ===
     void create_mixamo_skeleton();
     void clear();
 
@@ -93,27 +87,25 @@ public:
     int get_bone_parent(int bone_id) const;
     PackedInt32Array get_bone_children(int bone_id) const;
 
-    // === POSE ===
     void set_bone_pose(int bone_id, const Transform3D& pose);
     void set_bone_model_transform(int bone_id, const Transform3D& world_pose);
     void reset_to_bind_pose();
 
-    // === IK ===
     void solve_ik_two_bone(int root_bone, int mid_bone, int tip_bone, const Vector3& target, const Vector3& pole, float twist = 0.0f);
     void solve_ik_ccd(int tip_bone, const Vector3& target, int iterations = 10, float threshold = 0.001f);
 
-    // === UPDATE ===
     void update_transforms();
 
-    // === SKINNING MATRICES ===
-    // Returns array of SkinMatrix (Transform3D) for GPU skinning
-    PackedVector3Array get_skinning_matrices() const;  // Flattened 3x4 matrices
+    PackedVector3Array get_skinning_matrices() const;
 
-    // === SERIALIZATION ===
+    // === SYMMETRY ===
+    int get_symmetric_bone(int bone_id) const;
+    bool is_bone_symmetric(int bone_id) const;
+    static String get_mirrored_bone_name(const String& name);
+
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& data);
 
-    // === IMPORT ===
     void from_godot_skeleton(const Object* skeleton);
 };
 
