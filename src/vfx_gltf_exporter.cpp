@@ -371,16 +371,434 @@ bool VFXGLTFExporter::export_glb(const Ref<VFXMesh>& mesh, const Ref<VFXSkeleton
 }
 
 bool VFXGLTFExporter::export_glb_animated(const Ref<VFXMesh>& mesh, const Ref<VFXSkeleton>& skeleton, const Ref<VFXAnimator>& animator, int clip_idx, const String& filepath) {
-    // TODO: Add animation samplers/channels to the GLB export
-    // For now, fall back to static export
-    UtilityFunctions::print("Animated export TODO - exporting static mesh");
-    return export_glb(mesh, skeleton, filepath);
+    if (mesh.is_null() || skeleton.is_null() || animator.is_null()) {
+        UtilityFunctions::print("Animated export failed: missing mesh, skeleton, or animator");
+        return false;
+    }
+    if (clip_idx < 0 || clip_idx >= animator->get_clip_count()) {
+        UtilityFunctions::print("Animated export failed: invalid clip index ", clip_idx);
+        return false;
+    }
+
+    buffer_data.clear();
+
+    Dictionary doc;
+    doc["asset"] = _build_asset();
+
+    // Arrays
+    Array scenes, nodes, meshes_arr, buffers, bufferViews, accessors, skins, animations;
+
+    // Write mesh data to buffer
+    PackedVector3Array positions = mesh->get_positions();
+    PackedVector3Array normals = mesh->get_normals();
+    PackedVector2Array uvs = mesh->get_uvs();
+    PackedInt32Array indices = mesh->get_indices();
+
+    int pos_offset = _write_vec3_array(positions);
+    int norm_offset = _write_vec3_array(normals);
+    int uv_offset = _write_vec2_array(uvs);
+    int idx_offset = _write_uint16_array(indices);
+
+    // Buffer views
+    int pos_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, pos_offset, positions.size() * 12, GL_ARRAY_BUFFER));
+
+    int norm_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, norm_offset, normals.size() * 12, GL_ARRAY_BUFFER));
+
+    int uv_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, uv_offset, uvs.size() * 8, GL_ARRAY_BUFFER));
+
+    int idx_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, idx_offset, indices.size() * 2, GL_ELEMENT_ARRAY_BUFFER));
+
+    // Accessors
+    int pos_acc = accessors.size();
+    Dictionary pos_accessor = _build_accessor(pos_bv, positions.size(), GL_FLOAT, "VEC3");
+    Vector3 pmin(1e30f, 1e30f, 1e30f), pmax(-1e30f, -1e30f, -1e30f);
+    for (int i = 0; i < positions.size(); i++) {
+        pmin.x = fmin(pmin.x, positions[i].x); pmin.y = fmin(pmin.y, positions[i].y); pmin.z = fmin(pmin.z, positions[i].z);
+        pmax.x = fmax(pmax.x, positions[i].x); pmax.y = fmax(pmax.y, positions[i].y); pmax.z = fmax(pmax.z, positions[i].z);
+    }
+    Array amin, amax;
+    amin.append(pmin.x); amin.append(pmin.y); amin.append(pmin.z);
+    amax.append(pmax.x); amax.append(pmax.y); amax.append(pmax.z);
+    pos_accessor["min"] = amin;
+    pos_accessor["max"] = amax;
+    accessors.append(pos_accessor);
+
+    int norm_acc = accessors.size();
+    accessors.append(_build_accessor(norm_bv, normals.size(), GL_FLOAT, "VEC3"));
+
+    int uv_acc = accessors.size();
+    accessors.append(_build_accessor(uv_bv, uvs.size(), GL_FLOAT, "VEC2"));
+
+    int idx_acc = accessors.size();
+    accessors.append(_build_accessor(idx_bv, indices.size(), GL_UNSIGNED_SHORT, "SCALAR"));
+
+    // Skinning data
+    int joints_acc = -1, weights_acc = -1;
+    PackedFloat32Array skin_data = mesh->get_skinning_data();
+    int bone_count = skeleton->get_bone_count();
+    std::vector<int> node_indices(bone_count);
+
+    if (skin_data.size() > 0 && bone_count > 0) {
+        // JOINTS_0 (uint16, 4 per vertex)
+        PackedInt32Array joints;
+        joints.resize(positions.size() * 4);
+        PackedFloat32Array weights;
+        weights.resize(positions.size() * 4);
+        for (int i = 0; i < positions.size(); i++) {
+            int base = i * 8;
+            for (int j = 0; j < 4; j++) {
+                joints[i * 4 + j] = (int)skin_data[base + j];
+                weights[i * 4 + j] = skin_data[base + 4 + j];
+            }
+        }
+        int joints_offset = _write_uint16_array(joints);
+        int weights_offset = _write_float_array(weights);
+
+        int joints_bv = bufferViews.size();
+        bufferViews.append(_build_buffer_view(0, joints_offset, joints.size() * 2, GL_ARRAY_BUFFER));
+        int weights_bv = bufferViews.size();
+        bufferViews.append(_build_buffer_view(0, weights_offset, weights.size() * 4, GL_ARRAY_BUFFER));
+
+        joints_acc = accessors.size();
+        accessors.append(_build_accessor(joints_bv, positions.size(), GL_UNSIGNED_SHORT, "VEC4"));
+        weights_acc = accessors.size();
+        accessors.append(_build_accessor(weights_bv, positions.size(), GL_FLOAT, "VEC4"));
+
+        // Skeleton nodes
+        for (int i = 0; i < bone_count; i++) {
+            node_indices[i] = nodes.size();
+            PackedInt32Array packed_children = skeleton->get_bone_children(i);
+            std::vector<int> ch;
+            for (int j = 0; j < packed_children.size(); j++) ch.push_back(packed_children[j]);
+            nodes.append(_build_node_bone(i, ch));
+        }
+
+        // Inverse bind matrices
+        PackedFloat32Array ibm;
+        ibm.resize(bone_count * 16);
+        for (int i = 0; i < bone_count; i++) {
+            Transform3D ibm_t = skeleton->get_bone_bind_pose(i).affine_inverse();
+            Basis b = ibm_t.get_basis();
+            Vector3 t = ibm_t.get_origin();
+            int base = i * 16;
+            ibm[base + 0] = b[0][0]; ibm[base + 1] = b[0][1]; ibm[base + 2] = b[0][2]; ibm[base + 3] = 0;
+            ibm[base + 4] = b[1][0]; ibm[base + 5] = b[1][1]; ibm[base + 6] = b[1][2]; ibm[base + 7] = 0;
+            ibm[base + 8] = b[2][0]; ibm[base + 9] = b[2][1]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
+            ibm[base + 12] = t.x;    ibm[base + 13] = t.y;    ibm[base + 14] = t.z;    ibm[base + 15] = 1;
+        }
+        int ibm_offset = _write_mat4_array(ibm);
+        int ibm_bv = bufferViews.size();
+        bufferViews.append(_build_buffer_view(0, ibm_offset, bone_count * 64, GL_ARRAY_BUFFER));
+        int ibm_acc = accessors.size();
+        accessors.append(_build_accessor(ibm_bv, bone_count, GL_FLOAT, "MAT4"));
+
+        // Skin
+        int skin_idx = skins.size();
+        skins.append(_build_skin(ibm_acc, node_indices));
+
+        // Mesh node with skin
+        int mesh_node = nodes.size();
+        nodes.append(_build_node_mesh(0, skin_idx));
+
+        scenes.append(_build_scene(mesh_node));
+
+        // === ANIMATION ===
+        float duration = animator->get_clip_duration(clip_idx);
+        float fps = 30.0f; // Sample at 30fps
+        int frame_count = (int)ceilf(duration * fps) + 1;
+
+        // Build time samples
+        PackedFloat32Array time_samples;
+        time_samples.resize(frame_count);
+        for (int i = 0; i < frame_count; i++) {
+            time_samples[i] = (float)i / fps;
+            if (time_samples[i] > duration) time_samples[i] = duration;
+        }
+
+        // Write time accessor (shared)
+        int time_offset = _write_float_array(time_samples);
+        int time_bv = bufferViews.size();
+        bufferViews.append(_build_buffer_view(0, time_offset, time_samples.size() * 4, GL_ARRAY_BUFFER));
+        int time_acc = accessors.size();
+        Dictionary time_accessor = _build_accessor(time_bv, time_samples.size(), GL_FLOAT, "SCALAR");
+        Array tmin, tmax;
+        tmin.append(0.0f); tmax.append(duration);
+        time_accessor["min"] = tmin;
+        time_accessor["max"] = tmax;
+        accessors.append(time_accessor);
+
+        int curve_count = animator->get_curve_count(clip_idx);
+        Array anim_samplers;
+        Array anim_channels;
+
+        for (int c = 0; c < curve_count; c++) {
+            int bone_id = animator->get_curve_bone_id(clip_idx, c);
+            if (bone_id < 0 || bone_id >= bone_count) continue;
+
+            bool is_rotation = animator->get_curve_is_rotation(clip_idx, c);
+
+            // Sample the curve at each time point
+            PackedFloat32Array output_data;
+            output_data.resize(frame_count * (is_rotation ? 4 : 3));
+
+            for (int f = 0; f < frame_count; f++) {
+                float t = time_samples[f];
+                if (is_rotation) {
+                    Quaternion q = animator->sample_quaternion(clip_idx, c, t);
+                    output_data[f * 4 + 0] = q.x;
+                    output_data[f * 4 + 1] = q.y;
+                    output_data[f * 4 + 2] = q.z;
+                    output_data[f * 4 + 3] = q.w;
+                } else {
+                    Vector3 v = animator->sample_vector(clip_idx, c, t);
+                    output_data[f * 3 + 0] = v.x;
+                    output_data[f * 3 + 1] = v.y;
+                    output_data[f * 3 + 2] = v.z;
+                }
+            }
+
+            // Write output accessor
+            int out_offset = _write_float_array(output_data);
+            int out_bv = bufferViews.size();
+            bufferViews.append(_build_buffer_view(0, out_offset, output_data.size() * 4, GL_ARRAY_BUFFER));
+            int out_acc = accessors.size();
+            accessors.append(_build_accessor(out_bv, frame_count, GL_FLOAT, is_rotation ? "VEC4" : "VEC3"));
+
+            // Create sampler
+            int sampler_idx = anim_samplers.size();
+            anim_samplers.append(_build_animation_sampler(time_acc, out_acc, "LINEAR"));
+
+            // Determine path
+            String path;
+            // Check if this curve is scale by looking at curve name or properties
+            String curve_name = animator->get_curve_name(clip_idx, c);
+            if (curve_name.contains("scale") || curve_name.contains("Scale")) {
+                path = "scale";
+            } else if (is_rotation) {
+                path = "rotation";
+            } else {
+                path = "translation";
+            }
+
+            // Create channel targeting the bone node
+            anim_channels.append(_build_animation_channel(sampler_idx, path, node_indices[bone_id]));
+        }
+
+        // Add animation to document
+        if (anim_samplers.size() > 0) {
+            String anim_name = animator->get_clip_name(clip_idx);
+            if (anim_name.is_empty()) anim_name = "animation";
+            animations.append(_build_animation(anim_name, anim_samplers, anim_channels));
+        }
+
+    } else {
+        // No skeleton
+        int mesh_node = nodes.size();
+        nodes.append(_build_node_mesh(0, -1));
+        scenes.append(_build_scene(mesh_node));
+    }
+
+    // Mesh
+    Dictionary prim = _build_primitive(pos_acc, norm_acc, uv_acc, idx_acc, joints_acc, weights_acc);
+    Dictionary mesh_dict;
+    Array prims;
+    prims.append(prim);
+    mesh_dict["primitives"] = prims;
+    meshes_arr.append(mesh_dict);
+
+    // Buffer
+    buffers.append(_build_buffer(buffer_data.size()));
+
+    // Assemble document
+    doc["scene"] = 0;
+    doc["scenes"] = scenes;
+    doc["nodes"] = nodes;
+    doc["meshes"] = meshes_arr;
+    doc["buffers"] = buffers;
+    doc["bufferViews"] = bufferViews;
+    doc["accessors"] = accessors;
+    if (skins.size() > 0) doc["skins"] = skins;
+    if (animations.size() > 0) doc["animations"] = animations;
+
+    // Write GLB
+    PackedByteArray glb = combine_glb(doc, buffer_data);
+
+    Ref<FileAccess> f = FileAccess::open(filepath, FileAccess::WRITE);
+    if (f.is_null()) return false;
+    f->store_buffer(glb);
+    f->close();
+
+    UtilityFunctions::print("Exported animated GLB to: ", filepath, " (", buffer_data.size(), " bytes, ", animations.size(), " animation(s))");
+    return true;
 }
 
 bool VFXGLTFExporter::export_vat_glb(const Ref<VFXMesh>& mesh, const Ref<VFXSkin>& skin, int frame_count, float fps, const String& filepath) {
-    // TODO: Export mesh + VAT textures
-    UtilityFunctions::print("VAT export TODO");
-    return false;
+    if (mesh.is_null() || skin.is_null()) {
+        UtilityFunctions::print("VAT export failed: missing mesh or skin");
+        return false;
+    }
+    if (frame_count <= 0 || fps <= 0.0f) {
+        UtilityFunctions::print("VAT export failed: invalid frame_count or fps");
+        return false;
+    }
+
+    buffer_data.clear();
+
+    Dictionary doc;
+    doc["asset"] = _build_asset();
+
+    // Arrays
+    Array scenes, nodes, meshes_arr, buffers, bufferViews, accessors;
+
+    // Static mesh data (bind pose)
+    PackedVector3Array bind_positions = mesh->get_positions();
+    PackedVector3Array normals = mesh->get_normals();
+    PackedVector2Array uvs = mesh->get_uvs();
+    PackedInt32Array indices = mesh->get_indices();
+
+    int pos_offset = _write_vec3_array(bind_positions);
+    int norm_offset = _write_vec3_array(normals);
+    int uv_offset = _write_vec2_array(uvs);
+    int idx_offset = _write_uint16_array(indices);
+
+    // Buffer views
+    int pos_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, pos_offset, bind_positions.size() * 12, GL_ARRAY_BUFFER));
+
+    int norm_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, norm_offset, normals.size() * 12, GL_ARRAY_BUFFER));
+
+    int uv_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, uv_offset, uvs.size() * 8, GL_ARRAY_BUFFER));
+
+    int idx_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, idx_offset, indices.size() * 2, GL_ELEMENT_ARRAY_BUFFER));
+
+    // Accessors
+    int pos_acc = accessors.size();
+    Dictionary pos_accessor = _build_accessor(pos_bv, bind_positions.size(), GL_FLOAT, "VEC3");
+    Vector3 pmin(1e30f, 1e30f, 1e30f), pmax(-1e30f, -1e30f, -1e30f);
+    for (int i = 0; i < bind_positions.size(); i++) {
+        pmin.x = fmin(pmin.x, bind_positions[i].x); pmin.y = fmin(pmin.y, bind_positions[i].y); pmin.z = fmin(pmin.z, bind_positions[i].z);
+        pmax.x = fmax(pmax.x, bind_positions[i].x); pmax.y = fmax(pmax.y, bind_positions[i].y); pmax.z = fmax(pmax.z, bind_positions[i].z);
+    }
+    Array amin, amax;
+    amin.append(pmin.x); amin.append(pmin.y); amin.append(pmin.z);
+    amax.append(pmax.x); amax.append(pmax.y); amax.append(pmax.z);
+    pos_accessor["min"] = amin;
+    pos_accessor["max"] = amax;
+    accessors.append(pos_accessor);
+
+    int norm_acc = accessors.size();
+    accessors.append(_build_accessor(norm_bv, normals.size(), GL_FLOAT, "VEC3"));
+
+    int uv_acc = accessors.size();
+    accessors.append(_build_accessor(uv_bv, uvs.size(), GL_FLOAT, "VEC2"));
+
+    int idx_acc = accessors.size();
+    accessors.append(_build_accessor(idx_bv, indices.size(), GL_UNSIGNED_SHORT, "SCALAR"));
+
+    // === VAT TEXTURES ===
+    // Bake vertex animation data
+    PackedFloat32Array vat_data = skin->bake_vertex_animation(frame_count, fps);
+    int vertex_count = mesh->get_vertex_count();
+
+    // Position texture: RGB32F per vertex per frame
+    // Layout: each frame is a row, each vertex is a pixel (or packed)
+    int tex_width = vertex_count;
+    int tex_height = frame_count;
+
+    // For glTF, we store VAT data as buffer views and use KHR_texture_float extension
+    // or we can embed as raw buffer data with custom attributes
+
+    // Write position animation data as a flat buffer
+    PackedFloat32Array pos_anim_data;
+    pos_anim_data.resize(frame_count * vertex_count * 3);
+    PackedFloat32Array norm_anim_data;
+    norm_anim_data.resize(frame_count * vertex_count * 3);
+
+    for (int f = 0; f < frame_count; f++) {
+        int base = f * vertex_count * 6;
+        for (int v = 0; v < vertex_count; v++) {
+            int src = base + v * 6;
+            int dst = (f * vertex_count + v) * 3;
+            pos_anim_data[dst + 0] = vat_data[src + 0];
+            pos_anim_data[dst + 1] = vat_data[src + 1];
+            pos_anim_data[dst + 2] = vat_data[src + 2];
+            norm_anim_data[dst + 0] = vat_data[src + 3];
+            norm_anim_data[dst + 1] = vat_data[src + 4];
+            norm_anim_data[dst + 2] = vat_data[src + 5];
+        }
+    }
+
+    int pos_anim_offset = _write_float_array(pos_anim_data);
+    int pos_anim_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, pos_anim_offset, pos_anim_data.size() * 4, GL_ARRAY_BUFFER));
+    int pos_anim_acc = accessors.size();
+    accessors.append(_build_accessor(pos_anim_bv, pos_anim_data.size() / 3, GL_FLOAT, "VEC3"));
+
+    int norm_anim_offset = _write_float_array(norm_anim_data);
+    int norm_anim_bv = bufferViews.size();
+    bufferViews.append(_build_buffer_view(0, norm_anim_offset, norm_anim_data.size() * 4, GL_ARRAY_BUFFER));
+    int norm_anim_acc = accessors.size();
+    accessors.append(_build_accessor(norm_anim_bv, norm_anim_data.size() / 3, GL_FLOAT, "VEC3"));
+
+    // Mesh node (no skin, VAT replaces skinning)
+    int mesh_node = nodes.size();
+    Dictionary mesh_node_dict;
+    mesh_node_dict["mesh"] = 0;
+    // Add VAT metadata as extras
+    Dictionary extras;
+    extras["VAT_frame_count"] = frame_count;
+    extras["VAT_fps"] = fps;
+    extras["VAT_vertex_count"] = vertex_count;
+    extras["VAT_position_accessor"] = pos_anim_acc;
+    extras["VAT_normal_accessor"] = norm_anim_acc;
+    mesh_node_dict["extras"] = extras;
+    nodes.append(mesh_node_dict);
+
+    scenes.append(_build_scene(mesh_node));
+
+    // Mesh
+    Dictionary prim = _build_primitive(pos_acc, norm_acc, uv_acc, idx_acc, -1, -1);
+    Dictionary mesh_dict;
+    Array prims;
+    prims.append(prim);
+    mesh_dict["primitives"] = prims;
+    meshes_arr.append(mesh_dict);
+
+    // Buffer
+    buffers.append(_build_buffer(buffer_data.size()));
+
+    // Assemble document
+    doc["scene"] = 0;
+    doc["scenes"] = scenes;
+    doc["nodes"] = nodes;
+    doc["meshes"] = meshes_arr;
+    doc["buffers"] = buffers;
+    doc["bufferViews"] = bufferViews;
+    doc["accessors"] = accessors;
+
+    // Add extensionsUsed for KHR_texture_float if needed
+    Array extensionsUsed;
+    extensionsUsed.append("KHR_texture_float");
+    doc["extensionsUsed"] = extensionsUsed;
+
+    // Write GLB
+    PackedByteArray glb = combine_glb(doc, buffer_data);
+
+    Ref<FileAccess> f = FileAccess::open(filepath, FileAccess::WRITE);
+    if (f.is_null()) return false;
+    f->store_buffer(glb);
+    f->close();
+
+    UtilityFunctions::print("Exported VAT GLB to: ", filepath, 
+        " (", buffer_data.size(), " bytes, ", frame_count, " frames, ", vertex_count, " verts)");
+    return true;
 }
 
 Dictionary VFXGLTFExporter::build_gltf_document(const Ref<VFXMesh>& mesh, const Ref<VFXSkeleton>& skeleton) const {
