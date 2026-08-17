@@ -204,6 +204,12 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_texture_painter", "p"), &VFXEditorNode::set_texture_painter);
     ClassDB::bind_method(D_METHOD("get_texture_painter"), &VFXEditorNode::get_texture_painter);
     ClassDB::bind_method(D_METHOD("paint_at", "ray_origin", "ray_dir"), &VFXEditorNode::paint_at);
+
+    // === SYMMETRY ===
+    ClassDB::bind_method(D_METHOD("set_symmetry_enabled", "enabled"), &VFXEditorNode::set_symmetry_enabled);
+    ClassDB::bind_method(D_METHOD("get_symmetry_enabled"), &VFXEditorNode::get_symmetry_enabled);
+    ClassDB::bind_method(D_METHOD("set_symmetry_axis", "axis"), &VFXEditorNode::set_symmetry_axis);
+    ClassDB::bind_method(D_METHOD("get_symmetry_axis"), &VFXEditorNode::get_symmetry_axis);
 }
 
 // ============================================================================
@@ -858,12 +864,35 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         return;
     }
 
-    // === EXISTING BONE GIZMO LOGIC ===
+    // === BONE GIZMO LOGIC WITH SYMMETRY ===
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
         Transform3D local = parent_world.affine_inverse() * gizmo_transform;
         skeleton->set_bone_pose(selected_bone, local);
+
+        if (symmetry_enabled) {
+            int sym_bone = skeleton->get_symmetric_bone(selected_bone);
+            if (sym_bone >= 0) {
+                Transform3D mirrored_local = local;
+                Vector3 pos = mirrored_local.get_origin();
+                if (symmetry_axis == 0) pos.x = -pos.x;
+                else if (symmetry_axis == 1) pos.y = -pos.y;
+                else if (symmetry_axis == 2) pos.z = -pos.z;
+                mirrored_local.set_origin(pos);
+
+                if (symmetry_axis == 0) {
+                    Basis b = mirrored_local.get_basis();
+                    Vector3 euler = b.get_euler();
+                    euler.x = -euler.x;
+                    euler.z = -euler.z;
+                    mirrored_local.set_basis(Basis::from_euler(euler));
+                }
+
+                skeleton->set_bone_pose(sym_bone, mirrored_local);
+            }
+        }
+
         skeleton->update_transforms();
         gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
@@ -1622,3 +1651,10 @@ void VFXEditorNode::paint_at(const Vector3& ray_origin, const Vector3& ray_dir) 
     }
 }
 
+// ============================================================================
+// SYMMETRY
+// ============================================================================
+void VFXEditorNode::set_symmetry_enabled(bool enabled) { symmetry_enabled = enabled; }
+bool VFXEditorNode::get_symmetry_enabled() const { return symmetry_enabled; }
+void VFXEditorNode::set_symmetry_axis(int axis) { symmetry_axis = axis; }
+int VFXEditorNode::get_symmetry_axis() const { return symmetry_axis; }
