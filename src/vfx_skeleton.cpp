@@ -1,6 +1,7 @@
 #include "vfx_skeleton.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
+#include <godot_cpp/classes/skeleton3d.hpp>
 
 using namespace godot;
 
@@ -393,6 +394,55 @@ void VFXSkeleton::deserialize(const PackedByteArray& data) {
     clear();
 }
 
-void VFXSkeleton::from_godot_skeleton(const Object* skeleton) {
-    // TODO: Import from Godot Skeleton3D resource
+void VFXSkeleton::from_godot_skeleton(const Object* skeleton_obj) {
+    const Skeleton3D* skel = Object::cast_to<Skeleton3D>(skeleton_obj);
+    if (!skel) return;
+
+    clear();
+
+    int bone_count = skel->get_bone_count();
+    if (bone_count == 0) return;
+
+    // First pass: create all bones
+    for (int i = 0; i < bone_count; i++) {
+        String name = skel->get_bone_name(i);
+        int parent = skel->get_bone_parent(i);
+        add_bone(name, parent);
+    }
+
+    // Second pass: set local transforms and bind poses
+    for (int i = 0; i < bone_count; i++) {
+        // Local rest pose (bind pose)
+        Transform3D rest = skel->get_bone_rest(i);
+        set_bone_bind_pose(i, rest);
+
+        // Local transform (current pose, defaults to rest)
+        Transform3D pose = skel->get_bone_pose(i);
+        if (pose == Transform3D()) {
+            pose = rest; // fallback to rest if pose is identity (unposed)
+        }
+
+        set_bone_local_position(i, pose.get_origin());
+        set_bone_local_rotation(i, pose.get_basis().get_rotation_quaternion());
+        set_bone_local_scale(i, pose.get_basis().get_scale());
+    }
+
+    // Build name map and compute model transforms
+    update_transforms();
+
+    // Verify: if any bone has invalid model transform, fall back to rest
+    for (int i = 0; i < bone_count; i++) {
+        Transform3D model = get_bone_model_transform(i);
+        if (model == Transform3D() || !Math::is_finite(model.get_origin().x)) {
+            // Reset to bind pose if corrupted
+            Transform3D rest = skel->get_bone_rest(i);
+            set_bone_local_position(i, rest.get_origin());
+            set_bone_local_rotation(i, rest.get_basis().get_rotation_quaternion());
+            set_bone_local_scale(i, rest.get_basis().get_scale());
+        }
+    }
+
+    update_transforms();
+
+    UtilityFunctions::print("Imported Skeleton3D: ", bone_count, " bones");
 }
