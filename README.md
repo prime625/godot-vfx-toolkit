@@ -41,7 +41,7 @@ src/
 
 ### Clone & Setup
 ```bash
-git clone --recursive https://github.com/YOURNAME/godot_vfx_toolkit.git
+git clone --recursive https://github.com/sheltonndlovu625-sketch/godot_vfx_toolkit.git
 cd godot_vfx_toolkit
 ```
 
