@@ -614,7 +614,7 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
     // Clip header
     CharString name_utf8 = clip.name.utf8();
     append_u16((uint16_t)name_utf8.size());
-    for (int i = 0; i < name_utf8.size(); i++) data.append(name_utf8[i]);
+    for (int i = 0; i < name_utf8.size(); i++) data.append(name_utf8.ptr()[i]);
 
     append_f32(clip.duration);
     append_f32(clip.fps);
@@ -626,7 +626,7 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
     for (const auto& curve : clip.curves) {
         CharString cname_utf8 = curve.name.utf8();
         append_u16((uint16_t)cname_utf8.size());
-        for (int i = 0; i < cname_utf8.size(); i++) data.append(cname_utf8[i]);
+        for (int i = 0; i < cname_utf8.size(); i++) data.append(cname_utf8.ptr()[i]);
 
         append_i32(curve.bone_id);
         uint8_t flags = (curve.is_rotation ? 1 : 0) | (curve.is_scale ? 2 : 0) | (curve.is_scalar ? 4 : 0);
@@ -836,37 +836,27 @@ void VFXAnimator::from_godot_animation(const Object* anim_obj, int bone_count) {
             float time = (float)anim->track_get_key_time(t, k);
 
             if (is_position) {
-                Vector3 pos;
-                if (type == Animation::TYPE_POSITION_3D) {
-                    pos = anim->position_track_get_key(t, k);
-                } else {
-                    Variant v = anim->track_get_key_value(t, k);
-                    if (v.get_type() == Variant::VECTOR3) pos = (Vector3)v;
-                    else continue;
-                }
+                Variant v = anim->track_get_key_value(t, k);
+                if (v.get_type() != Variant::VECTOR3) continue;
+                Vector3 pos = (Vector3)v;
                 add_keyframe_vector(clip_idx, curve_idx, time, pos, INTERP_LINEAR);
             }
             else if (is_rotation) {
+                Variant v = anim->track_get_key_value(t, k);
                 Quaternion rot;
-                if (type == Animation::TYPE_ROTATION_3D) {
-                    rot = anim->rotation_track_get_key(t, k);
+                if (v.get_type() == Variant::QUATERNION) {
+                    rot = (Quaternion)v;
+                } else if (v.get_type() == Variant::BASIS) {
+                    rot = ((Basis)v).get_rotation_quaternion();
                 } else {
-                    Variant v = anim->track_get_key_value(t, k);
-                    if (v.get_type() == Variant::QUATERNION) rot = (Quaternion)v;
-                    else if (v.get_type() == Variant::BASIS) rot = ((Basis)v).get_rotation_quaternion();
-                    else continue;
+                    continue;
                 }
                 add_keyframe_quaternion(clip_idx, curve_idx, time, rot, INTERP_LINEAR);
             }
             else if (is_scale) {
-                Vector3 scl;
-                if (type == Animation::TYPE_SCALE_3D) {
-                    scl = anim->scale_track_get_key(t, k);
-                } else {
-                    Variant v = anim->track_get_key_value(t, k);
-                    if (v.get_type() == Variant::VECTOR3) scl = (Vector3)v;
-                    else continue;
-                }
+                Variant v = anim->track_get_key_value(t, k);
+                if (v.get_type() != Variant::VECTOR3) continue;
+                Vector3 scl = (Vector3)v;
                 add_keyframe_vector(clip_idx, curve_idx, time, scl, INTERP_LINEAR);
             }
         }
