@@ -64,6 +64,10 @@ private:
     int visualize_bone = 0;
     bool auto_update = true;
 
+    // === SYMMETRY ===
+    bool symmetry_enabled = false;
+    int symmetry_axis = 0; // 0=X, 1=Y, 2=Z
+
     // === EDIT MODE & SELECTION ===
     int edit_mode = MODE_OBJECT;
     int selected_face = -1;
@@ -218,6 +222,12 @@ public:
     int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir);
     void on_touch_up();
     void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
+
+    // === SYMMETRY ===
+    void set_symmetry_enabled(bool enabled);
+    bool get_symmetry_enabled() const;
+    void set_symmetry_axis(int axis);
+    int get_symmetry_axis() const;
 };
 
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
