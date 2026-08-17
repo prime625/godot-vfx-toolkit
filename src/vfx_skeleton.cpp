@@ -32,6 +32,10 @@ void VFXSkeleton::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_skinning_matrices"), &VFXSkeleton::get_skinning_matrices);
     ClassDB::bind_method(D_METHOD("serialize"), &VFXSkeleton::serialize);
     ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXSkeleton::deserialize);
+    
+    ClassDB::bind_method(D_METHOD("get_symmetric_bone", "bone_id"), &VFXSkeleton::get_symmetric_bone);
+    ClassDB::bind_method(D_METHOD("is_bone_symmetric", "bone_id"), &VFXSkeleton::is_bone_symmetric);
+    ClassDB::bind_method(D_METHOD("get_mirrored_bone_name", "name"), &VFXSkeleton::get_mirrored_bone_name);
 }
 
 VFXSkeleton::VFXSkeleton() {}
@@ -283,6 +287,27 @@ PackedVector3Array VFXSkeleton::get_skinning_matrices() const {
         matrices[base + 2] = b[2];
     }
     return matrices;
+}
+
+String VFXSkeleton::get_mirrored_bone_name(const String& name) {
+    String result = name;
+    if (name.find("Left") >= 0) {
+        result = result.replace("Left", "Right");
+    } else if (name.find("Right") >= 0) {
+        result = result.replace("Right", "Left");
+    }
+    return result;
+}
+
+int VFXSkeleton::get_symmetric_bone(int bone_id) const {
+    if (bone_id < 0 || bone_id >= (int)bones.size()) return -1;
+    String mirrored_name = get_mirrored_bone_name(bones[bone_id].name);
+    if (mirrored_name == bones[bone_id].name) return -1;
+    return find_bone(mirrored_name);
+}
+
+bool VFXSkeleton::is_bone_symmetric(int bone_id) const {
+    return get_symmetric_bone(bone_id) >= 0;
 }
 
 void VFXSkeleton::create_mixamo_skeleton() {
