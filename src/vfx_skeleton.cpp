@@ -32,10 +32,12 @@ void VFXSkeleton::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_skinning_matrices"), &VFXSkeleton::get_skinning_matrices);
     ClassDB::bind_method(D_METHOD("serialize"), &VFXSkeleton::serialize);
     ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXSkeleton::deserialize);
-    
+
     ClassDB::bind_method(D_METHOD("get_symmetric_bone", "bone_id"), &VFXSkeleton::get_symmetric_bone);
     ClassDB::bind_method(D_METHOD("is_bone_symmetric", "bone_id"), &VFXSkeleton::is_bone_symmetric);
-    ClassDB::bind_method(D_METHOD("get_mirrored_bone_name", "name"), &VFXSkeleton::get_mirrored_bone_name);
+
+    // FIX: static methods must use bind_static_method, not bind_method
+    ClassDB::bind_static_method("VFXSkeleton", D_METHOD("get_mirrored_bone_name", "name"), &VFXSkeleton::get_mirrored_bone_name);
 }
 
 VFXSkeleton::VFXSkeleton() {}
@@ -53,13 +55,19 @@ int VFXSkeleton::add_bone(const String& name, int parent_id) {
     b.name = name;
     b.parent_id = parent_id;
     bones.push_back(b);
-    name_to_index[name.utf8().get_data()] = b.id;
+
+    // FIX: avoid dangling pointer from temporary utf8() CharString
+    std::string key = name.utf8().get_data();
+    name_to_index[key] = b.id;
+
     dirty = true;
     return b.id;
 }
 
 int VFXSkeleton::find_bone(const String& name) const {
-    auto it = name_to_index.find(name.utf8().get_data());
+    // FIX: avoid dangling pointer from temporary utf8() CharString
+    std::string key = name.utf8().get_data();
+    auto it = name_to_index.find(key);
     if (it != name_to_index.end()) return it->second;
     return -1;
 }
