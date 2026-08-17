@@ -969,6 +969,37 @@ void VFXEditorNode::_build_skeleton_mesh() {
         for (int i = 0; i < 24; i++) indices.push_back(base + tri[i]);
     };
 
+    // === NEW: Joint sphere helper ===
+    auto add_sphere = [&](const Vector3& center, float radius, int segs, int rings, const Color& col) {
+        int base = verts.size();
+
+        for (int r = 0; r <= rings; r++) {
+            float phi = (float)r / rings * 3.14159265f;
+            for (int s = 0; s <= segs; s++) {
+                float theta = (float)s / segs * 3.14159265f * 2.0f;
+                Vector3 p(
+                    sinf(phi) * cosf(theta) * radius,
+                    cosf(phi) * radius,
+                    sinf(phi) * sinf(theta) * radius
+                );
+                verts.push_back(center + p);
+                colors.push_back(col);
+            }
+        }
+
+        for (int r = 0; r < rings; r++) {
+            for (int s = 0; s < segs; s++) {
+                int a = base + r * (segs + 1) + s;
+                int b = base + (r + 1) * (segs + 1) + s;
+                int c = base + (r + 1) * (segs + 1) + (s + 1);
+                int d = base + r * (segs + 1) + (s + 1);
+
+                indices.push_back(a); indices.push_back(b); indices.push_back(d);
+                indices.push_back(b); indices.push_back(c); indices.push_back(d);
+            }
+        }
+    };
+
     skeleton->update_transforms();
 
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
@@ -980,9 +1011,24 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
         bool is_selected = (i == selected_bone);
         Color col = is_selected ? Color(1.0f, 0.6f, 0.0f) : Color(0.25f, 0.55f, 0.85f);
-        if (i == 0) col = Color(0.6f, 0.6f, 0.6f);
+        if (i == 0) col = Color(0.6f, 0.6f, 0.6f); // root is gray
 
         add_octa(head, tail, col);
+
+        // === NEW: Add sphere at joint (head position) ===
+        float joint_radius = (tail - head).length() * 0.22f;
+        if (joint_radius < 0.04f) joint_radius = 0.04f;
+        if (joint_radius > 0.12f) joint_radius = 0.12f;
+
+        Color joint_col = is_selected ? Color(1.0f, 0.8f, 0.2f) : Color(0.35f, 0.65f, 0.95f);
+        if (i == 0) joint_col = Color(0.7f, 0.7f, 0.7f);
+
+        add_sphere(head, joint_radius, 8, 6, joint_col);
+
+        // === NEW: Add smaller sphere at tail (bone tip) for leaf bones ===
+        if (skeleton->get_bone_children(i).size() == 0) {
+            add_sphere(tail, joint_radius * 0.6f, 6, 4, col);
+        }
     }
 
     if (verts.size() > 0) {
@@ -997,10 +1043,12 @@ void VFXEditorNode::_build_skeleton_mesh() {
     Ref<StandardMaterial3D> mat;
     mat.instantiate();
     mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
     skel_visual->set_material_override(mat);
     skel_visual->set_mesh(am);
 }
+
 
 // ============================================================================
 // MATH HELPERS
