@@ -1601,7 +1601,14 @@ int VFXEditorNode::get_selected_bone() const {
 
 int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const {
     if (skeleton.is_null()) return -1;
+    
+    // ADD THESE TWO LINES — invisible bones don't eat input
+    if (!show_skeleton) return -1;
+    if (skel_visual && !skel_visual->is_visible()) return -1;
+    
     skeleton->update_transforms();
+    // ... rest of the function unchanged
+
 
     int best = -1;
     float best_t = 1e20f;
