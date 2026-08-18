@@ -463,9 +463,6 @@ void VFXEditorNode::_build_selection_mesh() {
 // GIZMO — VISUAL TRANSFORM
 // ============================================================================
 Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
-    if (gizmo_mode == GIZMO_SCALE) {
-        return gizmo_transform;
-    }
     Transform3D visual = gizmo_transform;
     Basis b = visual.get_basis();
     b.set_column(0, b.get_column(0).normalized());
@@ -474,6 +471,7 @@ Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     visual.set_basis(b);
     return visual;
 }
+
 
 // ============================================================================
 // GIZMO
