@@ -242,6 +242,130 @@ int VFXEditorNode::screen_select_face(const Vector2& screen_pos) {
 }
 
 // ============================================================================
+// SCREEN-SPACE GIZMO PICKER
+// ============================================================================
+int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
+    if (!gizmo_node || !gizmo_node->is_visible() || !camera) return GIZMO_NONE;
+
+    Transform3D visual = _get_visual_gizmo_transform();
+    float s = gizmo_screen_scale;
+    float tol = select_pixel_tolerance;
+    float best_score = tol * tol;
+    int best = GIZMO_NONE;
+
+    auto to_screen = [&](const Vector3& wp) -> Vector2 {
+        return camera->unproject_position(wp);
+    };
+
+    Vector3 o = visual.get_origin();
+    Vector2 o_screen = to_screen(o);
+
+    // If gizmo origin is behind the camera, bail
+    Vector3 o_local = camera->get_global_transform().affine_inverse().xform(o);
+    if (o_local.z >= 0.0f) return GIZMO_NONE;
+
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        // --- Axes (screen-space line segments) ---
+        for (int i = 0; i < 3; i++) {
+            Vector3 tip = o + visual.basis.get_column(i).normalized() * s;
+            Vector2 tip_screen = to_screen(tip);
+            float d2 = _point_segment_dist_sq_2d(screen_pos, o_screen, tip_screen);
+            if (d2 < best_score) {
+                best_score = d2;
+                best = i; // GIZMO_X, GIZMO_Y, GIZMO_Z
+            }
+        }
+
+        // --- Planes (projected triangles) ---
+        float p1 = s * 0.18f;
+        float p2 = s * 0.38f;
+
+        auto test_plane = [&](int axis, const Vector3& local_a, const Vector3& local_b, const Vector3& local_c) {
+            Vector2 sa = to_screen(o + visual.basis.xform(local_a));
+            Vector2 sb = to_screen(o + visual.basis.xform(local_b));
+            Vector2 sc = to_screen(o + visual.basis.xform(local_c));
+
+            PackedVector2Array tri;
+            tri.push_back(sa);
+            tri.push_back(sb);
+            tri.push_back(sc);
+
+            if (_point_in_polygon_2d(screen_pos, tri)) {
+                Vector2 center = (sa + sb + sc) / 3.0f;
+                float d2 = screen_pos.distance_squared_to(center);
+                if (d2 < best_score) {
+                    best_score = d2;
+                    best = axis;
+                }
+            }
+        };
+
+        test_plane(GIZMO_XY, Vector3(p1, p2, 0), Vector3(p2, p1, 0), Vector3(p1, p1, 0));
+        test_plane(GIZMO_XZ, Vector3(p1, 0, p2), Vector3(p2, 0, p1), Vector3(p1, 0, p1));
+        test_plane(GIZMO_YZ, Vector3(0, p1, p2), Vector3(0, p2, p1), Vector3(0, p1, p1));
+    }
+    else if (gizmo_mode == GIZMO_ROTATE) {
+        // --- Rings (sampled screen-space polyline) ---
+        float ring_r = s * 0.85f;
+        int segs = 32;
+        Transform3D cam_inv = camera->get_global_transform().affine_inverse();
+
+        for (int i = 0; i < 3; i++) {
+            Vector3 u = visual.basis.get_column((i + 1) % 3).normalized();
+            Vector3 v = visual.basis.get_column((i + 2) % 3).normalized();
+
+            float closest_d2 = 1e20f;
+            for (int j = 0; j < segs; j++) {
+                float ang0 = (float)j / segs * Math_PI * 2.0f;
+                float ang1 = (float)((j + 1) % segs) / segs * Math_PI * 2.0f;
+
+                Vector3 p0 = o + (u * cosf(ang0) + v * sinf(ang0)) * ring_r;
+                Vector3 p1 = o + (u * cosf(ang1) + v * sinf(ang1)) * ring_r;
+
+                Vector3 l0 = cam_inv.xform(p0);
+                Vector3 l1 = cam_inv.xform(p1);
+                if (l0.z >= 0.0f || l1.z >= 0.0f) continue; // skip behind-camera segments
+
+                Vector2 s0 = camera->unproject_position(p0);
+                Vector2 s1 = camera->unproject_position(p1);
+                float d2 = _point_segment_dist_sq_2d(screen_pos, s0, s1);
+                if (d2 < closest_d2) closest_d2 = d2;
+            }
+
+            if (closest_d2 < best_score) {
+                best_score = closest_d2;
+                best = i;
+            }
+        }
+    }
+    else if (gizmo_mode == GIZMO_SCALE) {
+        // --- Axes ---
+        for (int i = 0; i < 3; i++) {
+            Vector3 tip = o + visual.basis.get_column(i).normalized() * s;
+            Vector2 tip_screen = to_screen(tip);
+            float d2 = _point_segment_dist_sq_2d(screen_pos, o_screen, tip_screen);
+            if (d2 < best_score) {
+                best_score = d2;
+                best = i;
+            }
+        }
+
+        // --- Center box (XYZ) ---
+        float d2 = screen_pos.distance_squared_to(o_screen);
+        if (d2 < best_score) {
+            best_score = d2;
+            best = GIZMO_XYZ;
+        }
+    }
+
+    if (best != gizmo_hover_axis) {
+        gizmo_hover_axis = best;
+        _build_gizmo_mesh(); // highlight the hovered part
+    }
+    return best;
+}
+
+// ============================================================================
 // BINDINGS
 // ============================================================================
 void VFXEditorNode::_bind_methods() {
@@ -316,6 +440,7 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("screen_select_vertex", "screen_pos"), &VFXEditorNode::screen_select_vertex);
     ClassDB::bind_method(D_METHOD("screen_select_edge", "screen_pos"), &VFXEditorNode::screen_select_edge);
     ClassDB::bind_method(D_METHOD("screen_select_face", "screen_pos"), &VFXEditorNode::screen_select_face);
+    ClassDB::bind_method(D_METHOD("screen_raycast_gizmo", "screen_pos"), &VFXEditorNode::screen_raycast_gizmo);
 
     ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir", "screen_pos"), &VFXEditorNode::on_touch_down);
     ClassDB::bind_method(D_METHOD("on_touch_up"), &VFXEditorNode::on_touch_up);
@@ -1791,9 +1916,13 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
     // === MESH EDIT MODE ===
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
 
-        // Gizmo always uses 3D ray (it needs precise plane intersection)
         if ((selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
-            int axis = raycast_gizmo(ray_origin, ray_dir);
+            int axis;
+            if (camera && screen_pos.x >= 0.0f)
+                axis = screen_raycast_gizmo(screen_pos);
+            else
+                axis = raycast_gizmo(ray_origin, ray_dir);
+
             if (axis >= 0) {
                 gizmo_begin_drag(axis, ray_origin, ray_dir);
                 return -2;
@@ -1834,7 +1963,12 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
     // === SKELETON MODE (keep ray-based, bones are thick enough) ===
     if (show_skeleton) {
         if (skeleton.is_valid() && selected_bone >= 0) {
-            int axis = raycast_gizmo(ray_origin, ray_dir);
+            int axis;
+            if (camera && screen_pos.x >= 0.0f)
+                axis = screen_raycast_gizmo(screen_pos);
+            else
+                axis = raycast_gizmo(ray_origin, ray_dir);
+
             if (axis >= 0) {
                 gizmo_begin_drag(axis, ray_origin, ray_dir);
                 return -2;
