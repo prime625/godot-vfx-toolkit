@@ -1655,9 +1655,9 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
         return -1;
     }
 
-    // === SKELETON MODE (existing logic) ===
-    if (show_skeleton) {
-        if (skeleton.is_valid() && selected_bone >= 0) {
+    // === SKELETON MODE ===
+    if (show_skeleton && skel_visual && skel_visual->is_visible()) {
+        if (skeleton.is_valid() && selected_bone >= 0 && gizmo_node && gizmo_node->is_visible()) {
             int axis = raycast_gizmo(ray_origin, ray_dir);
             if (axis >= 0) {
                 gizmo_begin_drag(axis, ray_origin, ray_dir);
