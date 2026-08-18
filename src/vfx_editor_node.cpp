@@ -907,6 +907,12 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
 void VFXEditorNode::gizmo_end_drag() {
     gizmo_drag_axis = GIZMO_NONE;
+    // Snap gizmo back to axis-aligned (keep position, drop accumulated rotation)
+    gizmo_transform.basis = Basis();
+    if (gizmo_node) {
+        gizmo_node->set_transform(_get_visual_gizmo_transform());
+        _build_gizmo_mesh();
+    }
 }
 
 bool VFXEditorNode::is_gizmo_dragging() const {
