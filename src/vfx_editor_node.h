@@ -237,6 +237,7 @@ public:
     int screen_select_vertex(const Vector2& screen_pos);
     int screen_select_edge(const Vector2& screen_pos);
     int screen_select_face(const Vector2& screen_pos);
+    int screen_raycast_gizmo(const Vector2& screen_pos);
 
     int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos = Vector2(-1, -1));
     void on_touch_up();
