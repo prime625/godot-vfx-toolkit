@@ -104,7 +104,10 @@ static void _append_box(PackedVector3Array& verts, PackedColorArray& cols, Packe
 // ============================================================================
 // SCREEN-SPACE SELECTION HELPERS
 // ============================================================================
-static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b) {
+// NOTE: These are declared as static class members in the header, so the
+// definitions must be class-qualified so the linker exports the expected
+// mangled symbols (VFXEditorNode::_point_segment_dist_sq_2d, etc.).
+float VFXEditorNode::_point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b) {
     Vector2 ab = b - a;
     float len2 = ab.length_squared();
     if (len2 < 0.0001f) return p.distance_squared_to(a);
@@ -112,7 +115,7 @@ static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const
     return p.distance_squared_to(a + ab * t);
 }
 
-static bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly) {
+bool VFXEditorNode::_point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly) {
     bool inside = false;
     int n = poly.size();
     for (int i = 0, j = n - 1; i < n; j = i++) {
@@ -1193,7 +1196,6 @@ void VFXEditorNode::_build_skeleton_mesh() {
     skel_visual->set_material_override(mat);
     skel_visual->set_mesh(am);
 }
-
 
 // ============================================================================
 // MATH HELPERS
