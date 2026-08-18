@@ -2,6 +2,7 @@
 #define VFX_EDITOR_NODE_H
 
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/classes/immediate_mesh.hpp>
@@ -111,6 +112,13 @@ private:
     void _ensure_skeleton_visual();
     void _build_skeleton_mesh();
 
+    // === SCREEN-SPACE SELECTION ===
+    Camera3D* camera = nullptr;
+    float select_pixel_tolerance = 28.0f;
+
+    static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
+    static bool  _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
+
     // === MATH HELPERS ===
     bool _ray_vs_segment(const Vector3& ro, const Vector3& rd,
                          const Vector3& a, const Vector3& b,
@@ -219,7 +227,18 @@ public:
     int get_selected_bone() const;
     int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;
 
-    int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir);
+    // Camera binding
+    void set_camera(Camera3D* p_camera);
+    Camera3D* get_camera() const;
+
+    void set_select_pixel_tolerance(float px);
+    float get_select_pixel_tolerance() const;
+
+    int screen_select_vertex(const Vector2& screen_pos);
+    int screen_select_edge(const Vector2& screen_pos);
+    int screen_select_face(const Vector2& screen_pos);
+
+    int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos = Vector2(-1, -1));
     void on_touch_up();
     void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
 
