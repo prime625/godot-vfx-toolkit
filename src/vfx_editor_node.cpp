@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
 #include <algorithm>
 #include <vector>
 
@@ -99,6 +100,144 @@ static void _append_box(PackedVector3Array& verts, PackedColorArray& cols, Packe
     }
 }
 
+
+// ============================================================================
+// SCREEN-SPACE SELECTION HELPERS
+// ============================================================================
+static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b) {
+    Vector2 ab = b - a;
+    float len2 = ab.length_squared();
+    if (len2 < 0.0001f) return p.distance_squared_to(a);
+    float t = vfx::clampf((p - a).dot(ab) / len2, 0.0f, 1.0f);
+    return p.distance_squared_to(a + ab * t);
+}
+
+static bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly) {
+    bool inside = false;
+    int n = poly.size();
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        if (((poly[i].y > p.y) != (poly[j].y > p.y)) &&
+            (p.x < (poly[j].x - poly[i].x) * (p.y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x))
+            inside = !inside;
+    }
+    return inside;
+}
+
+// ============================================================================
+// CAMERA & SCREEN-SPACE SELECTION
+// ============================================================================
+void VFXEditorNode::set_camera(Camera3D* p_camera) { camera = p_camera; }
+Camera3D* VFXEditorNode::get_camera() const { return camera; }
+
+void VFXEditorNode::set_select_pixel_tolerance(float px) { select_pixel_tolerance = MAX(px, 4.0f); }
+float VFXEditorNode::get_select_pixel_tolerance() const { return select_pixel_tolerance; }
+
+int VFXEditorNode::screen_select_vertex(const Vector2& screen_pos) {
+    if (!mesh.is_valid() || !camera) return -1;
+
+    float best_depth = 1e20f;
+    int best_idx = -1;
+    Transform3D gt = get_global_transform();
+    float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
+
+    for (auto* v : mesh->get_vertices()) {
+        if (v->deleted) continue;
+
+        Vector3 world_pos = gt.xform(v->position);
+        Vector3 cam_local = camera->get_global_transform().affine_inverse().xform(world_pos);
+
+        if (cam_local.z >= 0.0f) continue;
+
+        Vector2 screen = camera->unproject_position(world_pos);
+        float dist_sq = screen.distance_squared_to(screen_pos);
+        if (dist_sq > tol_sq) continue;
+
+        float depth = -cam_local.z;
+        if (depth < best_depth) {
+            best_depth = depth;
+            best_idx = (int)v->id;
+        }
+    }
+    return best_idx;
+}
+
+int VFXEditorNode::screen_select_edge(const Vector2& screen_pos) {
+    if (!mesh.is_valid() || !camera) return -1;
+
+    float best_depth = 1e20f;
+    int best_idx = -1;
+    Transform3D gt = get_global_transform();
+    float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
+
+    for (auto* e : mesh->get_edges()) {
+        if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+
+        Vector3 a_world = gt.xform(e->next->vertex->position);
+        Vector3 b_world = gt.xform(e->vertex->position);
+
+        Vector3 a_local = camera->get_global_transform().affine_inverse().xform(a_world);
+        Vector3 b_local = camera->get_global_transform().affine_inverse().xform(b_world);
+
+        if (a_local.z >= 0.0f && b_local.z >= 0.0f) continue;
+
+        Vector2 a_screen = camera->unproject_position(a_world);
+        Vector2 b_screen = camera->unproject_position(b_world);
+
+        float dist_sq = _point_segment_dist_sq_2d(screen_pos, a_screen, b_screen);
+        if (dist_sq > tol_sq) continue;
+
+        float depth = 0.0f;
+        int count = 0;
+        if (a_local.z < 0.0f) { depth += -a_local.z; count++; }
+        if (b_local.z < 0.0f) { depth += -b_local.z; count++; }
+        if (count > 0) depth /= count;
+
+        if (depth < best_depth) {
+            best_depth = depth;
+            best_idx = (int)e->id;
+        }
+    }
+    return best_idx;
+}
+
+int VFXEditorNode::screen_select_face(const Vector2& screen_pos) {
+    if (!mesh.is_valid() || !camera) return -1;
+
+    float best_depth = 1e20f;
+    int best_idx = -1;
+    Transform3D gt = get_global_transform();
+
+    for (auto* f : mesh->get_faces()) {
+        if (f->deleted || !f->halfedge) continue;
+
+        std::vector<vfx::HEVertex*> verts;
+        mesh->get_face_vertices(f->id, verts);
+        if (verts.size() < 3) continue;
+
+        PackedVector2Array poly;
+        float avg_depth = 0.0f;
+        bool all_in_front = true;
+
+        for (auto* v : verts) {
+            Vector3 world_pos = gt.xform(v->position);
+            Vector3 local = camera->get_global_transform().affine_inverse().xform(world_pos);
+            if (local.z >= 0.0f) { all_in_front = false; break; }
+            poly.push_back(camera->unproject_position(world_pos));
+            avg_depth += -local.z;
+        }
+
+        if (!all_in_front) continue;
+        if (!_point_in_polygon_2d(screen_pos, poly)) continue;
+
+        avg_depth /= verts.size();
+        if (avg_depth < best_depth) {
+            best_depth = avg_depth;
+            best_idx = (int)f->id;
+        }
+    }
+    return best_idx;
+}
+
 // ============================================================================
 // BINDINGS
 // ============================================================================
@@ -167,7 +306,15 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
     ClassDB::bind_method(D_METHOD("raycast_bone", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_bone);
 
-    ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_down);
+    ClassDB::bind_method(D_METHOD("set_camera", "camera"), &VFXEditorNode::set_camera);
+    ClassDB::bind_method(D_METHOD("get_camera"), &VFXEditorNode::get_camera);
+    ClassDB::bind_method(D_METHOD("set_select_pixel_tolerance", "px"), &VFXEditorNode::set_select_pixel_tolerance);
+    ClassDB::bind_method(D_METHOD("get_select_pixel_tolerance"), &VFXEditorNode::get_select_pixel_tolerance);
+    ClassDB::bind_method(D_METHOD("screen_select_vertex", "screen_pos"), &VFXEditorNode::screen_select_vertex);
+    ClassDB::bind_method(D_METHOD("screen_select_edge", "screen_pos"), &VFXEditorNode::screen_select_edge);
+    ClassDB::bind_method(D_METHOD("screen_select_face", "screen_pos"), &VFXEditorNode::screen_select_face);
+
+    ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir", "screen_pos"), &VFXEditorNode::on_touch_down);
     ClassDB::bind_method(D_METHOD("on_touch_up"), &VFXEditorNode::on_touch_up);
     ClassDB::bind_method(D_METHOD("on_touch_drag", "ray_origin", "ray_dir"), &VFXEditorNode::on_touch_drag);
 
@@ -1601,11 +1748,11 @@ int VFXEditorNode::get_selected_bone() const {
 
 int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const {
     if (skeleton.is_null()) return -1;
-    
+
     // ADD THESE TWO LINES — invisible bones don't eat input
     if (!show_skeleton) return -1;
     if (skel_visual && !skel_visual->is_visible()) return -1;
-    
+
     skeleton->update_transforms();
     // ... rest of the function unchanged
 
@@ -1638,10 +1785,11 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
 // ============================================================================
 // UNIFIED TOUCH API
 // ============================================================================
-int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir) {
-    // === MESH EDIT MODE (priority when active) ===
+int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos) {
+    // === MESH EDIT MODE ===
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        // Gizmo takes precedence if active
+
+        // Gizmo always uses 3D ray (it needs precise plane intersection)
         if ((selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
             int axis = raycast_gizmo(ray_origin, ray_dir);
             if (axis >= 0) {
@@ -1649,15 +1797,41 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
                 return -2;
             }
         }
-        int hit = raycast_select(ray_origin, ray_dir);
-        if (hit >= 0) return hit;
+
+        int hit = -1;
+
+        // If we have a camera and a valid screen pos, use Prisma3D-style screen picking
+        if (camera && screen_pos.x >= 0.0f) {
+            switch (edit_mode) {
+                case MODE_VERTEX: hit = screen_select_vertex(screen_pos); break;
+                case MODE_EDGE:   hit = screen_select_edge(screen_pos);   break;
+                case MODE_FACE:   hit = screen_select_face(screen_pos);   break;
+            }
+        } else {
+            // Fallback to old raycast (desktop / no camera bound)
+            hit = raycast_select(ray_origin, ray_dir);
+        }
+
+        if (hit >= 0) {
+            if (edit_mode == MODE_VERTEX) {
+                selected_vertex = hit; selected_edge = -1; selected_face = -1;
+            } else if (edit_mode == MODE_EDGE) {
+                selected_edge = hit; selected_vertex = -1; selected_face = -1;
+            } else if (edit_mode == MODE_FACE) {
+                selected_face = hit; selected_vertex = -1; selected_edge = -1;
+            }
+            _build_selection_mesh();
+            _update_gizmo_for_selection();
+            return hit;
+        }
+
         clear_selection();
         return -1;
     }
 
-    // === SKELETON MODE ===
-    if (show_skeleton && skel_visual && skel_visual->is_visible()) {
-        if (skeleton.is_valid() && selected_bone >= 0 && gizmo_node && gizmo_node->is_visible()) {
+    // === SKELETON MODE (keep ray-based, bones are thick enough) ===
+    if (show_skeleton) {
+        if (skeleton.is_valid() && selected_bone >= 0) {
             int axis = raycast_gizmo(ray_origin, ray_dir);
             if (axis >= 0) {
                 gizmo_begin_drag(axis, ray_origin, ray_dir);
