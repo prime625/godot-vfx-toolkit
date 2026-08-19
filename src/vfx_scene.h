@@ -16,7 +16,7 @@ private:
     int node_counter = 0;
 
     void _import_godot_node(Node* godot_node, VFXSceneNode* parent);
-    void _flatten_recursive(const Ref<VFXSceneNode>& node, Array& out) const;
+    
 
 protected:
     static void _bind_methods();
