@@ -239,7 +239,7 @@ void VFXUVEditorViewport::_on_left_up(const Vector2& p_pos) {
             Rect2 r(_select_start, _select_current - _select_start);
             r = r.abs();
             Vector2 uv0 = screen_to_uv(r.position);
-            Vector2 uv1 = screen_to_uv(r.end);
+            Vector2 uv1 = screen_to_uv(r.position + r.size);
             Rect2 box(uv0, uv1 - uv0);
             box = box.abs();
             uv_editor->select_box(box, true);
