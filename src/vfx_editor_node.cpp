@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <algorithm>
 #include <vector>
+#include <unordered_set>
 
 using namespace godot;
 
@@ -2089,7 +2090,7 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
 void VFXEditorNode::_sync_scene_visuals() {
     if (scene.is_null() || !scene_container) return;
 
-    HashSet<uint64_t> used;
+    std::unordered_set<uint64_t> used;
     Array nodes = scene->flatten_tree();
 
     for (int i = 0; i < nodes.size(); i++) {
@@ -2107,7 +2108,6 @@ void VFXEditorNode::_sync_scene_visuals() {
         Ref<VFXMesh> vmesh = sn->get_mesh();
         if (vmesh.is_null()) continue;
 
-        // Only rebuild if mesh is dirty (or always for now to keep it simple)
         Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, sn->get_skeleton(), sn->get_skin(), show_weights, visualize_bone);
         if (am.is_valid()) {
             visual->set_mesh(am);
@@ -2121,11 +2121,13 @@ void VFXEditorNode::_sync_scene_visuals() {
 
     // Hide visuals for nodes that are no longer visible / removed
     for (const auto& pair : scene_visuals) {
-        if (!used.has(pair.key)) {
+        if (used.find(pair.key) == used.end()) {
             pair.value->set_visible(false);
         }
     }
 }
+
+
 
 // Public scene API
 void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
