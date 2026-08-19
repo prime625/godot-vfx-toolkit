@@ -9,16 +9,15 @@ using namespace godot;
 // BINDINGS
 // ================================================================
 void VFXSceneNode::_bind_methods() {
-    // --- Enums ---
-    BIND_ENUM_CONSTANT(TYPE_EMPTY);
-    BIND_ENUM_CONSTANT(TYPE_MESH);
-    BIND_ENUM_CONSTANT(TYPE_ARMATURE);
-    BIND_ENUM_CONSTANT(TYPE_BONE);
-    BIND_ENUM_CONSTANT(TYPE_LIGHT);
-    BIND_ENUM_CONSTANT(TYPE_CAMERA);
-    BIND_ENUM_CONSTANT(TYPE_CURVE);
+    BIND_ENUM_CONSTANT(NODE_EMPTY);
+    BIND_ENUM_CONSTANT(NODE_MESH);
+    BIND_ENUM_CONSTANT(NODE_ARMATURE);
+    BIND_ENUM_CONSTANT(NODE_BONE);
+    BIND_ENUM_CONSTANT(NODE_LIGHT);
+    BIND_ENUM_CONSTANT(NODE_CAMERA);
+    BIND_ENUM_CONSTANT(NODE_CURVE);
 
-    // --- Identity ---
+    // Identity
     ClassDB::bind_method(D_METHOD("set_node_id", "id"), &VFXSceneNode::set_node_id);
     ClassDB::bind_method(D_METHOD("get_node_id"), &VFXSceneNode::get_node_id);
     ADD_PROPERTY(PropertyInfo(Variant::INT, "node_id"), "set_node_id", "get_node_id");
@@ -31,10 +30,8 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_node_type"), &VFXSceneNode::get_node_type);
     ADD_PROPERTY(PropertyInfo(Variant::INT, "node_type"), "set_node_type", "get_node_type");
 
-    // --- Hierarchy ---
-    ClassDB::bind_method(D_METHOD("set_parent_id", "parent_id"), &VFXSceneNode::set_parent_id);
-    ClassDB::bind_method(D_METHOD("get_parent_id"), &VFXSceneNode::get_parent_id);
-    ADD_PROPERTY(PropertyInfo(Variant::INT, "parent_id"), "set_parent_id", "get_parent_id");
+    // Hierarchy
+    ClassDB::bind_method(D_METHOD("get_parent_node"), &VFXSceneNode::get_parent_node);
 
     ClassDB::bind_method(D_METHOD("add_child", "child"), &VFXSceneNode::add_child);
     ClassDB::bind_method(D_METHOD("remove_child", "child"), &VFXSceneNode::remove_child);
@@ -49,15 +46,19 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("is_ancestor_of", "node"), &VFXSceneNode::is_ancestor_of);
     ClassDB::bind_method(D_METHOD("is_descendant_of", "node"), &VFXSceneNode::is_descendant_of);
 
-    // --- Traversal ---
+    // Traversal
     ClassDB::bind_method(D_METHOD("find_node_by_id", "id"), &VFXSceneNode::find_node_by_id);
     ClassDB::bind_method(D_METHOD("find_node_by_name", "name"), &VFXSceneNode::find_node_by_name);
+    ClassDB::bind_method(D_METHOD("find_child_by_name", "name"), &VFXSceneNode::find_child_by_name);
     ClassDB::bind_method(D_METHOD("get_all_descendants"), &VFXSceneNode::get_all_descendants);
 
-    // --- Transform ---
+    // Transform
     ClassDB::bind_method(D_METHOD("set_local_transform", "transform"), &VFXSceneNode::set_local_transform);
     ClassDB::bind_method(D_METHOD("get_local_transform"), &VFXSceneNode::get_local_transform);
     ADD_PROPERTY(PropertyInfo(Variant::TRANSFORM3D, "local_transform"), "set_local_transform", "get_local_transform");
+
+    ClassDB::bind_method(D_METHOD("set_transform", "transform"), &VFXSceneNode::set_transform);
+    ClassDB::bind_method(D_METHOD("get_transform"), &VFXSceneNode::get_transform);
 
     ClassDB::bind_method(D_METHOD("set_local_position", "position"), &VFXSceneNode::set_local_position);
     ClassDB::bind_method(D_METHOD("get_local_position"), &VFXSceneNode::get_local_position);
@@ -66,7 +67,7 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_local_scale", "scale"), &VFXSceneNode::set_local_scale);
     ClassDB::bind_method(D_METHOD("get_local_scale"), &VFXSceneNode::get_local_scale);
 
-    // --- State ---
+    // State
     ClassDB::bind_method(D_METHOD("set_visible", "visible"), &VFXSceneNode::set_visible);
     ClassDB::bind_method(D_METHOD("get_visible"), &VFXSceneNode::get_visible);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "visible"), "set_visible", "get_visible");
@@ -79,7 +80,7 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_selected"), &VFXSceneNode::get_selected);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "selected"), "set_selected", "get_selected");
 
-    // --- Components ---
+    // Components
     ClassDB::bind_method(D_METHOD("set_mesh", "mesh"), &VFXSceneNode::set_mesh);
     ClassDB::bind_method(D_METHOD("get_mesh"), &VFXSceneNode::get_mesh);
     ClassDB::bind_method(D_METHOD("set_skeleton", "skeleton"), &VFXSceneNode::set_skeleton);
@@ -93,11 +94,11 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_texture_painter", "painter"), &VFXSceneNode::set_texture_painter);
     ClassDB::bind_method(D_METHOD("get_texture_painter"), &VFXSceneNode::get_texture_painter);
 
-    // --- Bone ---
+    // Bone
     ClassDB::bind_method(D_METHOD("set_bone_parent_index", "index"), &VFXSceneNode::set_bone_parent_index);
     ClassDB::bind_method(D_METHOD("get_bone_parent_index"), &VFXSceneNode::get_bone_parent_index);
 
-    // --- Utility ---
+    // Utility
     ClassDB::bind_method(D_METHOD("has_mesh"), &VFXSceneNode::has_mesh);
     ClassDB::bind_method(D_METHOD("has_skeleton"), &VFXSceneNode::has_skeleton);
     ClassDB::bind_method(D_METHOD("has_skin"), &VFXSceneNode::has_skin);
@@ -107,7 +108,7 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_type_color"), &VFXSceneNode::get_type_color);
     ClassDB::bind_method(D_METHOD("get_type_icon_hint"), &VFXSceneNode::get_type_icon_hint);
 
-    // --- Serialization ---
+    // Serialization
     ClassDB::bind_method(D_METHOD("serialize"), &VFXSceneNode::serialize);
     ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXSceneNode::deserialize);
 }
@@ -116,7 +117,14 @@ void VFXSceneNode::_bind_methods() {
 // CTOR / DTOR
 // ================================================================
 VFXSceneNode::VFXSceneNode() {}
-VFXSceneNode::~VFXSceneNode() {}
+
+VFXSceneNode::~VFXSceneNode() {
+    // Clear children's back-pointers so they don't dangle
+    for (auto& c : children) {
+        if (c.is_valid()) c->parent_node = nullptr;
+    }
+    children.clear();
+}
 
 // ================================================================
 // IDENTITY
@@ -128,7 +136,7 @@ void VFXSceneNode::set_node_name(const String& p_name) { node_name = p_name; }
 String VFXSceneNode::get_node_name() const { return node_name; }
 
 void VFXSceneNode::set_node_type(int p_type) {
-    if (p_type >= TYPE_EMPTY && p_type <= TYPE_CURVE)
+    if (p_type >= NODE_EMPTY && p_type <= NODE_CURVE)
         node_type = static_cast<NodeType>(p_type);
 }
 int VFXSceneNode::get_node_type() const { return static_cast<int>(node_type); }
@@ -136,24 +144,29 @@ int VFXSceneNode::get_node_type() const { return static_cast<int>(node_type); }
 // ================================================================
 // HIERARCHY
 // ================================================================
-void VFXSceneNode::set_parent_id(int p_parent_id) { parent_id = p_parent_id; }
-int VFXSceneNode::get_parent_id() const { return parent_id; }
+void VFXSceneNode::set_parent_node(VFXSceneNode* p_parent) {
+    parent_node = p_parent;
+}
+
+VFXSceneNode* VFXSceneNode::get_parent_node() const {
+    return parent_node;
+}
 
 void VFXSceneNode::_unparent() {
-    parent_id = -1;
+    parent_node = nullptr;
 }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
     if (p_child.is_null()) return;
-    if (p_child->node_id == node_id) return;                 // Can't parent to self
-    if (is_descendant_of(p_child)) return;                   // Can't create cycle
+    if (p_child.ptr() == this) return;                 // Can't parent to self
+    if (is_descendant_of(p_child)) return;              // Can't create cycle
 
     // Remove from old parent if any
-    if (p_child->parent_id >= 0) {
-        p_child->_unparent();
+    if (p_child->parent_node != nullptr) {
+        p_child->parent_node->remove_child(p_child);
     }
 
-    p_child->parent_id = node_id;
+    p_child->parent_node = this;
     children.push_back(p_child);
 }
 
@@ -185,7 +198,9 @@ void VFXSceneNode::clear_children() {
     children.clear();
 }
 
-int VFXSceneNode::get_child_count() const { return static_cast<int>(children.size()); }
+int VFXSceneNode::get_child_count() const {
+    return static_cast<int>(children.size());
+}
 
 Ref<VFXSceneNode> VFXSceneNode::get_child(int p_index) const {
     if (p_index < 0 || p_index >= static_cast<int>(children.size()))
@@ -210,31 +225,14 @@ bool VFXSceneNode::has_child(const Ref<VFXSceneNode>& p_child) const {
 
 bool VFXSceneNode::is_ancestor_of(const Ref<VFXSceneNode>& p_node) const {
     if (p_node.is_null()) return false;
-    return p_node->is_descendant_of(Ref<VFXSceneNode>(this));
+    return p_node->is_descendant_of(Ref<VFXSceneNode>(const_cast<VFXSceneNode*>(this)));
 }
 
 bool VFXSceneNode::is_descendant_of(const Ref<VFXSceneNode>& p_node) const {
     if (p_node.is_null()) return false;
-    // Is 'this' somewhere under p_node?
-    for (const auto& c : p_node->children) {
-        if (c.ptr() == this) return true;
-        if (c.is_valid() && c->is_descendant_of(p_node)) {
-            // Wait, this logic is wrong. We need to check if 'this' is under c.
-            // Let's use a helper approach.
-        }
-    }
-    // Correct recursive check:
-    for (const auto& c : p_node->children) {
-        if (c.ptr() == this) return true;
-        if (c.is_valid()) {
-            // Check if c is ancestor of this
-            for (const auto& cc : c->children) {
-                if (cc.ptr() == this) return true;
-            }
-            // Deep check
-            if (c->find_node_by_id(node_id).is_valid()) return true;
-        }
-    }
+    if (parent_node == p_node.ptr()) return true;
+    if (parent_node != nullptr)
+        return parent_node->is_descendant_of(p_node);
     return false;
 }
 
@@ -274,6 +272,14 @@ Ref<VFXSceneNode> VFXSceneNode::find_node_by_name(const String& p_name) const {
     return result;
 }
 
+Ref<VFXSceneNode> VFXSceneNode::find_child_by_name(const String& p_name) const {
+    for (const auto& c : children) {
+        if (c.is_null()) continue;
+        if (c->node_name == p_name) return c;
+    }
+    return Ref<VFXSceneNode>();
+}
+
 void VFXSceneNode::_get_all_descendants_recursive(Array& r_out) const {
     for (const auto& c : children) {
         if (c.is_null()) continue;
@@ -295,6 +301,14 @@ void VFXSceneNode::set_local_transform(const Transform3D& p_transform) {
     local_transform = p_transform;
 }
 Transform3D VFXSceneNode::get_local_transform() const {
+    return local_transform;
+}
+
+// Aliases for vfx_scene.cpp compatibility
+void VFXSceneNode::set_transform(const Transform3D& p_transform) {
+    local_transform = p_transform;
+}
+Transform3D VFXSceneNode::get_transform() const {
     return local_transform;
 }
 
@@ -374,39 +388,36 @@ bool VFXSceneNode::has_texture_painter() const { return texture_painter.is_valid
 
 Color VFXSceneNode::get_type_color() const {
     switch (node_type) {
-        case TYPE_MESH:     return Color(0.35f, 0.56f, 0.78f); // soft blue
-        case TYPE_ARMATURE: return Color(0.78f, 0.56f, 0.35f); // orange
-        case TYPE_BONE:     return Color(0.90f, 0.70f, 0.13f); // gold
-        case TYPE_LIGHT:    return Color(0.90f, 0.90f, 0.20f); // yellow
-        case TYPE_CAMERA:   return Color(0.50f, 0.80f, 0.50f); // green
-        case TYPE_CURVE:    return Color(0.80f, 0.50f, 0.80f); // purple
-        default:            return Color(0.53f, 0.53f, 0.53f); // gray
+        case NODE_MESH:     return Color(0.35f, 0.56f, 0.78f);
+        case NODE_ARMATURE: return Color(0.78f, 0.56f, 0.35f);
+        case NODE_BONE:     return Color(0.90f, 0.70f, 0.13f);
+        case NODE_LIGHT:    return Color(0.90f, 0.90f, 0.20f);
+        case NODE_CAMERA:   return Color(0.50f, 0.80f, 0.50f);
+        case NODE_CURVE:    return Color(0.80f, 0.50f, 0.80f);
+        default:            return Color(0.53f, 0.53f, 0.53f);
     }
 }
 
 String VFXSceneNode::get_type_icon_hint() const {
     switch (node_type) {
-        case TYPE_MESH:     return "mesh";
-        case TYPE_ARMATURE: return "armature";
-        case TYPE_BONE:     return "bone";
-        case TYPE_LIGHT:    return "light";
-        case TYPE_CAMERA:   return "camera";
-        case TYPE_CURVE:    return "curve";
+        case NODE_MESH:     return "mesh";
+        case NODE_ARMATURE: return "armature";
+        case NODE_BONE:     return "bone";
+        case NODE_LIGHT:    return "light";
+        case NODE_CAMERA:   return "camera";
+        case NODE_CURVE:    return "curve";
         default:            return "empty";
     }
 }
 
 // ================================================================
-// SERIALIZATION (metadata + recursive children; components by reference)
+// SERIALIZATION
 // ================================================================
 PackedByteArray VFXSceneNode::serialize() const {
     PackedByteArray data;
-
-    // Header
     data.append('V'); data.append('F'); data.append('X'); data.append('N');
     data.append(1); // version
 
-    // Node metadata
     auto append_int = [&](int v) {
         data.append((v >> 0) & 0xFF);
         data.append((v >> 8) & 0xFF);
@@ -422,17 +433,15 @@ PackedByteArray VFXSceneNode::serialize() const {
     };
 
     append_int(node_id);
-    append_int(parent_id);
+    append_int(parent_node ? parent_node->node_id : -1);
     append_int(static_cast<int>(node_type));
     append_int(bone_parent_idx);
 
-    // Name
     CharString cs = node_name.utf8();
     int name_len = cs.length();
     append_int(name_len);
     for (int i = 0; i < name_len; ++i) data.append(cs[i]);
 
-    // Transform (12 floats: 3x4 matrix)
     Basis b = local_transform.get_basis();
     Vector3 o = local_transform.get_origin();
     append_float(b[0][0]); append_float(b[0][1]); append_float(b[0][2]);
@@ -440,12 +449,10 @@ PackedByteArray VFXSceneNode::serialize() const {
     append_float(b[2][0]); append_float(b[2][1]); append_float(b[2][2]);
     append_float(o.x);      append_float(o.y);      append_float(o.z);
 
-    // Flags
     data.append(node_visible ? 1 : 0);
     data.append(node_expanded ? 1 : 0);
     data.append(node_selected ? 1 : 0);
 
-    // Component presence flags (IDs saved separately by VFXScene)
     data.append(has_mesh() ? 1 : 0);
     data.append(has_skeleton() ? 1 : 0);
     data.append(has_skin() ? 1 : 0);
@@ -453,7 +460,6 @@ PackedByteArray VFXSceneNode::serialize() const {
     data.append(has_curve() ? 1 : 0);
     data.append(has_texture_painter() ? 1 : 0);
 
-    // Children recursive
     append_int(static_cast<int>(children.size()));
     for (const auto& c : children) {
         if (c.is_valid()) {
@@ -466,8 +472,6 @@ PackedByteArray VFXSceneNode::serialize() const {
 }
 
 void VFXSceneNode::deserialize(const PackedByteArray& p_data) {
-    // TODO: Implement if you need runtime tree loading.
-    // For now, this is a stub to satisfy the binding.
-    // A full implementation needs a byte offset cursor and recursive reconstruction.
     clear_children();
+    // TODO: full implementation with offset cursor
 }
