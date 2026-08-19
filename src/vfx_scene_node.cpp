@@ -350,7 +350,9 @@ PackedByteArray VFXSceneNode::serialize() const {
     CharString cs = node_name.utf8();
     int name_len = cs.length();
     append_int(name_len);
-    for (int i = 0; i < name_len; ++i) data.append(cs[i]);
+
+	for (int i = 0; i < name_len; ++i) data.append(cs.ptr()[i]);
+
 
     Basis b = local_transform.get_basis();
     Vector3 o = local_transform.get_origin();
