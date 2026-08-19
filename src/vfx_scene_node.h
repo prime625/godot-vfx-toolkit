@@ -103,8 +103,7 @@ public:
     Ref<VFXSceneNode> find_child_by_name(const String& name) const;
     // BEFORE: void get_all_descendants(Array& out) const;
     Array get_all_descendants() const;
-    void get_all_descendants(Array& out) const;
-
+    
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& data);
 };
