@@ -183,7 +183,7 @@ Array VFXScene::flatten_tree() const {
     Array out;
     if (root.is_valid()) {
         out.append(root);
-        root->get_all_descendants(out);
+        out.append_array(root->get_all_descendants());
     }
     return out;
 }
