@@ -15,6 +15,9 @@
 #include "vfx_animator.h"
 #include "vfx_curve.h"
 #include "vfx_texture_painter.h"
+#include "vfx_scene.h"
+#include "vfx_scene_node.h"
+#include <godot_cpp/templates/hash_map.hpp>
 
 using namespace godot;
 
@@ -46,6 +49,8 @@ public:
         MODE_FACE = 3
     };
 
+    static const int SCENE_NODE_HIT = -3;
+
 private:
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
@@ -56,7 +61,16 @@ private:
 
     MeshInstance3D* mesh_instance = nullptr;
     MeshInstance3D* brush_cursor = nullptr;
+	    Ref<VFXScene> scene;
+    Ref<VFXSceneNode> active_scene_node;
+    Node3D* scene_container = nullptr;
+    HashMap<uint64_t, MeshInstance3D*> scene_visuals;
 
+    void _ensure_scene_container();
+    void _sync_scene_visuals();
+    void _clear_scene_visuals();
+    MeshInstance3D* _get_scene_visual(uint64_t node_id);
+    Ref<ArrayMesh> _build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone);
     Ref<StandardMaterial3D> base_material;
     Ref<StandardMaterial3D> weight_material;
 
@@ -149,6 +163,14 @@ public:
     void set_vfx_skin(const Ref<VFXSkin>& p_skin);
     Ref<VFXSkin> get_vfx_skin() const;
     void auto_weight();
+
+	void set_scene(const Ref<VFXScene>& p_scene);
+    Ref<VFXScene> get_scene() const;
+    void set_active_scene_node(const Ref<VFXSceneNode>& node);
+    Ref<VFXSceneNode> get_active_scene_node() const;
+    bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
+    Ref<VFXSceneNode> raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir);
+ 
 
     void set_vfx_animator(const Ref<VFXAnimator>& p_anim);
     Ref<VFXAnimator> get_vfx_animator() const;
