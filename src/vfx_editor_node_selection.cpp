@@ -1,4 +1,5 @@
 #include "vfx_editor_node.h"
+#include "vfx_math.h"
 #include "vfx_editor_utils.h"
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
