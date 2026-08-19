@@ -12,6 +12,7 @@
 #include "vfx_texture_painter.h"
 #include "vfx_scene.h"
 #include "vfx_scene_node.h"
+#include "vfx_uv_editor_viewport.h"
 
 void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -26,6 +27,7 @@ void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
         ClassDB::register_class<VFXRetopology>();
         ClassDB::register_class<VFXTexturePainter>();
         ClassDB::register_class<VFXScene>();
+		ClassDB::register_class<VFXUVEditorViewport>();
 		ClassDB::register_class<VFXSceneNode>();
 
     }
