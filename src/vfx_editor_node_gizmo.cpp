@@ -183,8 +183,8 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
 
             float closest_d2 = 1e20f;
             for (int j = 0; j < segs; j++) {
-                float ang0 = (float)j / segs * Math_PI * 2.0f;
-                float ang1 = (float)((j + 1) % segs) / segs * Math_PI * 2.0f;
+                float ang0 = (float)j / segs * 3.14159265f * 2.0f;
+                float ang1 = (float)((j + 1) % segs) / segs * 3.14159265f * 2.0f;
 
                 Vector3 p0 = o + (u * cosf(ang0) + v * sinf(ang0)) * ring_r;
                 Vector3 p1 = o + (u * cosf(ang1) + v * sinf(ang1)) * ring_r;
