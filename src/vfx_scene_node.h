@@ -16,7 +16,7 @@
 #include "vfx_skin.h"
 #include "vfx_animator.h"
 
-// Forward declarations (your existing classes)
+// Forward declarations
 class VFXCurve;
 class VFXTexturePainter;
 
@@ -27,21 +27,22 @@ class VFXSceneNode : public RefCounted {
 
 public:
     enum NodeType {
-        TYPE_EMPTY = 0,
-        TYPE_MESH = 1,
-        TYPE_ARMATURE = 2,
-        TYPE_BONE = 3,
-        TYPE_LIGHT = 4,
-        TYPE_CAMERA = 5,
-        TYPE_CURVE = 6
+        NODE_EMPTY = 0,
+        NODE_MESH = 1,
+        NODE_ARMATURE = 2,
+        NODE_BONE = 3,
+        NODE_LIGHT = 4,
+        NODE_CAMERA = 5,
+        NODE_CURVE = 6
     };
 
 private:
     int node_id = -1;
     String node_name = "Node";
-    NodeType node_type = TYPE_EMPTY;
+    NodeType node_type = NODE_EMPTY;
 
-    int parent_id = -1;
+    // Hierarchy: parent is a raw back-pointer (parent owns us via Ref)
+    VFXSceneNode* parent_node = nullptr;
     std::vector<Ref<VFXSceneNode>> children;
 
     Transform3D local_transform;
@@ -49,7 +50,7 @@ private:
     bool node_expanded = true;
     bool node_selected = false;
 
-    // Components (only the relevant one is typically non-null)
+    // Components
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
@@ -57,7 +58,7 @@ private:
     Ref<VFXCurve> curve;
     Ref<VFXTexturePainter> texture_painter;
 
-    // Bone-specific metadata
+    // Bone-specific
     int bone_parent_idx = -1;
 
     // Internal helpers
@@ -88,8 +89,8 @@ public:
     // ================================================================
     // HIERARCHY
     // ================================================================
-    void set_parent_id(int p_parent_id);
-    int get_parent_id() const;
+    void set_parent_node(VFXSceneNode* p_parent);
+    VFXSceneNode* get_parent_node() const;
 
     void add_child(const Ref<VFXSceneNode>& p_child);
     void remove_child(const Ref<VFXSceneNode>& p_child);
@@ -109,6 +110,7 @@ public:
     // ================================================================
     Ref<VFXSceneNode> find_node_by_id(int p_id) const;
     Ref<VFXSceneNode> find_node_by_name(const String& p_name) const;
+    Ref<VFXSceneNode> find_child_by_name(const String& p_name) const; // direct children only
     Array get_all_descendants() const;
 
     // ================================================================
@@ -116,6 +118,9 @@ public:
     // ================================================================
     void set_local_transform(const Transform3D& p_transform);
     Transform3D get_local_transform() const;
+
+    void set_transform(const Transform3D& p_transform); // alias for set_local_transform
+    Transform3D get_transform() const;                  // alias for get_local_transform
 
     void set_local_position(const Vector3& p_pos);
     Vector3 get_local_position() const;
@@ -177,7 +182,7 @@ public:
     String get_type_icon_hint() const;
 
     // ================================================================
-    // SERIALIZATION (node metadata only; components saved separately)
+    // SERIALIZATION
     // ================================================================
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& p_data);
