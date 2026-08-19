@@ -2,13 +2,12 @@
 #define VFX_EDITOR_NODE_H
 
 #include <godot_cpp/classes/node3d.hpp>
-#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
-#include <godot_cpp/classes/immediate_mesh.hpp>
-#include <godot_cpp/classes/sphere_mesh.hpp>
-#include <godot_cpp/variant/variant.hpp>
-#include <vector>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
 #include "vfx_skin.h"
@@ -17,7 +16,6 @@
 #include "vfx_texture_painter.h"
 #include "vfx_scene.h"
 #include "vfx_scene_node.h"
-#include <godot_cpp/templates/hash_map.hpp>
 
 using namespace godot;
 
@@ -61,7 +59,7 @@ private:
 
     MeshInstance3D* mesh_instance = nullptr;
     MeshInstance3D* brush_cursor = nullptr;
-	    Ref<VFXScene> scene;
+    Ref<VFXScene> scene;
     Ref<VFXSceneNode> active_scene_node;
     Node3D* scene_container = nullptr;
     HashMap<uint64_t, MeshInstance3D*> scene_visuals;
@@ -110,7 +108,7 @@ private:
     Transform3D gizmo_drag_start_transform;
     Plane gizmo_drag_plane;
     Quaternion gizmo_drag_start_rotation;
-    Vector3    gizmo_drag_start_scale;
+    Vector3 gizmo_drag_start_scale;
 
     MeshInstance3D* gizmo_node = nullptr;
 
@@ -131,14 +129,11 @@ private:
     float select_pixel_tolerance = 28.0f;
 
     static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
-    static bool  _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
+    static bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
 
-    // === MATH HELPERS ===
-    bool _ray_vs_segment(const Vector3& ro, const Vector3& rd,
-                         const Vector3& a, const Vector3& b,
-                         float radius, float& out_t) const;
-    bool _ray_vs_plane(const Vector3& ro, const Vector3& rd,
-                       const Plane& p, Vector3& out_hit) const;
+    // === MATH HELPERS (moved to vfx_editor_utils) ===
+    // bool _ray_vs_segment(...)  -> now in vfx_editor_utils namespace
+    // bool _ray_vs_plane(...)    -> now in vfx_editor_utils namespace
 
     void _ensure_mesh_instance();
     void _ensure_brush_cursor();
@@ -164,13 +159,12 @@ public:
     Ref<VFXSkin> get_vfx_skin() const;
     void auto_weight();
 
-	void set_scene(const Ref<VFXScene>& p_scene);
+    void set_scene(const Ref<VFXScene>& p_scene);
     Ref<VFXScene> get_scene() const;
     void set_active_scene_node(const Ref<VFXSceneNode>& node);
     Ref<VFXSceneNode> get_active_scene_node() const;
     bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
     Ref<VFXSceneNode> raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir);
- 
 
     void set_vfx_animator(const Ref<VFXAnimator>& p_anim);
     Ref<VFXAnimator> get_vfx_animator() const;
