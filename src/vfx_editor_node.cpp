@@ -485,6 +485,17 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_symmetry_enabled"), &VFXEditorNode::get_symmetry_enabled);
     ClassDB::bind_method(D_METHOD("set_symmetry_axis", "axis"), &VFXEditorNode::set_symmetry_axis);
     ClassDB::bind_method(D_METHOD("get_symmetry_axis"), &VFXEditorNode::get_symmetry_axis);
+
+ 		// === SCENE TREE ===
+ 		ClassDB::bind_method(D_METHOD("set_scene", "scene"), &VFXEditorNode::set_scene);
+    ClassDB::bind_method(D_METHOD("get_scene"), &VFXEditorNode::get_scene);
+    ClassDB::bind_method(D_METHOD("set_active_scene_node", "node"), &VFXEditorNode::set_active_scene_node);
+    ClassDB::bind_method(D_METHOD("get_active_scene_node"), &VFXEditorNode::get_active_scene_node);
+    ClassDB::bind_method(D_METHOD("import_model", "filepath", "parent"), &VFXEditorNode::import_model, DEFVAL(Ref<VFXSceneNode>()));
+    ClassDB::bind_method(D_METHOD("raycast_scene_node", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_scene_node);
+
+    ClassDB::bind_integer_constant(get_class_static(), "", "SCENE_NODE_HIT", SCENE_NODE_HIT);
+
 }
 
 // ============================================================================
@@ -508,21 +519,23 @@ VFXEditorNode::VFXEditorNode() {
 VFXEditorNode::~VFXEditorNode() {}
 
 void VFXEditorNode::_notification(int p_what) {
-    if (p_what == NOTIFICATION_ENTER_TREE) {
+        if (p_what == NOTIFICATION_ENTER_TREE) {
         _ensure_mesh_instance();
         _ensure_brush_cursor();
         _ensure_gizmo_node();
         _ensure_skeleton_visual();
-        _ensure_selection_visual(); // NEW
+        _ensure_selection_visual();
+        _ensure_scene_container(); // ADD THIS
     }
     if (p_what == NOTIFICATION_PROCESS) {
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
         }
 
-        // Refresh skinned mesh when skeleton is posed/animated
-        if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
-            _update_godot_mesh();
+        if (scene.is_valid()) {
+            _sync_scene_visuals(); // ADD THIS — renders all scene meshes
+        } else if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
+            _update_godot_mesh(); // legacy single-mesh path
         }
 
         if (show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
@@ -532,7 +545,6 @@ void VFXEditorNode::_notification(int p_what) {
             skel_visual->set_visible(false);
         }
 
-        // NEW: selection overlay
         if (mesh.is_valid() && show_wireframe) {
             _build_selection_mesh();
             if (selection_visual) selection_visual->set_visible(true);
@@ -580,80 +592,10 @@ void VFXEditorNode::_update_godot_mesh() {
     _ensure_mesh_instance();
     if (mesh.is_null()) return;
 
-    Ref<ArrayMesh> am;
-    am.instantiate();
-
-    Array arrays;
-    arrays.resize(Mesh::ARRAY_MAX);
-
-    PackedVector3Array positions;
-    if (skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
-        skeleton->update_transforms();
-        if (skin.is_valid()) skin->set_mesh_transform(get_global_transform());
-        positions = skin->compute_skinned_positions();
-
-        // DEBUG: verify skinning is actually producing different positions
-        PackedVector3Array bind_pos = mesh->get_positions();
-        if (bind_pos.size() > 0 && positions.size() > 0) {
-            float diff = bind_pos[0].distance_to(positions[0]);
-            UtilityFunctions::print("Skinned pos[0] diff: ", diff,
-                " bone0_pos: ", skeleton->get_bone_model_transform(0).get_origin(),
-                " bind0_pos: ", skeleton->get_bone_bind_pose(0).get_origin());
-        }
-    } else {
-        positions = mesh->get_positions();
-    }
-
-    arrays[Mesh::ARRAY_VERTEX] = positions;
-
-    // FIX: validate normals so mesh never goes black
-    PackedVector3Array normals = mesh->get_normals();
-    for (int i = 0; i < normals.size(); i++) {
-        if (normals[i].length_squared() < 0.0001f) normals[i] = Vector3(0, 1, 0);
-        else normals[i] = normals[i].normalized();
-    }
-    arrays[Mesh::ARRAY_NORMAL] = normals;
-
-    arrays[Mesh::ARRAY_TEX_UV] = mesh->get_uvs();
-    arrays[Mesh::ARRAY_COLOR] = mesh->get_colors();
-    arrays[Mesh::ARRAY_INDEX] = mesh->get_indices();
-
-    if (!show_weights && skin.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
-        // pre-skinned: omit bones/weights
-    } else {
-        int vc = positions.size();
-        if (vc > 0) {
-            PackedInt32Array bones;
-            PackedFloat32Array weights;
-            bones.resize(vc * 4);
-            weights.resize(vc * 4);
-            for (int i = 0; i < vc; i++) {
-                int b[4];
-                float w[4];
-                mesh->get_vertex_skinning(i, b, w);
-                for (int j = 0; j < 4; j++) {
-                    bones[i * 4 + j] = b[j];
-                    weights[i * 4 + j] = w[j];
-                }
-            }
-            arrays[Mesh::ARRAY_BONES] = bones;
-            arrays[Mesh::ARRAY_WEIGHTS] = weights;
-        }
-    }
-
-    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    Ref<ArrayMesh> am = _build_array_mesh_for_node(mesh, skeleton, skin, show_weights, visualize_bone);
+    if (am.is_null()) return;
 
     if (show_weights && skin.is_valid()) {
-        if (am->get_surface_count() > 0) {
-            PackedColorArray colors = skin->get_weight_visualization(visualize_bone);
-            Array a = am->surface_get_arrays(0);
-            PackedVector3Array verts = a[Mesh::ARRAY_VERTEX];
-            if (colors.size() == verts.size()) {
-                a[Mesh::ARRAY_COLOR] = colors;
-                am->clear_surfaces();
-                am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, a);
-            }
-        }
         mesh_instance->set_surface_override_material(0, weight_material);
     } else {
         mesh_instance->set_surface_override_material(0, base_material);
@@ -765,7 +707,11 @@ void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
     bool show = false;
     if (edit_mode == MODE_OBJECT) {
-        show = (selected_bone >= 0 && show_skeleton);
+        if (active_scene_node.is_valid()) {
+            show = true;
+        } else if (selected_bone >= 0 && show_skeleton) {
+            show = true;
+        }
     } else {
         show = (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0);
     }
@@ -1913,6 +1859,33 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
 // UNIFIED TOUCH API
 // ============================================================================
 int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos) {
+    // === SCENE MODE (OBJECT-level selection) ===
+    if (scene.is_valid() && edit_mode == MODE_OBJECT) {
+        // Gizmo takes precedence for the active scene node
+        if (active_scene_node.is_valid() && gizmo_node && gizmo_node->is_visible()) {
+            int axis;
+            if (camera && screen_pos.x >= 0.0f)
+                axis = screen_raycast_gizmo(screen_pos);
+            else
+                axis = raycast_gizmo(ray_origin, ray_dir);
+
+            if (axis >= 0) {
+                gizmo_begin_drag(axis, ray_origin, ray_dir);
+                return -2;
+            }
+        }
+
+        Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
+        if (hit.is_valid()) {
+            set_active_scene_node(hit);
+            return SCENE_NODE_HIT;
+        }
+
+        // Clicked empty space → deselect active object
+        set_active_scene_node(Ref<VFXSceneNode>());
+        return -1;
+    }
+
     // === MESH EDIT MODE ===
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
 
@@ -1985,6 +1958,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
     return -1;
 }
 
+
 void VFXEditorNode::on_touch_up() {
     if (is_gizmo_dragging()) {
         gizmo_end_drag();
@@ -2015,6 +1989,219 @@ void VFXEditorNode::paint_at(const Vector3& ray_origin, const Vector3& ray_dir) 
     if (painter.is_valid()) {
         painter->paint_at(ray_origin, ray_dir);
     }
+}
+
+
+void VFXEditorNode::_ensure_scene_container() {
+    if (!scene_container) {
+        scene_container = memnew(Node3D);
+        scene_container->set_name("SceneContainer");
+        add_child(scene_container);
+        scene_container->set_owner(this);
+    }
+}
+
+MeshInstance3D* VFXEditorNode::_get_scene_visual(uint64_t node_id) {
+    MeshInstance3D** ptr = scene_visuals.getptr(node_id);
+    if (ptr) return *ptr;
+    MeshInstance3D* vis = memnew(MeshInstance3D);
+    vis->set_name("SceneVisual_" + String::num_int64(node_id));
+    scene_container->add_child(vis);
+    vis->set_owner(scene_container);
+    scene_visuals.insert(node_id, vis);
+    return vis;
+}
+
+void VFXEditorNode::_clear_scene_visuals() {
+    for (auto& pair : scene_visuals) {
+        if (pair.value) memdelete(pair.value);
+    }
+    scene_visuals.clear();
+}
+
+Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone) {
+    if (p_mesh.is_null()) return Ref<ArrayMesh>();
+    Ref<ArrayMesh> am;
+    am.instantiate();
+
+    Array arrays;
+    arrays.resize(Mesh::ARRAY_MAX);
+
+    PackedVector3Array positions;
+    if (p_skin.is_valid() && p_sk.is_valid() && p_sk->get_bone_count() > 0 && !p_show_weights) {
+        p_sk->update_transforms();
+        p_skin->set_mesh_transform(Transform3D()); // scene nodes handle their own transform
+        positions = p_skin->compute_skinned_positions();
+    } else {
+        positions = p_mesh->get_positions();
+    }
+    arrays[Mesh::ARRAY_VERTEX] = positions;
+
+    PackedVector3Array normals = p_mesh->get_normals();
+    for (int i = 0; i < normals.size(); i++) {
+        if (normals[i].length_squared() < 0.0001f) normals[i] = Vector3(0, 1, 0);
+        else normals[i] = normals[i].normalized();
+    }
+    arrays[Mesh::ARRAY_NORMAL] = normals;
+    arrays[Mesh::ARRAY_TEX_UV] = p_mesh->get_uvs();
+    arrays[Mesh::ARRAY_COLOR] = p_mesh->get_colors();
+    arrays[Mesh::ARRAY_INDEX] = p_mesh->get_indices();
+
+    if (!p_show_weights && p_skin.is_valid() && p_sk.is_valid() && p_sk->get_bone_count() > 0) {
+        // Pre-skinned, no bone attributes needed
+    } else {
+        int vc = positions.size();
+        if (vc > 0) {
+            PackedInt32Array bones;
+            PackedFloat32Array weights;
+            bones.resize(vc * 4);
+            weights.resize(vc * 4);
+            for (int i = 0; i < vc; i++) {
+                int b[4]; float w[4];
+                p_mesh->get_vertex_skinning(i, b, w);
+                for (int j = 0; j < 4; j++) {
+                    bones[i * 4 + j] = b[j];
+                    weights[i * 4 + j] = w[j];
+                }
+            }
+            arrays[Mesh::ARRAY_BONES] = bones;
+            arrays[Mesh::ARRAY_WEIGHTS] = weights;
+        }
+    }
+
+    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+
+    if (p_show_weights && p_skin.is_valid()) {
+        if (am->get_surface_count() > 0) {
+            PackedColorArray colors = p_skin->get_weight_visualization(p_viz_bone);
+            Array a = am->surface_get_arrays(0);
+            PackedVector3Array verts = a[Mesh::ARRAY_VERTEX];
+            if (colors.size() == verts.size()) {
+                a[Mesh::ARRAY_COLOR] = colors;
+                am->clear_surfaces();
+                am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, a);
+            }
+        }
+    }
+    return am;
+}
+
+void VFXEditorNode::_sync_scene_visuals() {
+    if (scene.is_null() || !scene_container) return;
+
+    HashSet<uint64_t> used;
+    Array nodes = scene->flatten_tree();
+
+    for (int i = 0; i < nodes.size(); i++) {
+        Ref<VFXSceneNode> sn = nodes[i];
+        if (sn.is_null() || sn->get_node_type() != VFXSceneNode::NODE_MESH) continue;
+        if (!sn->is_visible()) continue;
+
+        uint64_t id = sn->get_instance_id();
+        used.insert(id);
+
+        MeshInstance3D* visual = _get_scene_visual(id);
+        visual->set_visible(true);
+        visual->set_transform(sn->get_global_transform());
+
+        Ref<VFXMesh> vmesh = sn->get_mesh();
+        if (vmesh.is_null()) continue;
+
+        // Only rebuild if mesh is dirty (or always for now to keep it simple)
+        Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, sn->get_skeleton(), sn->get_skin(), show_weights, visualize_bone);
+        if (am.is_valid()) {
+            visual->set_mesh(am);
+            if (show_weights && sn->get_skin().is_valid()) {
+                visual->set_surface_override_material(0, weight_material);
+            } else {
+                visual->set_surface_override_material(0, base_material);
+            }
+        }
+    }
+
+    // Hide visuals for nodes that are no longer visible / removed
+    for (const auto& pair : scene_visuals) {
+        if (!used.has(pair.key)) {
+            pair.value->set_visible(false);
+        }
+    }
+}
+
+// Public scene API
+void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
+    scene = p_scene;
+    _clear_scene_visuals();
+    if (scene.is_valid()) {
+        _ensure_scene_container();
+        if (!scene->get_root().is_valid()) scene->create_default_root();
+        // Hide the legacy single mesh instance when in scene mode
+        if (mesh_instance) mesh_instance->set_visible(false);
+    } else {
+        if (mesh_instance) mesh_instance->set_visible(true);
+    }
+    _sync_scene_visuals();
+}
+
+Ref<VFXScene> VFXEditorNode::get_scene() const { return scene; }
+
+void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& node) {
+    active_scene_node = node;
+    if (node.is_valid()) {
+        // Wire the existing editing pipeline to this node's data
+        mesh = node->get_mesh();
+        skeleton = node->get_skeleton();
+        skin = node->get_skin();
+        animator = node->get_animator();
+
+        // Move gizmo to this object's transform
+        gizmo_transform = node->get_transform();
+        if (gizmo_node) {
+            gizmo_node->set_transform(_get_visual_gizmo_transform());
+            gizmo_node->set_visible(true);
+            _build_gizmo_mesh();
+        }
+        _update_gizmo_visibility();
+    }
+}
+
+Ref<VFXSceneNode> VFXEditorNode::get_active_scene_node() const { return active_scene_node; }
+
+bool VFXEditorNode::import_model(const String& filepath, const Ref<VFXSceneNode>& parent) {
+    if (scene.is_null()) return false;
+    bool ok = scene->import_model(filepath, parent);
+    if (ok) _sync_scene_visuals();
+    return ok;
+}
+
+Ref<VFXSceneNode> VFXEditorNode::raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir) {
+    if (scene.is_null()) return Ref<VFXSceneNode>();
+    float closest = 1e20f;
+    Ref<VFXSceneNode> best;
+
+    Array nodes = scene->flatten_tree();
+    for (int i = 0; i < nodes.size(); i++) {
+        Ref<VFXSceneNode> sn = nodes[i];
+        if (sn.is_null() || sn->get_node_type() != VFXSceneNode::NODE_MESH) continue;
+        if (!sn->is_visible()) continue;
+
+        Ref<VFXMesh> vmesh = sn->get_mesh();
+        if (vmesh.is_null()) continue;
+
+        Transform3D global = sn->get_global_transform();
+        Transform3D inv = global.affine_inverse();
+        Vector3 local_origin = inv.xform(ray_origin);
+        Vector3 local_dir = inv.basis.xform(ray_dir).normalized();
+
+        Vector3 hit;
+        if (vmesh->raycast(local_origin, local_dir, hit, closest)) {
+            float dist = global.xform(hit).distance_to(ray_origin);
+            if (dist < closest) {
+                closest = dist;
+                best = sn;
+            }
+        }
+    }
+    return best;
 }
 
 // ============================================================================
