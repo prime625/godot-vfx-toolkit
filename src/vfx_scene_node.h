@@ -16,10 +16,6 @@
 #include "vfx_skin.h"
 #include "vfx_animator.h"
 
-// Forward declarations
-class VFXCurve;
-class VFXTexturePainter;
-
 using namespace godot;
 
 class VFXSceneNode : public RefCounted {
@@ -41,7 +37,6 @@ private:
     String node_name = "Node";
     NodeType node_type = NODE_EMPTY;
 
-    // Hierarchy: parent is a raw back-pointer (parent owns us via Ref)
     VFXSceneNode* parent_node = nullptr;
     std::vector<Ref<VFXSceneNode>> children;
 
@@ -55,13 +50,9 @@ private:
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
     Ref<VFXAnimator> animator;
-    Ref<VFXCurve> curve;
-    Ref<VFXTexturePainter> texture_painter;
 
-    // Bone-specific
     int bone_parent_idx = -1;
 
-    // Internal helpers
     void _unparent();
     Ref<VFXSceneNode> _find_node_by_id_recursive(int p_id) const;
     void _find_node_by_name_recursive(const String& p_name, Ref<VFXSceneNode>& r_result) const;
@@ -74,54 +65,39 @@ public:
     VFXSceneNode();
     ~VFXSceneNode();
 
-    // ================================================================
-    // IDENTITY
-    // ================================================================
+    // Identity
     void set_node_id(int p_id);
     int get_node_id() const;
-
     void set_node_name(const String& p_name);
     String get_node_name() const;
-
     void set_node_type(int p_type);
     int get_node_type() const;
 
-    // ================================================================
-    // HIERARCHY
-    // ================================================================
+    // Hierarchy
     void set_parent_node(VFXSceneNode* p_parent);
     VFXSceneNode* get_parent_node() const;
-
     void add_child(const Ref<VFXSceneNode>& p_child);
     void remove_child(const Ref<VFXSceneNode>& p_child);
     void remove_child_by_id(int p_child_id);
     void clear_children();
-
     int get_child_count() const;
     Ref<VFXSceneNode> get_child(int p_index) const;
     Array get_children() const;
-
     bool has_child(const Ref<VFXSceneNode>& p_child) const;
     bool is_ancestor_of(const Ref<VFXSceneNode>& p_node) const;
     bool is_descendant_of(const Ref<VFXSceneNode>& p_node) const;
 
-    // ================================================================
-    // TREE TRAVERSAL
-    // ================================================================
+    // Traversal
     Ref<VFXSceneNode> find_node_by_id(int p_id) const;
     Ref<VFXSceneNode> find_node_by_name(const String& p_name) const;
-    Ref<VFXSceneNode> find_child_by_name(const String& p_name) const; // direct children only
+    Ref<VFXSceneNode> find_child_by_name(const String& p_name) const;
     Array get_all_descendants() const;
 
-    // ================================================================
-    // TRANSFORM
-    // ================================================================
+    // Transform
     void set_local_transform(const Transform3D& p_transform);
     Transform3D get_local_transform() const;
-
-    void set_transform(const Transform3D& p_transform); // alias for set_local_transform
-    Transform3D get_transform() const;                  // alias for get_local_transform
-
+    void set_transform(const Transform3D& p_transform);
+    Transform3D get_transform() const;
     void set_local_position(const Vector3& p_pos);
     Vector3 get_local_position() const;
     void set_local_rotation(const Quaternion& p_rot);
@@ -129,65 +105,41 @@ public:
     void set_local_scale(const Vector3& p_scale);
     Vector3 get_local_scale() const;
 
-    // ================================================================
-    // STATE (Outliner + Viewport)
-    // ================================================================
+    // State
     void set_visible(bool p_visible);
     bool get_visible() const;
-
     void set_expanded(bool p_expanded);
     bool get_expanded() const;
-
     void set_selected(bool p_selected);
     bool get_selected() const;
 
-    // ================================================================
-    // COMPONENTS
-    // ================================================================
+    // Components
     void set_mesh(const Ref<VFXMesh>& p_mesh);
     Ref<VFXMesh> get_mesh() const;
-
     void set_skeleton(const Ref<VFXSkeleton>& p_skeleton);
     Ref<VFXSkeleton> get_skeleton() const;
-
     void set_skin(const Ref<VFXSkin>& p_skin);
     Ref<VFXSkin> get_skin() const;
-
     void set_animator(const Ref<VFXAnimator>& p_animator);
     Ref<VFXAnimator> get_animator() const;
 
-    void set_curve(const Ref<VFXCurve>& p_curve);
-    Ref<VFXCurve> get_curve() const;
-
-    void set_texture_painter(const Ref<VFXTexturePainter>& p_painter);
-    Ref<VFXTexturePainter> get_texture_painter() const;
-
-    // ================================================================
-    // BONE METADATA
-    // ================================================================
+    // Bone
     void set_bone_parent_index(int p_idx);
     int get_bone_parent_index() const;
 
-    // ================================================================
-    // UTILITY
-    // ================================================================
+    // Utility
     bool has_mesh() const;
     bool has_skeleton() const;
     bool has_skin() const;
     bool has_animator() const;
-    bool has_curve() const;
-    bool has_texture_painter() const;
-
     Color get_type_color() const;
     String get_type_icon_hint() const;
 
-    // ================================================================
-    // SERIALIZATION
-    // ================================================================
+    // Serialization
     PackedByteArray serialize() const;
     void deserialize(const PackedByteArray& p_data);
 };
 
 VARIANT_ENUM_CAST(VFXSceneNode::NodeType);
 
-#endif // VFX_SCENE_NODE_H
+#endif
