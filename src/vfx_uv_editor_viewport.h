@@ -84,10 +84,10 @@ private:
 protected:
     static void _bind_methods();
     void _notification(int p_what);
-    void _gui_input(const Ref<InputEvent>& p_event) override;
-    void _draw() override;
 
 public:
+    void _gui_input(const Ref<InputEvent>& p_event) override;
+    void _draw() override;
     VFXUVEditorViewport();
 
     void set_mesh(const Ref<VFXMesh>& p_mesh);
