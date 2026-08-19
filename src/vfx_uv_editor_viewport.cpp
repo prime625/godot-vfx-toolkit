@@ -529,8 +529,8 @@ void VFXUVEditorViewport::_draw_uv_grid() {
 
     int x0 = (int)std::floor(uv_rect.position.x);
     int y0 = (int)std::floor(uv_rect.position.y);
-    int x1 = (int)std::ceil(uv_rect.end.x);
-    int y1 = (int)std::ceil(uv_rect.end.y);
+    int x1 = (int)std::ceil((uv_rect.position.x + uv_rect.size.x));
+    int y1 = (int)std::ceil((uv_rect.position.y + uv_rect.size.y));
 
     // Major checkerboard tiles
     for (int x = x0; x < x1; x++) {
@@ -568,7 +568,7 @@ void VFXUVEditorViewport::_draw_uv_grid() {
         float step = 1.0f / 49.0f;
 
         float fx = std::floor(uv_rect.position.x / step) * step;
-        while (fx <= uv_rect.end.x + step) {
+        while (fx <= (uv_rect.position.x + uv_rect.size.x) + step) {
             bool major = std::fabs(std::fmod(fx, 1.0)) < 0.001;
             bool medium = std::fabs(std::fmod(fx * 7.0, 1.0)) < 0.001;
             if (!major && !medium) {
@@ -579,7 +579,7 @@ void VFXUVEditorViewport::_draw_uv_grid() {
         }
 
         float fy = std::floor(uv_rect.position.y / step) * step;
-        while (fy <= uv_rect.end.y + step) {
+        while (fy <= (uv_rect.position.y + uv_rect.size.y) + step) {
             bool major = std::fabs(std::fmod(fy, 1.0)) < 0.001;
             bool medium = std::fabs(std::fmod(fy * 7.0, 1.0)) < 0.001;
             if (!major && !medium) {
