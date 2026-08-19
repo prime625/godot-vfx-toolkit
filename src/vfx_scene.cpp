@@ -122,10 +122,13 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
             vfx_node->set_mesh(vmesh);
         }
         // Skeleton reference on MeshInstance3D
-        NodePath skel_path = mi->get_skeleton();
-        if (!skel_path.is_empty()) {
-            Skeleton3D* skel_node = Object::cast_to<Skeleton3D>(mi->get_node_or_null(skel_path));
-            if (skel_node) {
+                // Skeleton reference on MeshInstance3D (use property access, not getter)
+        Variant skel_var = mi->get("skeleton");
+        if (skel_var.get_type() == Variant::NODE_PATH) {
+            NodePath skel_path = skel_var;
+            if (!skel_path.is_empty()) {
+                Skeleton3D* skel_node = Object::cast_to<Skeleton3D>(mi->get_node_or_null(skel_path));
+                if (skel_node) {
                 Ref<VFXSkeleton> vskel;
                 vskel.instantiate();
                 vskel->from_godot_skeleton(skel_node);
