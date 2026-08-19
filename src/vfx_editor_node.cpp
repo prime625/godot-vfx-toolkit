@@ -7,6 +7,8 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
+#include <vector>
+#include <unordered_set>
 
 using namespace godot;
 
