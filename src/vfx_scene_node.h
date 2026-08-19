@@ -122,6 +122,9 @@ public:
     Ref<VFXSkin> get_skin() const;
     void set_animator(const Ref<VFXAnimator>& p_animator);
     Ref<VFXAnimator> get_animator() const;
+	bool is_visible() const;                 // alias for get_visible()
+	Transform3D get_global_transform() const; // walks parent chain
+
 
     // Bone
     void set_bone_parent_index(int p_idx);
