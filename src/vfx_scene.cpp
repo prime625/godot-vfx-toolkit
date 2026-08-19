@@ -121,25 +121,25 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
             vmesh->from_godot_mesh(gmesh);
             vfx_node->set_mesh(vmesh);
         }
-        // Skeleton reference on MeshInstance3D
-                // Skeleton reference on MeshInstance3D (use property access, not getter)
+        // Skeleton reference on MeshInstance3D (use property access, not getter)
         Variant skel_var = mi->get("skeleton");
         if (skel_var.get_type() == Variant::NODE_PATH) {
             NodePath skel_path = skel_var;
             if (!skel_path.is_empty()) {
                 Skeleton3D* skel_node = Object::cast_to<Skeleton3D>(mi->get_node_or_null(skel_path));
                 if (skel_node) {
-                Ref<VFXSkeleton> vskel;
-                vskel.instantiate();
-                vskel->from_godot_skeleton(skel_node);
-                vfx_node->set_skeleton(vskel);
-                if (vfx_node->get_mesh().is_valid()) {
-                    Ref<VFXSkin> skin;
-                    skin.instantiate();
-                    skin->set_mesh(vfx_node->get_mesh());
-                    skin->set_skeleton(vskel);
-                    skin->auto_weight_from_bones(4);
-                    vfx_node->set_skin(skin);
+                    Ref<VFXSkeleton> vskel;
+                    vskel.instantiate();
+                    vskel->from_godot_skeleton(skel_node);
+                    vfx_node->set_skeleton(vskel);
+                    if (vfx_node->get_mesh().is_valid()) {
+                        Ref<VFXSkin> skin;
+                        skin.instantiate();
+                        skin->set_mesh(vfx_node->get_mesh());
+                        skin->set_skeleton(vskel);
+                        skin->auto_weight_from_bones(4);
+                        vfx_node->set_skin(skin);
+                    }
                 }
             }
         }
@@ -189,14 +189,6 @@ Array VFXScene::flatten_tree() const {
         out.append_array(root->get_all_descendants());
     }
     return out;
-}
-
-void VFXScene::_flatten_recursive(const Ref<VFXSceneNode>& node, Array& out) const {
-    if (node.is_null()) return;
-    out.append(node);
-    for (int i = 0; i < node->get_child_count(); i++) {
-        _flatten_recursive(node->get_child(i), out);
-    }
 }
 
 int VFXScene::get_unique_id() { return node_counter++; }
