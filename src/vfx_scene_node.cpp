@@ -89,6 +89,8 @@ void VFXSceneNode::_bind_methods() {
 
     ClassDB::bind_method(D_METHOD("serialize"), &VFXSceneNode::serialize);
     ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXSceneNode::deserialize);
+	ClassDB::bind_method(D_METHOD("is_visible"), &VFXSceneNode::is_visible);
+	ClassDB::bind_method(D_METHOD("get_global_transform"), &VFXSceneNode::get_global_transform);
 }
 
 VFXSceneNode::VFXSceneNode() {}
@@ -321,6 +323,22 @@ String VFXSceneNode::get_type_icon_hint() const {
         case NODE_CURVE:    return "curve";
         default:            return "empty";
     }
+}
+
+
+
+bool VFXSceneNode::is_visible() const {
+    return node_visible;
+}
+
+Transform3D VFXSceneNode::get_global_transform() const {
+    Transform3D global = local_transform;
+    VFXSceneNode* p = parent_node;
+    while (p != nullptr) {
+        global = p->local_transform * global;
+        p = p->parent_node;
+    }
+    return global;
 }
 
 PackedByteArray VFXSceneNode::serialize() const {
