@@ -162,13 +162,16 @@ Ref<VFXSceneNode> VFXSceneNode::find_child_by_name(const String& name) const {
     return Ref<VFXSceneNode>();
 }
 
-void VFXSceneNode::get_all_descendants(Array& out) const {
+// REPLACE the old void implementation with this:
+Array VFXSceneNode::get_all_descendants() const {
+    Array out;
     for (auto& c : children) {
         if (c.is_valid()) {
             out.append(c);
-            c->get_all_descendants(out);
+            out.append_array(c->get_all_descendants());
         }
     }
+    return out;
 }
 
 PackedByteArray VFXSceneNode::serialize() const {
