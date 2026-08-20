@@ -505,7 +505,7 @@ void VFXUVEditor::project_planar(const Vector3& normal) {
 
     for (auto* face : mesh->get_faces()) {
         if (face->deleted || face->id >= layer.face_corners.size()) continue;
-        std::vector<VFXMesh::Vertex*> fverts;
+        std::vector<vfx::HEVertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -540,7 +540,7 @@ void VFXUVEditor::project_cylindrical(const Vector3& axis) {
 
     for (auto* face : mesh->get_faces()) {
         if (face->deleted || face->id >= layer.face_corners.size()) continue;
-        std::vector<VFXMesh::Vertex*> fverts;
+        std::vector<vfx::HEVertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -567,7 +567,7 @@ void VFXUVEditor::project_spherical(const Vector3& axis) {
 
     for (auto* face : mesh->get_faces()) {
         if (face->deleted || face->id >= layer.face_corners.size()) continue;
-        std::vector<VFXMesh::Vertex*> fverts;
+        std::vector<vfx::HEVertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -599,7 +599,7 @@ void VFXUVEditor::project_box() {
         Vector3 fn = mesh->get_face_normal((int)face->id).abs();
         int dom = (fn.x > fn.y && fn.x > fn.z) ? 0 : (fn.y > fn.z) ? 1 : 2;
 
-        std::vector<VFXMesh::Vertex*> fverts;
+        std::vector<vfx::HEVertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -627,7 +627,7 @@ void VFXUVEditor::unwrap_selected_faces() {
         if (face->deleted || face->id >= (int)sel_faces.size()) continue;
         if (!sel_faces[face->id]) continue;
 
-        std::vector<VFXMesh::Vertex*> fverts;
+        std::vector<vfx::HEVertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         if (fverts.size() < 3) continue;
 
