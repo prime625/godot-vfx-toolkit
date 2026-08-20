@@ -2,6 +2,7 @@
 #include "vfx_editor_utils.h"
 #include "vfx_gltf_exporter.h"
 #include "vfx_texture_painter.h"
+#include "vfx_scene_tree_panel.h"
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/sphere_mesh.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -172,15 +173,27 @@ void VFXEditorNode::_notification(int p_what) {
         _ensure_skeleton_visual();
         _ensure_selection_visual();
         _ensure_scene_container();
+
+        // Create scene tree panel (hidden by default, UI script toggles visibility)
+        if (!scene_tree_panel) {
+            scene_tree_panel = memnew(VFXSceneTreePanel);
+            scene_tree_panel->set_name("SceneTreePanel");
+            scene_tree_panel->set_visible(false); // UI layer controls this
+            scene_tree_panel->connect("node_selected", callable_mp(this, &VFXEditorNode::_on_scene_node_selected));
+            add_child(scene_tree_panel);
+            scene_tree_panel->set_owner(this);
+        }
     }
     if (p_what == NOTIFICATION_PROCESS) {
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
         }
 
-        if (scene.is_valid()) {
+        // Dirty-flagged scene sync — only rebuilds when data changes
+        if (scene.is_valid() && scene_visuals_dirty) {
+            scene_visuals_dirty = false;
             _sync_scene_visuals();
-        } else if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
+        } else if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights && !scene.is_valid()) {
             _update_godot_mesh();
         }
 
@@ -268,6 +281,20 @@ void VFXEditorNode::_ensure_scene_container() {
         scene_container->set_name("SceneContainer");
         add_child(scene_container);
         scene_container->set_owner(this);
+    }
+}
+
+// ============================================================================
+// SCENE TREE INTEGRATION
+// ============================================================================
+void VFXEditorNode::_on_scene_node_selected(Ref<VFXSceneNode> p_node) {
+    set_active_scene_node(p_node);
+}
+
+void VFXEditorNode::mark_scene_dirty() {
+    scene_visuals_dirty = true;
+    if (scene_tree_panel) {
+        scene_tree_panel->mark_dirty();
     }
 }
 
@@ -514,7 +541,10 @@ void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
     } else {
         if (mesh_instance) mesh_instance->set_visible(true);
     }
-    _sync_scene_visuals();
+    if (scene_tree_panel) {
+        scene_tree_panel->set_scene(scene);
+    }
+    mark_scene_dirty();
 }
 
 Ref<VFXScene> VFXEditorNode::get_scene() const { return scene; }
@@ -525,6 +555,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     if (active_scene_node.is_null()) {
         clear_selection();
         _update_gizmo_visibility();
+        mark_scene_dirty();
         return;
     }
 
@@ -543,7 +574,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     }
     clear_selection();
     _update_gizmo_visibility();
-    _sync_scene_visuals();
+    mark_scene_dirty();
 }
 
 Ref<VFXSceneNode> VFXEditorNode::get_active_scene_node() const { return active_scene_node; }
@@ -551,7 +582,7 @@ Ref<VFXSceneNode> VFXEditorNode::get_active_scene_node() const { return active_s
 bool VFXEditorNode::import_model(const String& filepath, const Ref<VFXSceneNode>& parent) {
     if (scene.is_null()) return false;
     bool ok = scene->import_model(filepath, parent);
-    if (ok) _sync_scene_visuals();
+    if (ok) mark_scene_dirty();
     return ok;
 }
 
@@ -657,7 +688,7 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
         }
     }
 
-    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    am->add_surface_from_arrays(Mesh::ARRAY_PRIMITIVE_TRIANGLES, arrays);
 
     if (p_show_weights && p_skin.is_valid()) {
         if (am->get_surface_count() > 0) {
@@ -667,7 +698,7 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
             if (colors.size() == verts.size()) {
                 a[Mesh::ARRAY_COLOR] = colors;
                 am->clear_surfaces();
-                am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, a);
+                am->add_surface_from_arrays(Mesh::ARRAY_PRIMITIVE_TRIANGLES, a);
             }
         }
     }
