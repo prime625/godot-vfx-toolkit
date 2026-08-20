@@ -25,7 +25,7 @@ VFXSceneTreePanel::~VFXSceneTreePanel() {}
 
 void VFXSceneTreePanel::_notification(int p_what) {
     if (p_what == NOTIFICATION_READY) {
-        set_custom_minimum_size(Vector2(240, 300));
+        set_custom_minimum_size(Vector2(180, 200));
 
         // --- Toolbar ---
         HBoxContainer* toolbar = memnew(HBoxContainer);
@@ -58,7 +58,7 @@ void VFXSceneTreePanel::_notification(int p_what) {
         tree->set_column_title(0, "Node");
         tree->set_column_expand(0, true);
         tree->set_column_expand(1, false);
-        tree->set_column_custom_minimum_width(1, 28);
+        tree->set_column_custom_minimum_width(1, 22);
         tree->set_column_title_alignment(0, HorizontalAlignment::HORIZONTAL_ALIGNMENT_LEFT);
 
         // Signals
