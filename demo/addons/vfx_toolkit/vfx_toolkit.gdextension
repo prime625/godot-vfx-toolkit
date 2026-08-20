@@ -1,7 +1,6 @@
 [configuration]
 entry_symbol = "vfx_toolkit_library_init"
 compatibility_minimum = 4.3
-reloadable = true
 
 [libraries]
 macos.debug = "res://addons/vfx_toolkit/libvfx_toolkit.macos.template_debug.framework"
