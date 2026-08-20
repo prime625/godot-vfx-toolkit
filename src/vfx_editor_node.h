@@ -5,9 +5,10 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
-#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
-#include <godot_cpp/variant/rect2.hpp>
+#include <vector>
+#include <unordered_set>
+
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
 #include "vfx_skin.h"
@@ -66,6 +67,7 @@ private:
 
     void _ensure_scene_container();
     void _sync_scene_visuals();
+    void _sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used);
     void _clear_scene_visuals();
     MeshInstance3D* _get_scene_visual(uint64_t node_id);
     Ref<ArrayMesh> _build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone);
@@ -130,10 +132,6 @@ private:
 
     static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
     static bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
-
-    // === MATH HELPERS (moved to vfx_editor_utils) ===
-    // bool _ray_vs_segment(...)  -> now in vfx_editor_utils namespace
-    // bool _ray_vs_plane(...)    -> now in vfx_editor_utils namespace
 
     void _ensure_mesh_instance();
     void _ensure_brush_cursor();
