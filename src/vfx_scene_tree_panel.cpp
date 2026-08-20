@@ -132,12 +132,13 @@ void VFXSceneTreePanel::_build_tree() {
     if (!tree || !scene.is_valid()) return;
     syncing = true;
 
-    // Save selection & expansion state
+    // Save selection state using get_next_selected iteration
     PackedInt32Array old_selection;
-    for (int i = 0; i < tree->get_selected_count(); i++) {
-        TreeItem* it = tree->get_selected(i);
-        auto itf = item_to_node.find(it);
+    TreeItem* sel = tree->get_selected();
+    while (sel) {
+        auto itf = item_to_node.find(sel);
         if (itf != item_to_node.end()) old_selection.append(itf->second);
+        sel = tree->get_next_selected(sel);
     }
 
     tree->clear();
@@ -228,7 +229,10 @@ Ref<VFXSceneNode> VFXSceneTreePanel::_get_node_for_item(TreeItem* item) const {
     if (!scene.is_valid() || !item) return Ref<VFXSceneNode>();
     auto it = item_to_node.find(item);
     if (it == item_to_node.end()) return Ref<VFXSceneNode>();
-    return scene->find_node_by_id(it->second);
+    // find_node_by_id is on VFXSceneNode, not VFXScene — traverse from root
+    Ref<VFXSceneNode> root = scene->get_root();
+    if (root.is_null()) return Ref<VFXSceneNode>();
+    return root->find_node_by_id(it->second);
 }
 
 TreeItem* VFXSceneTreePanel::_get_item_for_node(int node_id) const {
@@ -265,13 +269,15 @@ void VFXSceneTreePanel::_sync_selection_to_scene() {
         if (n.is_valid()) n->set_selected(false);
     }
 
-    for (int i = 0; i < tree->get_selected_count(); i++) {
-        TreeItem* it = tree->get_selected(i);
-        Ref<VFXSceneNode> n = _get_node_for_item(it);
+    // Iterate multi-selection via get_next_selected
+    TreeItem* sel = tree->get_selected();
+    while (sel) {
+        Ref<VFXSceneNode> n = _get_node_for_item(sel);
         if (n.is_valid()) {
             n->set_selected(true);
             emit_signal("node_selected", n);
         }
+        sel = tree->get_next_selected(sel);
     }
 }
 
