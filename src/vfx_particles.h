@@ -120,6 +120,10 @@ private:
 	bool cm_dirty = true;
 	void _cache_custom_mesh();
 
+	// Material
+	Ref<Material> material;
+	void _apply_material();
+
 	// Rendering
 	MeshInstance3D* mesh_instance = nullptr;
 	Ref<ArrayMesh> array_mesh;
@@ -221,6 +225,10 @@ public:
 	void set_draw_mesh(const Ref<Mesh>& mesh);
 	Ref<Mesh> get_draw_mesh() const;
 
+	// Material — exposed in inspector, works with StandardMaterial3D, ShaderMaterial, noise textures, etc.
+	void set_material(const Ref<Material>& mat);
+	Ref<Material> get_material() const;
+
 	// Collision
 	void set_collision_mode(int mode);
 	int get_collision_mode() const;
@@ -245,8 +253,6 @@ public:
 	// Actions
 	void restart();
 	void emit_burst(int count);
-	void set_material(const Ref<Material>& mat);
-	Ref<Material> get_material() const;
 };
 
 VARIANT_ENUM_CAST(VFXParticles3D::EmissionShape);
