@@ -5,12 +5,10 @@
 #include <godot_cpp/classes/tree.hpp>
 #include <godot_cpp/classes/tree_item.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
+#include <godot_cpp/classes/h_box_container.hpp>
 #include <godot_cpp/classes/line_edit.hpp>
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
-#include <godot_cpp/classes/input_event.hpp>
-#include <godot_cpp/classes/input_event_mouse_button.hpp>
-#include <godot_cpp/classes/input_event_key.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <map>
 
@@ -27,7 +25,7 @@ private:
     Button* add_btn = nullptr;
 
     Ref<VFXScene> scene;
-    
+
     // Map: VFXSceneNode id -> TreeItem*
     std::map<int, TreeItem*> node_to_item;
     // Map: TreeItem* -> VFXSceneNode id
@@ -51,6 +49,8 @@ private:
     void _build_tree_recursive(TreeItem* parent_item, const Ref<VFXSceneNode>& node);
     void _clear_tree_maps();
 
+    Ref<Texture2D> _get_icon_for_type(int type) const;
+
     void _on_tree_item_selected();
     void _on_tree_item_edited();
     void _on_tree_button_clicked(TreeItem* item, int column, int id, int mouse_button_idx);
@@ -71,7 +71,6 @@ private:
 protected:
     static void _bind_methods();
     void _notification(int p_what);
-    void _process(double delta) override;
 
 public:
     VFXSceneTreePanel();
