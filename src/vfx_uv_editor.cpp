@@ -1,10 +1,10 @@
 #include "vfx_uv_editor.h"
 #include "vfx_math.h"
+#include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
-#include <algorithm>
 #include <stack>
-#include <queue>
+#include <algorithm>
 
 using namespace godot;
 
@@ -277,6 +277,7 @@ void VFXUVEditor::invert_selection() {
 }
 
 void VFXUVEditor::select_at(const Vector2& uv_pos, float radius, bool add) {
+    if (mesh.is_null()) return;
     _ensure_selection_size();
     if (!add) _deselect_all();
     const auto& layer = mesh->uv_layers[active_layer];
@@ -287,6 +288,7 @@ void VFXUVEditor::select_at(const Vector2& uv_pos, float radius, bool add) {
 }
 
 void VFXUVEditor::select_edge_at(const Vector2& uv_pos, float radius, bool add) {
+    if (mesh.is_null()) return;
     _ensure_selection_size();
     if (!add) _deselect_all();
     const auto& layer = mesh->uv_layers[active_layer];
@@ -306,6 +308,7 @@ void VFXUVEditor::select_edge_at(const Vector2& uv_pos, float radius, bool add) 
 }
 
 void VFXUVEditor::select_face_at(const Vector2& uv_pos, bool add) {
+    if (mesh.is_null()) return;
     _ensure_selection_size();
     if (!add) _deselect_all();
     const auto& layer = mesh->uv_layers[active_layer];
@@ -321,6 +324,7 @@ void VFXUVEditor::select_face_at(const Vector2& uv_pos, bool add) {
 }
 
 void VFXUVEditor::select_island_at(const Vector2& uv_pos) {
+    if (mesh.is_null()) return;
     if (islands_dirty) _rebuild_islands();
     _ensure_selection_size();
     _deselect_all();
@@ -345,6 +349,7 @@ void VFXUVEditor::select_island_at(const Vector2& uv_pos) {
 }
 
 void VFXUVEditor::select_box(const Rect2& box, bool add) {
+    if (mesh.is_null()) return;
     _ensure_selection_size();
     if (!add) _deselect_all();
     const auto& layer = mesh->uv_layers[active_layer];
@@ -354,6 +359,7 @@ void VFXUVEditor::select_box(const Rect2& box, bool add) {
 }
 
 void VFXUVEditor::select_island_box(const Rect2& box, bool add) {
+    if (mesh.is_null()) return;
     if (islands_dirty) _rebuild_islands();
     _ensure_selection_size();
     if (!add) _deselect_all();
@@ -379,6 +385,7 @@ void VFXUVEditor::select_island_box(const Rect2& box, bool add) {
 }
 
 void VFXUVEditor::select_island(int island_idx) {
+    if (mesh.is_null()) return;
     if (islands_dirty) _rebuild_islands();
     _ensure_selection_size();
     _deselect_all();
@@ -394,6 +401,7 @@ void VFXUVEditor::select_island(int island_idx) {
 }
 
 void VFXUVEditor::deselect_island(int island_idx) {
+    if (mesh.is_null()) return;
     if (islands_dirty) _rebuild_islands();
     const auto& layer = mesh->uv_layers[active_layer];
     for (int i = 0; i < (int)island_map.size(); i++) {
@@ -497,7 +505,7 @@ void VFXUVEditor::project_planar(const Vector3& normal) {
 
     for (auto* face : mesh->get_faces()) {
         if (face->deleted || face->id >= layer.face_corners.size()) continue;
-        std::vector<vfx::HEVertex*> fverts;
+        std::vector<VFXMesh::Vertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -532,7 +540,7 @@ void VFXUVEditor::project_cylindrical(const Vector3& axis) {
 
     for (auto* face : mesh->get_faces()) {
         if (face->deleted || face->id >= layer.face_corners.size()) continue;
-        std::vector<vfx::HEVertex*> fverts;
+        std::vector<VFXMesh::Vertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -559,7 +567,7 @@ void VFXUVEditor::project_spherical(const Vector3& axis) {
 
     for (auto* face : mesh->get_faces()) {
         if (face->deleted || face->id >= layer.face_corners.size()) continue;
-        std::vector<vfx::HEVertex*> fverts;
+        std::vector<VFXMesh::Vertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -591,7 +599,7 @@ void VFXUVEditor::project_box() {
         Vector3 fn = mesh->get_face_normal((int)face->id).abs();
         int dom = (fn.x > fn.y && fn.x > fn.z) ? 0 : (fn.y > fn.z) ? 1 : 2;
 
-        std::vector<vfx::HEVertex*> fverts;
+        std::vector<VFXMesh::Vertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         const auto& corners = layer.face_corners[face->id];
         for (size_t i = 0; i < fverts.size() && i < corners.size(); i++) {
@@ -619,7 +627,7 @@ void VFXUVEditor::unwrap_selected_faces() {
         if (face->deleted || face->id >= (int)sel_faces.size()) continue;
         if (!sel_faces[face->id]) continue;
 
-        std::vector<vfx::HEVertex*> fverts;
+        std::vector<VFXMesh::Vertex*> fverts;
         mesh->get_face_vertices((int)face->id, fverts);
         if (fverts.size() < 3) continue;
 
