@@ -205,7 +205,7 @@ void VFXParticles3D::_simulate(float delta) {
 				emit_burst(max_particles);
 			}
 		} else {
-			float rate_jitter = 1.0f + (Math::randf() - 0.5f) * 2.0f * randomness_ratio;
+			float rate_jitter = 1.0f + (UtilityFunctions::randf() - 0.5f) * 2.0f * randomness_ratio;
 			emission_accum += emission_rate * delta * rate_jitter;
 			int to_emit = (int)emission_accum;
 			if (to_emit > 0) {
@@ -265,10 +265,10 @@ void VFXParticles3D::_emit(int count, const Vector3& pos, const Vector3& normal)
 		VFXParticle& p = particles[particle_count];
 		p.active = true;
 		p.age = 0.0f;
-		p.lifetime = lifetime * (1.0f + (Math::randf() - 0.5f) * 2.0f * lifetime_randomness);
+		p.lifetime = lifetime * (1.0f + (UtilityFunctions::randf() - 0.5f) * 2.0f * lifetime_randomness);
 		p.lifetime = vfx::clampf(p.lifetime, 0.001f, 600.0f);
 		p.position = pos;
-		p.seed = (uint32_t)(Math::randf() * 4294967295.0f);
+		p.seed = (uint32_t)(UtilityFunctions::randf() * 4294967295.0f);
 
 		// Velocity
 		Vector3 dir = _random_direction_in_cone();
@@ -276,12 +276,12 @@ void VFXParticles3D::_emit(int count, const Vector3& pos, const Vector3& normal)
 			Vector3 proj = vfx::project_on_plane(dir, emission_direction.normalized());
 			dir = dir.lerp(proj, flatness).normalized();
 		}
-		float speed = vfx::lerp(initial_velocity_min, initial_velocity_max, Math::randf());
+		float speed = vfx::lerp(initial_velocity_min, initial_velocity_max, UtilityFunctions::randf());
 		p.velocity = dir * speed;
 
 		p.acceleration = Vector3(0, 0, 0);
 		p.color = color_ramp.is_valid() ? color_ramp->get_color(0.0f) : Color(1, 1, 1, 1);
-		p.size = vfx::lerp(scale_amount_min, scale_amount_max, Math::randf());
+		p.size = vfx::lerp(scale_amount_min, scale_amount_max, UtilityFunctions::randf());
 		p.rotation = 0.0f;
 
 		particle_count++;
@@ -487,7 +487,7 @@ bool VFXParticles3D::_solve_collision(VFXParticle& p, float delta) {
 void VFXParticles3D::_trigger_subemit(SubEmitTrigger trigger, const Vector3& pos, const Vector3& normal) {
 	for (const auto& sub : sub_emitters) {
 		if (sub.trigger != trigger) continue;
-		if (Math::randf() > sub.probability) continue;
+		if (UtilityFunctions::randf() > sub.probability) continue;
 		if (!sub.system) continue;
 
 		// Validate pointer with cast (returns null if object was freed)
@@ -512,9 +512,9 @@ Vector3 VFXParticles3D::_random_direction_in_cone() const {
 	Basis basis = vfx::look_at_safe(dir);
 	float spread_rad = Math::deg_to_rad(spread_degrees);
 
-	float cos_theta = 1.0f - Math::randf() * (1.0f - Math::cos(spread_rad));
+	float cos_theta = 1.0f - UtilityFunctions::randf() * (1.0f - Math::cos(spread_rad));
 	float theta = Math::acos(cos_theta);
-	float phi = Math::randf() * 2.0f * Math::PI;
+	float phi = UtilityFunctions::randf() * 2.0f * Math_PI;
 
 	Vector3 local_dir = Vector3(
 		Math::sin(theta) * Math::cos(phi),
@@ -527,14 +527,14 @@ Vector3 VFXParticles3D::_random_direction_in_cone() const {
 Vector3 VFXParticles3D::_random_emission_position() const {
 	switch (emission_shape) {
 		case EMISSION_SPHERE: {
-			Vector3 rnd = Vector3(Math::randf() - 0.5f, Math::randf() - 0.5f, Math::randf() - 0.5f).normalized();
-			return rnd * Math::randf() * emission_sphere_radius;
+			Vector3 rnd = Vector3(UtilityFunctions::randf() - 0.5f, UtilityFunctions::randf() - 0.5f, UtilityFunctions::randf() - 0.5f).normalized();
+			return rnd * UtilityFunctions::randf() * emission_sphere_radius;
 		}
 		case EMISSION_BOX: {
 			return Vector3(
-				(Math::randf() - 0.5f) * 2.0f * emission_box_extents.x,
-				(Math::randf() - 0.5f) * 2.0f * emission_box_extents.y,
-				(Math::randf() - 0.5f) * 2.0f * emission_box_extents.z
+				(UtilityFunctions::randf() - 0.5f) * 2.0f * emission_box_extents.x,
+				(UtilityFunctions::randf() - 0.5f) * 2.0f * emission_box_extents.y,
+				(UtilityFunctions::randf() - 0.5f) * 2.0f * emission_box_extents.z
 			);
 		}
 		case EMISSION_POINT:
