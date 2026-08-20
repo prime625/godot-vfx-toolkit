@@ -72,15 +72,15 @@ void VFXSceneTreePanel::_notification(int p_what) {
 
         // Load icons (fallback to empty if not found)
         ResourceLoader* rl = ResourceLoader::get_singleton();
-        icon_mesh = rl->load("res://addons/vfx_toolkit/icons/mesh.png");
-        icon_armature = rl->load("res://addons/vfx_toolkit/icons/armature.png");
-        icon_bone = rl->load("res://addons/vfx_toolkit/icons/bone.png");
-        icon_light = rl->load("res://addons/vfx_toolkit/icons/light.png");
-        icon_camera = rl->load("res://addons/vfx_toolkit/icons/camera.png");
-        icon_curve = rl->load("res://addons/vfx_toolkit/icons/curve.png");
-        icon_empty = rl->load("res://addons/vfx_toolkit/icons/empty.png");
-        icon_visible = rl->load("res://addons/vfx_toolkit/icons/visible.png");
-        icon_hidden = rl->load("res://addons/vfx_toolkit/icons/hidden.png");
+        icon_mesh = rl->load("res://addons/vfx_toolkit/icons/mesh.svg");
+        icon_armature = rl->load("res://addons/vfx_toolkit/icons/armature.svg");
+        icon_bone = rl->load("res://addons/vfx_toolkit/icons/bone.svg");
+        icon_light = rl->load("res://addons/vfx_toolkit/icons/light.svg");
+        icon_camera = rl->load("res://addons/vfx_toolkit/icons/camera.svg");
+        icon_curve = rl->load("res://addons/vfx_toolkit/icons/curve.svg");
+        icon_empty = rl->load("res://addons/vfx_toolkit/icons/empty.svg");
+        icon_visible = rl->load("res://addons/vfx_toolkit/icons/visible.svg");
+        icon_hidden = rl->load("res://addons/vfx_toolkit/icons/hidden.svg");
 
         mark_dirty();
     }
