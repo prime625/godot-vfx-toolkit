@@ -112,9 +112,9 @@ private:
 	PackedVector2Array r_uvs;
 	PackedInt32Array   r_indices;
 
-	// Subemitters
+	// Subemitters (raw pointers because VFXParticles3D is a Node, not RefCounted)
 	struct SubEmitter {
-		Ref<VFXParticles3D> system;
+		VFXParticles3D* system = nullptr;
 		SubEmitTrigger trigger;
 		int count = 1;
 		float probability = 1.0f;
@@ -209,8 +209,8 @@ public:
 	void set_collision_sphere_radius(float r);
 	float get_collision_sphere_radius() const;
 
-	// Subemitters
-	void add_subemitter(const Ref<VFXParticles3D>& system, int trigger, int count, float probability);
+	// Subemitters — NOTE: takes raw pointer because VFXParticles3D is a Node, not RefCounted
+	void add_subemitter(VFXParticles3D* system, int trigger, int count, float probability);
 	void clear_subemitters();
 	int get_subemitter_count() const;
 
