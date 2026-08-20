@@ -73,6 +73,10 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_scale_curve"), &VFXParticles3D::get_scale_curve);
 	ClassDB::bind_method(D_METHOD("set_color_ramp", "gradient"), &VFXParticles3D::set_color_ramp);
 	ClassDB::bind_method(D_METHOD("get_color_ramp"), &VFXParticles3D::get_color_ramp);
+	ClassDB::bind_method(D_METHOD("set_billboard_mode", "mode"), &VFXParticles3D::set_billboard_mode);
+	ClassDB::bind_method(D_METHOD("get_billboard_mode"), &VFXParticles3D::get_billboard_mode);
+	ClassDB::bind_method(D_METHOD("set_draw_mesh", "mesh"), &VFXParticles3D::set_draw_mesh);
+	ClassDB::bind_method(D_METHOD("get_draw_mesh"), &VFXParticles3D::get_draw_mesh);
 
 	// Collision
 	ClassDB::bind_method(D_METHOD("set_collision_mode", "mode"), &VFXParticles3D::set_collision_mode);
@@ -90,7 +94,7 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_collision_sphere_radius", "radius"), &VFXParticles3D::set_collision_sphere_radius);
 	ClassDB::bind_method(D_METHOD("get_collision_sphere_radius"), &VFXParticles3D::get_collision_sphere_radius);
 
-	// Subemitters — raw pointer because VFXParticles3D is a Node, not RefCounted
+	// Subemitters
 	ClassDB::bind_method(D_METHOD("add_subemitter", "system", "trigger", "count", "probability"), &VFXParticles3D::add_subemitter);
 	ClassDB::bind_method(D_METHOD("clear_subemitters"), &VFXParticles3D::clear_subemitters);
 	ClassDB::bind_method(D_METHOD("get_subemitter_count"), &VFXParticles3D::get_subemitter_count);
@@ -131,6 +135,8 @@ void VFXParticles3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_amount_max", PROPERTY_HINT_RANGE, "0,1000.0,0.01,or_greater"), "set_scale_amount_max", "get_scale_amount_max");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scale_curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_scale_curve", "get_scale_curve");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "color_ramp", PROPERTY_HINT_RESOURCE_TYPE, "Gradient"), "set_color_ramp", "get_color_ramp");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "billboard_mode", PROPERTY_HINT_ENUM, "Camera,Y to Velocity,None,Fixed Y"), "set_billboard_mode", "get_billboard_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "draw_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_draw_mesh", "get_draw_mesh");
 
 	ADD_GROUP("Collision", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "Disabled,Raycast,Plane,Sphere"), "set_collision_mode", "get_collision_mode");
@@ -154,6 +160,11 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "SUBEMIT_ON_BIRTH", SUBEMIT_ON_BIRTH);
 	ClassDB::bind_integer_constant(get_class_static(), "", "SUBEMIT_ON_DEATH", SUBEMIT_ON_DEATH);
 	ClassDB::bind_integer_constant(get_class_static(), "", "SUBEMIT_ON_COLLISION", SUBEMIT_ON_COLLISION);
+
+	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_CAMERA", BILLBOARD_CAMERA);
+	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_Y_TO_VELOCITY", BILLBOARD_Y_TO_VELOCITY);
+	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_NONE", BILLBOARD_NONE);
+	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_FIXED_Y", BILLBOARD_FIXED_Y);
 }
 
 // ============================================================================
@@ -197,7 +208,6 @@ void VFXParticles3D::_notification(int p_what) {
 // ============================================================================
 
 void VFXParticles3D::_simulate(float delta) {
-	// Emission
 	if (emitting) {
 		if (one_shot) {
 			if (!_one_shot_emitted) {
@@ -217,7 +227,6 @@ void VFXParticles3D::_simulate(float delta) {
 		}
 	}
 
-	// Update particles
 	for (int i = 0; i < particle_count; i++) {
 		VFXParticle& p = particles[i];
 		p.age += delta;
@@ -225,24 +234,19 @@ void VFXParticles3D::_simulate(float delta) {
 		if (p.age >= p.lifetime) {
 			_trigger_subemit(SUBEMIT_ON_DEATH, p.position, p.velocity.normalized());
 			_kill(i);
-			i--; // process swapped-in particle
+			i--;
 			continue;
 		}
 
-		// Damping (seed-derived deterministic per-particle)
 		float damping_rnd = (float)(p.seed % 10000) / 10000.0f;
 		float damping = vfx::lerp(damping_min, damping_max, damping_rnd);
 		if (damping > 0.0f) {
 			p.velocity *= (1.0f - damping * delta);
 		}
 
-		// Gravity + acceleration
 		p.velocity += (gravity + p.acceleration) * delta;
-
-		// Integrate
 		Vector3 next_pos = p.position + p.velocity * delta;
 
-		// Collision
 		if (collision_mode != COLLISION_NONE) {
 			if (_solve_collision(p, delta)) {
 				_trigger_subemit(SUBEMIT_ON_COLLISION, p.position, -p.velocity.normalized());
@@ -252,7 +256,6 @@ void VFXParticles3D::_simulate(float delta) {
 		}
 	}
 
-	// One-shot auto-stop
 	if (one_shot && _one_shot_emitted && particle_count == 0) {
 		emitting = false;
 	}
@@ -270,7 +273,6 @@ void VFXParticles3D::_emit(int count, const Vector3& pos, const Vector3& normal)
 		p.position = pos;
 		p.seed = (uint32_t)(UtilityFunctions::randf() * 4294967295.0f);
 
-		// Velocity
 		Vector3 dir = _random_direction_in_cone();
 		if (flatness > 0.0f) {
 			Vector3 proj = vfx::project_on_plane(dir, emission_direction.normalized());
@@ -299,6 +301,54 @@ void VFXParticles3D::_kill(int idx) {
 }
 
 // ============================================================================
+// CUSTOM MESH CACHE
+// ============================================================================
+
+void VFXParticles3D::_cache_custom_mesh() {
+	cm_verts.clear();
+	cm_normals.clear();
+	cm_uvs.clear();
+	cm_colors.clear();
+	cm_indices.clear();
+
+	if (draw_mesh.is_null()) {
+		cm_dirty = false;
+		return;
+	}
+
+	int sc = draw_mesh->get_surface_count();
+	if (sc == 0) {
+		cm_dirty = false;
+		return;
+	}
+
+	// For now, cache only the first surface. Multi-surface meshes can be merged externally.
+	Array arrays = draw_mesh->surface_get_arrays(0);
+	if (arrays.size() < Mesh::ARRAY_MAX) {
+		cm_dirty = false;
+		return;
+	}
+
+	if (arrays[Mesh::ARRAY_VERTEX].get_type() == Variant::PACKED_VECTOR3_ARRAY) {
+		cm_verts = arrays[Mesh::ARRAY_VERTEX];
+	}
+	if (arrays[Mesh::ARRAY_NORMAL].get_type() == Variant::PACKED_VECTOR3_ARRAY) {
+		cm_normals = arrays[Mesh::ARRAY_NORMAL];
+	}
+	if (arrays[Mesh::ARRAY_TEX_UV].get_type() == Variant::PACKED_VECTOR2_ARRAY) {
+		cm_uvs = arrays[Mesh::ARRAY_TEX_UV];
+	}
+	if (arrays[Mesh::ARRAY_COLOR].get_type() == Variant::PACKED_COLOR_ARRAY) {
+		cm_colors = arrays[Mesh::ARRAY_COLOR];
+	}
+	if (arrays[Mesh::ARRAY_INDEX].get_type() == Variant::PACKED_INT32_ARRAY) {
+		cm_indices = arrays[Mesh::ARRAY_INDEX];
+	}
+
+	cm_dirty = false;
+}
+
+// ============================================================================
 // RENDERING
 // ============================================================================
 
@@ -310,13 +360,23 @@ void VFXParticles3D::_rebuild_mesh() {
 		return;
 	}
 
-	// Camera for billboarding
+	if (draw_mesh.is_valid()) {
+		if (cm_dirty) _cache_custom_mesh();
+		if (cm_verts.size() > 0) {
+			_rebuild_mesh_custom();
+			return;
+		}
+	}
+
+	_rebuild_mesh_billboard();
+}
+
+void VFXParticles3D::_rebuild_mesh_billboard() {
 	Camera3D* cam = nullptr;
 	if (get_viewport()) {
 		cam = get_viewport()->get_camera_3d();
 	}
-
-	Vector3 cam_pos_local = Vector3(0, 0, 5); // fallback
+	Vector3 cam_pos_local = Vector3(0, 0, 5);
 	if (cam) {
 		cam_pos_local = to_local(cam->get_global_position());
 	}
@@ -330,7 +390,6 @@ void VFXParticles3D::_rebuild_mesh() {
 	for (int i = 0; i < particle_count; i++) {
 		const VFXParticle& p = particles[i];
 
-		// Evaluate curves
 		float life_t = (p.lifetime > 0.0f) ? vfx::clampf(p.age / p.lifetime, 0.0f, 1.0f) : 0.0f;
 		Color col = p.color;
 		if (color_ramp.is_valid()) {
@@ -341,16 +400,13 @@ void VFXParticles3D::_rebuild_mesh() {
 			sz *= scale_curve->sample_baked(life_t);
 		}
 
-		// Billboard basis
-		Vector3 to_cam = (cam_pos_local - p.position).normalized();
-		if (to_cam.length_squared() < 0.0001f) to_cam = Vector3(0, 0, 1);
-		Basis bb = vfx::look_at_safe(to_cam);
-		Vector3 right = bb.get_column(0) * sz * 0.5f;
-		Vector3 up = bb.get_column(1) * sz * 0.5f;
+		Basis basis = _compute_particle_basis(p, cam_pos_local);
+		Vector3 right = basis.get_column(0) * sz * 0.5f;
+		Vector3 up = basis.get_column(1) * sz * 0.5f;
 
-		// Apply particle rotation around view axis
 		if (p.rotation != 0.0f) {
-			Basis rot_basis(to_cam, p.rotation);
+			Vector3 axis = basis.get_column(2);
+			Basis rot_basis(axis, p.rotation);
 			right = rot_basis.xform(right);
 			up = rot_basis.xform(up);
 		}
@@ -361,7 +417,7 @@ void VFXParticles3D::_rebuild_mesh() {
 		r_verts[v + 2] = p.position + right + up;
 		r_verts[v + 3] = p.position - right + up;
 
-		Vector3 normal = -to_cam;
+		Vector3 normal = -basis.get_column(2);
 		for (int j = 0; j < 4; j++) {
 			r_normals[v + j] = normal;
 			r_colors[v + j] = col;
@@ -391,6 +447,135 @@ void VFXParticles3D::_rebuild_mesh() {
 
 	array_mesh->clear_surfaces();
 	array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+}
+
+void VFXParticles3D::_rebuild_mesh_custom() {
+	Camera3D* cam = nullptr;
+	if (get_viewport()) {
+		cam = get_viewport()->get_camera_3d();
+	}
+	Vector3 cam_pos_local = Vector3(0, 0, 5);
+	if (cam) {
+		cam_pos_local = to_local(cam->get_global_position());
+	}
+
+	int cm_vcount = cm_verts.size();
+	int cm_icount = cm_indices.size();
+	bool has_indices = cm_icount > 0;
+	int total_verts = particle_count * cm_vcount;
+	int total_indices = has_indices ? particle_count * cm_icount : 0;
+
+	r_verts.resize(total_verts);
+	r_normals.resize(total_verts);
+	r_colors.resize(total_verts);
+	r_uvs.resize(total_verts);
+	if (has_indices) {
+		r_indices.resize(total_indices);
+	}
+
+	for (int i = 0; i < particle_count; i++) {
+		const VFXParticle& p = particles[i];
+
+		float life_t = (p.lifetime > 0.0f) ? vfx::clampf(p.age / p.lifetime, 0.0f, 1.0f) : 0.0f;
+		Color col = p.color;
+		if (color_ramp.is_valid()) {
+			col = color_ramp->get_color(life_t);
+		}
+		float sz = p.size;
+		if (scale_curve.is_valid()) {
+			sz *= scale_curve->sample_baked(life_t);
+		}
+
+		Basis basis = _compute_particle_basis(p, cam_pos_local);
+		Transform3D xf;
+		xf.basis = basis;
+		xf.basis.scale(Vector3(sz, sz, sz));
+		xf.origin = p.position;
+
+		int base = i * cm_vcount;
+		for (int j = 0; j < cm_vcount; j++) {
+			r_verts[base + j] = xf.xform(cm_verts[j]);
+			if (j < (int)cm_normals.size()) {
+				r_normals[base + j] = basis.xform(cm_normals[j]).normalized();
+			} else {
+				r_normals[base + j] = -basis.get_column(2);
+			}
+			if (j < (int)cm_uvs.size()) {
+				r_uvs[base + j] = cm_uvs[j];
+			} else {
+				r_uvs[base + j] = Vector2(0, 0);
+			}
+			if (j < (int)cm_colors.size()) {
+				r_colors[base + j] = cm_colors[j] * col;
+			} else {
+				r_colors[base + j] = col;
+			}
+		}
+
+		if (has_indices) {
+			int ibase = i * cm_icount;
+			for (int j = 0; j < cm_icount; j++) {
+				r_indices[ibase + j] = cm_indices[j] + base;
+			}
+		}
+	}
+
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = r_verts;
+	arrays[Mesh::ARRAY_NORMAL] = r_normals;
+	arrays[Mesh::ARRAY_COLOR] = r_colors;
+	arrays[Mesh::ARRAY_TEX_UV] = r_uvs;
+	if (has_indices) {
+		arrays[Mesh::ARRAY_INDEX] = r_indices;
+	}
+
+	array_mesh->clear_surfaces();
+	array_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+}
+
+// ============================================================================
+// BASIS COMPUTATION
+// ============================================================================
+
+Basis VFXParticles3D::_compute_particle_basis(const VFXParticle& p, const Vector3& cam_pos_local) const {
+	switch (billboard_mode) {
+		case BILLBOARD_CAMERA: {
+			Vector3 to_cam = (cam_pos_local - p.position).normalized();
+			if (to_cam.length_squared() < 0.0001f) to_cam = Vector3(0, 0, 1);
+			return vfx::look_at_safe(to_cam);
+		}
+		case BILLBOARD_Y_TO_VELOCITY: {
+			Vector3 y = p.velocity.normalized();
+			if (y.length_squared() < 0.0001f) y = Vector3(0, 1, 0);
+			Vector3 x = Vector3(0, 0, 1).cross(y).normalized();
+			if (x.length_squared() < 0.0001f) x = Vector3(1, 0, 0);
+			Vector3 z = x.cross(y).normalized();
+			Basis b;
+			b.set_column(0, x);
+			b.set_column(1, y);
+			b.set_column(2, z);
+			return b;
+		}
+		case BILLBOARD_NONE: {
+			return Basis();
+		}
+		case BILLBOARD_FIXED_Y: {
+			Vector3 to_cam = (cam_pos_local - p.position).normalized();
+			if (to_cam.length_squared() < 0.0001f) to_cam = Vector3(0, 0, 1);
+			Vector3 y = Vector3(0, 1, 0);
+			Vector3 x = y.cross(to_cam).normalized();
+			if (x.length_squared() < 0.0001f) x = Vector3(1, 0, 0);
+			Vector3 z = x.cross(y).normalized();
+			Basis b;
+			b.set_column(0, x);
+			b.set_column(1, y);
+			b.set_column(2, z);
+			return b;
+		}
+		default:
+			return Basis();
+	}
 }
 
 // ============================================================================
@@ -443,7 +628,6 @@ bool VFXParticles3D::_solve_collision(VFXParticle& p, float delta) {
 				p.position = next_pos;
 				return false;
 			}
-			// Crossed plane
 			Vector3 hit = collision_plane.project(p.position);
 			p.position = hit + collision_plane.get_normal() * 0.001f;
 
@@ -462,7 +646,6 @@ bool VFXParticles3D::_solve_collision(VFXParticle& p, float delta) {
 				p.position = next_pos;
 				return false;
 			}
-			// Inside or crossed into sphere
 			Vector3 n = (p.position - collision_sphere_center).normalized();
 			if (n.length_squared() < 0.0001f) n = Vector3(0, 1, 0);
 			p.position = collision_sphere_center + n * (collision_sphere_radius + 0.001f);
@@ -490,11 +673,9 @@ void VFXParticles3D::_trigger_subemit(SubEmitTrigger trigger, const Vector3& pos
 		if (UtilityFunctions::randf() > sub.probability) continue;
 		if (!sub.system) continue;
 
-		// Validate pointer with cast (returns null if object was freed)
 		VFXParticles3D* valid = Object::cast_to<VFXParticles3D>(sub.system);
 		if (!valid) continue;
 
-		// Position sub-emitter in world space at event location
 		Vector3 world_pos = get_global_transform().xform(pos);
 		valid->set_global_position(world_pos);
 		valid->emit_burst(sub.count);
@@ -622,6 +803,15 @@ Ref<Curve> VFXParticles3D::get_scale_curve() const { return scale_curve; }
 
 void VFXParticles3D::set_color_ramp(const Ref<Gradient>& ramp) { color_ramp = ramp; }
 Ref<Gradient> VFXParticles3D::get_color_ramp() const { return color_ramp; }
+
+void VFXParticles3D::set_billboard_mode(int mode) { billboard_mode = (BillboardMode)vfx::clampf(mode, 0, 3); }
+int VFXParticles3D::get_billboard_mode() const { return (int)billboard_mode; }
+
+void VFXParticles3D::set_draw_mesh(const Ref<Mesh>& mesh) {
+	draw_mesh = mesh;
+	cm_dirty = true;
+}
+Ref<Mesh> VFXParticles3D::get_draw_mesh() const { return draw_mesh; }
 
 void VFXParticles3D::set_collision_mode(int mode) { collision_mode = (CollisionMode)vfx::clampf(mode, 0, 3); }
 int VFXParticles3D::get_collision_mode() const { return (int)collision_mode; }
