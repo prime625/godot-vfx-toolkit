@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
+#include <unordered_set>
 
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
@@ -59,7 +60,6 @@ public:
 protected:
     static void _bind_methods();
     void _notification(int p_what);
-    void _process(double delta) override;
 
 private:
     // === COMPONENTS ===
