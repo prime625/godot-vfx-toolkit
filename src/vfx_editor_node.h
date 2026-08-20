@@ -3,11 +3,16 @@
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/curve3d.hpp>
+#include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
-#include <vector>
-#include <unordered_set>
+#include <godot_cpp/classes/v_box_container.hpp>
 
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
@@ -18,6 +23,9 @@
 #include "vfx_scene.h"
 #include "vfx_scene_node.h"
 
+// Forward declare to avoid circular include in header
+class VFXSceneTreePanel;
+
 using namespace godot;
 
 class VFXEditorNode : public Node3D {
@@ -27,146 +35,144 @@ public:
     enum GizmoMode {
         GIZMO_TRANSLATE = 0,
         GIZMO_ROTATE = 1,
-        GIZMO_SCALE = 2
+        GIZMO_SCALE = 2,
     };
 
     enum GizmoAxis {
         GIZMO_NONE = -1,
         GIZMO_X = 0,
-        GIZMO_Y,
-        GIZMO_Z,
-        GIZMO_XY,
-        GIZMO_XZ,
-        GIZMO_YZ,
-        GIZMO_XYZ
+        GIZMO_Y = 1,
+        GIZMO_Z = 2,
     };
 
     enum EditMode {
         MODE_OBJECT = 0,
         MODE_VERTEX = 1,
         MODE_EDGE = 2,
-        MODE_FACE = 3
+        MODE_FACE = 3,
     };
 
-    static const int SCENE_NODE_HIT = -3;
+    enum HitType {
+        SCENE_NODE_HIT = -3,
+    };
+
+protected:
+    static void _bind_methods();
+    void _notification(int p_what);
+    void _process(double delta) override;
 
 private:
+    // === COMPONENTS ===
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
     Ref<VFXAnimator> animator;
     Ref<VFXCurve> active_curve;
     Ref<VFXTexturePainter> painter;
-
-    MeshInstance3D* mesh_instance = nullptr;
-    MeshInstance3D* brush_cursor = nullptr;
     Ref<VFXScene> scene;
     Ref<VFXSceneNode> active_scene_node;
-    Node3D* scene_container = nullptr;
-    HashMap<uint64_t, MeshInstance3D*> scene_visuals;
 
-    void _ensure_scene_container();
-    void _sync_scene_visuals();
-    void _sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used);
-    void _clear_scene_visuals();
-    MeshInstance3D* _get_scene_visual(uint64_t node_id);
-    Ref<ArrayMesh> _build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone);
+    // === GODOT NODES ===
+    MeshInstance3D* mesh_instance = nullptr;
+    MeshInstance3D* brush_cursor = nullptr;
+    MeshInstance3D* gizmo_node = nullptr;
+    MeshInstance3D* selection_visual = nullptr;
+    MeshInstance3D* skel_visual = nullptr;
+    Node3D* scene_container = nullptr;
+    VFXSceneTreePanel* scene_tree_panel = nullptr;
+    Camera3D* camera = nullptr;
+
+    // === MATERIALS ===
     Ref<StandardMaterial3D> base_material;
     Ref<StandardMaterial3D> weight_material;
 
-    bool show_skeleton = true;
+    // === STATE ===
+    bool show_skeleton = false;
     bool show_weights = false;
-    int visualize_bone = 0;
     bool auto_update = true;
-
-    // === SYMMETRY ===
+    bool show_wireframe = false;
     bool symmetry_enabled = false;
-    int symmetry_axis = 0; // 0=X, 1=Y, 2=Z
-
-    // === EDIT MODE & SELECTION ===
+    int visualize_bone = -1;
+    int symmetry_axis = 0; // 0=x, 1=y, 2=z
     int edit_mode = MODE_OBJECT;
+    int gizmo_mode = GIZMO_TRANSLATE;
+    int gizmo_hover_axis = GIZMO_NONE;
+    int selected_bone = -1;
     int selected_face = -1;
     int selected_edge = -1;
     int selected_vertex = -1;
-    bool show_wireframe = true;
-    MeshInstance3D* selection_visual = nullptr;
+    float select_pixel_tolerance = 8.0f;
 
-    void _ensure_selection_visual();
-    void _build_selection_mesh();
-    void _update_gizmo_for_selection();
-
-    // Mesh gizmo drag state
-    std::vector<int> mesh_edit_verts;
-    std::vector<Vector3> mesh_edit_initial_positions;
-
-    // === GIZMO STATE ===
-    int gizmo_mode = GIZMO_TRANSLATE;
-    int gizmo_hover_axis = GIZMO_NONE;
+    // === GIZMO DRAG STATE ===
+    bool gizmo_dragging = false;
     int gizmo_drag_axis = GIZMO_NONE;
+    Vector3 gizmo_drag_start_pos;
+    Vector3 gizmo_drag_plane_normal;
+    float gizmo_drag_plane_d = 0.0f;
     Transform3D gizmo_transform;
-    float gizmo_screen_scale = 0.5f;
-
-    Vector3 gizmo_drag_start_point;
     Transform3D gizmo_drag_start_transform;
-    Plane gizmo_drag_plane;
     Quaternion gizmo_drag_start_rotation;
     Vector3 gizmo_drag_start_scale;
 
-    MeshInstance3D* gizmo_node = nullptr;
+    // === SCENE VISUALS ===
+    HashMap<uint64_t, MeshInstance3D*> scene_visuals;
+    bool scene_visuals_dirty = true;
 
+    // === INTERNAL HELPERS ===
+    void _ensure_mesh_instance();
+    void _ensure_brush_cursor();
     void _ensure_gizmo_node();
+    void _ensure_selection_visual();
+    void _ensure_skeleton_visual();
+    void _ensure_scene_container();
+
+    void _update_godot_mesh();
     void _build_gizmo_mesh();
+    void _build_skeleton_mesh();
+    void _build_selection_mesh();
+    void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
 
-    // === SKELETON VISUAL ===
-    int selected_bone = -1;
-    MeshInstance3D* skel_visual = nullptr;
+    // Scene tree integration
+    void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
+    void mark_scene_dirty();
 
-    void _ensure_skeleton_visual();
-    void _build_skeleton_mesh();
+    // Scene visuals
+    MeshInstance3D* _get_scene_visual(uint64_t node_id);
+    void _clear_scene_visuals();
+    Ref<ArrayMesh> _build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone);
+    void _sync_scene_visuals();
+    void _sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used);
 
-    // === SCREEN-SPACE SELECTION ===
-    Camera3D* camera = nullptr;
-    float select_pixel_tolerance = 28.0f;
-
-    static float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
-    static bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
-
-    void _ensure_mesh_instance();
-    void _ensure_brush_cursor();
-    void _update_godot_mesh();
-
-protected:
-    static void _bind_methods();
-    void _notification(int p_what);
+    // Gizmo raycast / drag
+    float _ray_plane_intersect(const Vector3& ro, const Vector3& rd, const Vector3& pn, float pd) const;
+    float _ray_sphere_intersect(const Vector3& ro, const Vector3& rd, const Vector3& sc, float sr) const;
 
 public:
     VFXEditorNode();
     ~VFXEditorNode();
 
+    // === MESH ===
     void set_vfx_mesh(const Ref<VFXMesh>& p_mesh);
     Ref<VFXMesh> get_vfx_mesh() const;
     void refresh_mesh();
 
+    // === SKELETON ===
     void set_vfx_skeleton(const Ref<VFXSkeleton>& p_sk);
     Ref<VFXSkeleton> get_vfx_skeleton() const;
     void create_mixamo_skeleton();
 
+    // === SKIN ===
     void set_vfx_skin(const Ref<VFXSkin>& p_skin);
     Ref<VFXSkin> get_vfx_skin() const;
     void auto_weight();
 
-    void set_scene(const Ref<VFXScene>& p_scene);
-    Ref<VFXScene> get_scene() const;
-    void set_active_scene_node(const Ref<VFXSceneNode>& node);
-    Ref<VFXSceneNode> get_active_scene_node() const;
-    bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
-    Ref<VFXSceneNode> raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir);
-
+    // === ANIMATOR ===
     void set_vfx_animator(const Ref<VFXAnimator>& p_anim);
     Ref<VFXAnimator> get_vfx_animator() const;
 
+    // === VISIBILITY ===
     void set_show_skeleton(bool show);
     bool get_show_skeleton() const;
     void set_show_weights(bool show);
@@ -176,30 +182,21 @@ public:
     void set_auto_update(bool auto_up);
     bool get_auto_update() const;
 
+    // === BRUSH ===
     void set_brush_cursor(const Vector3& world_pos, float radius);
     void clear_brush_cursor();
+    Variant raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, float max_dist);
 
-    Variant raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, float max_dist = 1e20f);
+    // === EXPORT ===
+    void export_glb(const String& filepath);
+    void export_glb_animated(const String& filepath, int clip_idx);
+    void export_vat(const String& filepath, int frame_count, float fps);
 
-    bool export_glb(const String& filepath);
-    bool export_glb_animated(const String& filepath, int clip_idx);
-    bool export_vat(const String& filepath, int frame_count, float fps);
-
+    // === DEMO ===
     void create_demo_cube();
     void create_demo_character();
 
-    // === EDIT MODE ===
-    void set_edit_mode(int mode);
-    int get_edit_mode() const;
-    void set_show_wireframe(bool show);
-    bool get_show_wireframe() const;
-    void clear_selection();
-    int get_selected_face() const;
-    int get_selected_edge() const;
-    int get_selected_vertex() const;
-    int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
-
-    // === MODELING (legacy face-0) ===
+    // === MODELING ===
     void extrude_selected_face(float distance);
     void inset_selected_face(float amount);
     void delete_selected_face();
@@ -207,7 +204,6 @@ public:
     void flip_normals();
     void mesh_cleanup();
 
-    // === MODELING (selection-aware) ===
     void extrude_selection(float distance);
     void inset_selection(float amount);
     void delete_selection();
@@ -222,11 +218,7 @@ public:
     Ref<VFXCurve> get_active_curve() const;
     void curve_to_mesh(float radius, int segments, int rings);
 
-    // === TEXTURE PAINTER ===
-    void set_texture_painter(const Ref<VFXTexturePainter>& p_painter);
-    Ref<VFXTexturePainter> get_texture_painter() const;
-    void paint_at(const Vector3& ray_origin, const Vector3& ray_dir);
-
+    // === GIZMO ===
     void set_gizmo_mode(int mode);
     int get_gizmo_mode() const;
     void set_gizmo_transform(const Transform3D& t);
@@ -237,31 +229,57 @@ public:
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
 
+    // === BONE ===
     void set_selected_bone(int idx);
     int get_selected_bone() const;
-    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;
+    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir);
 
-    // Camera binding
+    // === CAMERA ===
     void set_camera(Camera3D* p_camera);
     Camera3D* get_camera() const;
-
     void set_select_pixel_tolerance(float px);
     float get_select_pixel_tolerance() const;
 
+    // === SCREEN SELECT ===
     int screen_select_vertex(const Vector2& screen_pos);
     int screen_select_edge(const Vector2& screen_pos);
     int screen_select_face(const Vector2& screen_pos);
     int screen_raycast_gizmo(const Vector2& screen_pos);
 
-    int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos = Vector2(-1, -1));
-    void on_touch_up();
-    void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
+    // === EDIT MODE ===
+    void set_edit_mode(int mode);
+    int get_edit_mode() const;
+    void set_show_wireframe(bool show);
+    bool get_show_wireframe() const;
+    void clear_selection();
+    int get_selected_face() const;
+    int get_selected_edge() const;
+    int get_selected_vertex() const;
+    int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
+
+    // === TEXTURE PAINTER ===
+    void set_texture_painter(const Ref<VFXTexturePainter>& p);
+    Ref<VFXTexturePainter> get_texture_painter() const;
+    void paint_at(const Vector3& ray_origin, const Vector3& ray_dir);
 
     // === SYMMETRY ===
     void set_symmetry_enabled(bool enabled);
     bool get_symmetry_enabled() const;
     void set_symmetry_axis(int axis);
     int get_symmetry_axis() const;
+
+    // === SCENE ===
+    void set_scene(const Ref<VFXScene>& p_scene);
+    Ref<VFXScene> get_scene() const;
+    void set_active_scene_node(const Ref<VFXSceneNode>& p_node);
+    Ref<VFXSceneNode> get_active_scene_node() const;
+    bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent);
+    Ref<VFXSceneNode> raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir);
+
+    // === UNIFIED TOUCH ===
+    int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos);
+    void on_touch_up();
+    void on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir);
 };
 
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
