@@ -11,9 +11,11 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
 #include <unordered_set>
+#include <vector>
 
 #include "vfx_mesh.h"
 #include "vfx_skeleton.h"
@@ -44,6 +46,10 @@ public:
         GIZMO_X = 0,
         GIZMO_Y = 1,
         GIZMO_Z = 2,
+        GIZMO_XY = 3,
+        GIZMO_XZ = 4,
+        GIZMO_YZ = 5,
+        GIZMO_XYZ = 6,
     };
 
     enum EditMode {
@@ -102,6 +108,7 @@ private:
     int selected_edge = -1;
     int selected_vertex = -1;
     float select_pixel_tolerance = 8.0f;
+    float gizmo_screen_scale = 1.0f;
 
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
@@ -113,6 +120,12 @@ private:
     Transform3D gizmo_drag_start_transform;
     Quaternion gizmo_drag_start_rotation;
     Vector3 gizmo_drag_start_scale;
+    Plane gizmo_drag_plane;
+    Vector3 gizmo_drag_start_point;
+
+    // === MESH EDIT STATE ===
+    std::vector<int> mesh_edit_verts;
+    std::vector<Vector3> mesh_edit_initial_positions;
 
     // === SCENE VISUALS ===
     HashMap<uint64_t, MeshInstance3D*> scene_visuals;
