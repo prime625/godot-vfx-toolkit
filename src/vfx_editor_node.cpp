@@ -334,9 +334,10 @@ void VFXEditorNode::create_mixamo_skeleton() {
 
 void VFXEditorNode::set_vfx_skin(const Ref<VFXSkin>& p_skin) {
     skin = p_skin;
+    if (skin.is_null()) return;
     if (mesh.is_valid()) skin->set_mesh(mesh);
     if (skeleton.is_valid()) skin->set_skeleton(skeleton);
-    if (skin.is_valid()) skin->set_mesh_transform(get_global_transform());
+    skin->set_mesh_transform(get_global_transform());
 }
 
 Ref<VFXSkin> VFXEditorNode::get_vfx_skin() const { return skin; }
@@ -504,6 +505,7 @@ int VFXEditorNode::get_symmetry_axis() const { return symmetry_axis; }
 // ============================================================================
 void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
     scene = p_scene;
+    active_scene_node = Ref<VFXSceneNode>();
     _clear_scene_visuals();
     if (scene.is_valid()) {
         _ensure_scene_container();
@@ -517,22 +519,31 @@ void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
 
 Ref<VFXScene> VFXEditorNode::get_scene() const { return scene; }
 
-void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& node) {
-    active_scene_node = node;
-    if (node.is_valid()) {
-        mesh = node->get_mesh();
-        skeleton = node->get_skeleton();
-        skin = node->get_skin();
-        animator = node->get_animator();
+void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
+    active_scene_node = p_node;
 
-        gizmo_transform = node->get_transform();
-        if (gizmo_node) {
-            gizmo_node->set_transform(_get_visual_gizmo_transform());
-            gizmo_node->set_visible(true);
-            _build_gizmo_mesh();
-        }
+    if (active_scene_node.is_null()) {
+        clear_selection();
         _update_gizmo_visibility();
+        return;
     }
+
+    // Swap viewport content from the scene node (shared Refs, so edits propagate back)
+    set_vfx_mesh(active_scene_node->get_mesh());
+    set_vfx_skeleton(active_scene_node->get_skeleton());
+    set_vfx_skin(active_scene_node->get_skin());
+    set_vfx_animator(active_scene_node->get_animator());
+
+    // Update transform gizmo to match node's world transform
+    set_gizmo_transform(active_scene_node->get_global_transform());
+
+    // Rebuild gizmo and clear mesh selection
+    if (gizmo_node) {
+        _build_gizmo_mesh();
+    }
+    clear_selection();
+    _update_gizmo_visibility();
+    _sync_scene_visuals();
 }
 
 Ref<VFXSceneNode> VFXEditorNode::get_active_scene_node() const { return active_scene_node; }
@@ -665,29 +676,35 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
 
 void VFXEditorNode::_sync_scene_visuals() {
     if (scene.is_null() || !scene_container) return;
+    if (!scene->get_root().is_valid()) return;
 
     std::unordered_set<uint64_t> used;
-    Array nodes = scene->flatten_tree();
+    _sync_node_visual_recursive(scene->get_root(), used);
 
-    for (int i = 0; i < nodes.size(); i++) {
-        Ref<VFXSceneNode> sn = nodes[i];
-        if (sn.is_null() || sn->get_node_type() != VFXSceneNode::NODE_MESH) continue;
-        if (!sn->is_visible()) continue;
+    // Hide visuals for nodes no longer in the tree or that became invisible
+    for (const auto& pair : scene_visuals) {
+        if (used.find(pair.key) == used.end()) {
+            pair.value->set_visible(false);
+        }
+    }
+}
 
-        uint64_t id = sn->get_instance_id();
-        used.insert(id);
+void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used) {
+    if (p_node.is_null() || !p_node->is_visible()) return;
+
+    if (p_node->get_node_type() == VFXSceneNode::NODE_MESH && p_node->has_mesh()) {
+        uint64_t id = p_node->get_instance_id();
+        r_used.insert(id);
 
         MeshInstance3D* visual = _get_scene_visual(id);
         visual->set_visible(true);
-        visual->set_transform(sn->get_global_transform());
+        visual->set_transform(p_node->get_global_transform());
 
-        Ref<VFXMesh> vmesh = sn->get_mesh();
-        if (vmesh.is_null()) continue;
-
-        Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, sn->get_skeleton(), sn->get_skin(), show_weights, visualize_bone);
+        Ref<VFXMesh> vmesh = p_node->get_mesh();
+        Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, p_node->get_skeleton(), p_node->get_skin(), show_weights, visualize_bone);
         if (am.is_valid()) {
             visual->set_mesh(am);
-            if (show_weights && sn->get_skin().is_valid()) {
+            if (show_weights && p_node->get_skin().is_valid()) {
                 visual->set_surface_override_material(0, weight_material);
             } else {
                 visual->set_surface_override_material(0, base_material);
@@ -695,10 +712,8 @@ void VFXEditorNode::_sync_scene_visuals() {
         }
     }
 
-    for (const auto& pair : scene_visuals) {
-        if (used.find(pair.key) == used.end()) {
-            pair.value->set_visible(false);
-        }
+    for (int i = 0; i < p_node->get_child_count(); ++i) {
+        _sync_node_visual_recursive(p_node->get_child(i), r_used);
     }
 }
 
