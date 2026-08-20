@@ -57,6 +57,13 @@ public:
 		SUBEMIT_ON_COLLISION = 2
 	};
 
+	enum BillboardMode {
+		BILLBOARD_CAMERA = 0,
+		BILLBOARD_Y_TO_VELOCITY = 1,
+		BILLBOARD_NONE = 2,
+		BILLBOARD_FIXED_Y = 3
+	};
+
 private:
 	// Simulation pool (active particles are contiguous at front)
 	std::vector<VFXParticle> particles;
@@ -100,6 +107,18 @@ private:
 	Ref<Gradient> color_ramp;
 	float scale_amount_min = 1.0f;
 	float scale_amount_max = 1.0f;
+	BillboardMode billboard_mode = BILLBOARD_CAMERA;
+
+	// Custom draw mesh (if set, overrides billboard quads)
+	Ref<Mesh> draw_mesh;
+	// Cached custom mesh data to avoid re-reading every frame
+	PackedVector3Array cm_verts;
+	PackedVector3Array cm_normals;
+	PackedVector2Array cm_uvs;
+	PackedColorArray cm_colors;
+	PackedInt32Array cm_indices;
+	bool cm_dirty = true;
+	void _cache_custom_mesh();
 
 	// Rendering
 	MeshInstance3D* mesh_instance = nullptr;
@@ -128,10 +147,13 @@ private:
 	void _emit(int count, const Vector3& pos, const Vector3& normal);
 	void _kill(int idx);
 	void _rebuild_mesh();
+	void _rebuild_mesh_billboard();
+	void _rebuild_mesh_custom();
 	void _trigger_subemit(SubEmitTrigger trigger, const Vector3& pos, const Vector3& normal);
 	bool _solve_collision(VFXParticle& p, float delta);
 	Vector3 _random_direction_in_cone() const;
 	Vector3 _random_emission_position() const;
+	Basis _compute_particle_basis(const VFXParticle& p, const Vector3& cam_pos_local) const;
 
 protected:
 	static void _bind_methods();
@@ -192,6 +214,12 @@ public:
 	Ref<Curve> get_scale_curve() const;
 	void set_color_ramp(const Ref<Gradient>& ramp);
 	Ref<Gradient> get_color_ramp() const;
+	void set_billboard_mode(int mode);
+	int get_billboard_mode() const;
+
+	// Custom draw mesh
+	void set_draw_mesh(const Ref<Mesh>& mesh);
+	Ref<Mesh> get_draw_mesh() const;
 
 	// Collision
 	void set_collision_mode(int mode);
@@ -224,5 +252,6 @@ public:
 VARIANT_ENUM_CAST(VFXParticles3D::EmissionShape);
 VARIANT_ENUM_CAST(VFXParticles3D::CollisionMode);
 VARIANT_ENUM_CAST(VFXParticles3D::SubEmitTrigger);
+VARIANT_ENUM_CAST(VFXParticles3D::BillboardMode);
 
 #endif
