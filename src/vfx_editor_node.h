@@ -149,6 +149,10 @@ private:
     float _ray_plane_intersect(const Vector3& ro, const Vector3& rd, const Vector3& pn, float pd) const;
     float _ray_sphere_intersect(const Vector3& ro, const Vector3& rd, const Vector3& sc, float sr) const;
 
+    // Screen-space selection helpers
+    float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
+    bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
+
 public:
     VFXEditorNode();
     ~VFXEditorNode();
@@ -188,9 +192,9 @@ public:
     Variant raycast_mesh(const Vector3& ray_origin, const Vector3& ray_dir, float max_dist);
 
     // === EXPORT ===
-    void export_glb(const String& filepath);
-    void export_glb_animated(const String& filepath, int clip_idx);
-    void export_vat(const String& filepath, int frame_count, float fps);
+    bool export_glb(const String& filepath);
+    bool export_glb_animated(const String& filepath, int clip_idx);
+    bool export_vat(const String& filepath, int frame_count, float fps);
 
     // === DEMO ===
     void create_demo_cube();
@@ -232,7 +236,7 @@ public:
     // === BONE ===
     void set_selected_bone(int idx);
     int get_selected_bone() const;
-    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir);
+    int raycast_bone(const Vector3& ray_origin, const Vector3& ray_dir) const;
 
     // === CAMERA ===
     void set_camera(Camera3D* p_camera);
