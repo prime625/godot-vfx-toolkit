@@ -15,7 +15,6 @@ void VFXSceneTreePanel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("mark_dirty"), &VFXSceneTreePanel::mark_dirty);
     ClassDB::bind_method(D_METHOD("force_rebuild"), &VFXSceneTreePanel::force_rebuild);
 
-    // Signal forwarded from internal tree
     ADD_SIGNAL(MethodInfo("node_selected", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("node_activated", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_reparented"));
@@ -71,7 +70,7 @@ void VFXSceneTreePanel::_notification(int p_what) {
         tree->connect("nothing_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_nothing_selected));
         tree->connect("item_mouse_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_mouse_selected));
 
-        // Load icons (fallback to empty if not found — replace paths with your actual icon paths)
+        // Load icons (fallback to empty if not found)
         ResourceLoader* rl = ResourceLoader::get_singleton();
         icon_mesh = rl->load("res://addons/vfx_toolkit/icons/mesh.png");
         icon_armature = rl->load("res://addons/vfx_toolkit/icons/armature.png");
@@ -85,12 +84,12 @@ void VFXSceneTreePanel::_notification(int p_what) {
 
         mark_dirty();
     }
-}
 
-void VFXSceneTreePanel::_process(double delta) {
-    if (tree_dirty && scene.is_valid()) {
-        tree_dirty = false;
-        _build_tree();
+    if (p_what == NOTIFICATION_PROCESS) {
+        if (tree_dirty && scene.is_valid()) {
+            tree_dirty = false;
+            _build_tree();
+        }
     }
 }
 
@@ -159,8 +158,9 @@ void VFXSceneTreePanel::_build_tree() {
     root_item->set_collapsed(!root->get_expanded());
 
     // Visibility button
-    int btn_idx = root->get_visible() ? 0 : 1;
-    root_item->add_button(1, root->get_visible() ? icon_visible : icon_hidden, btn_idx, false, root->get_visible() ? "Hide" : "Show");
+    root_item->add_button(1, root->get_visible() ? icon_visible : icon_hidden,
+                          root->get_visible() ? 0 : 1, false,
+                          root->get_visible() ? "Hide" : "Show");
 
     node_to_item[root->get_node_id()] = root_item;
     item_to_node[root_item] = root->get_node_id();
@@ -188,7 +188,6 @@ void VFXSceneTreePanel::_build_tree_recursive(TreeItem* parent_item, const Ref<V
         bool name_matches = filter.is_empty() || child->get_node_name().to_lower().contains(filter);
         bool descendant_matches = false;
         if (!name_matches) {
-            // Quick check: if any descendant name matches, show this node
             Array desc = child->get_all_descendants();
             for (int d = 0; d < desc.size(); d++) {
                 Ref<VFXSceneNode> dd = desc[d];
@@ -247,7 +246,6 @@ void VFXSceneTreePanel::_on_tree_item_selected() {
 
 void VFXSceneTreePanel::_on_tree_nothing_selected() {
     if (syncing) return;
-    // Clear scene selection
     if (scene.is_valid()) {
         Array all = scene->flatten_tree();
         for (int i = 0; i < all.size(); i++) {
@@ -261,14 +259,12 @@ void VFXSceneTreePanel::_on_tree_nothing_selected() {
 void VFXSceneTreePanel::_sync_selection_to_scene() {
     if (!scene.is_valid()) return;
 
-    // First clear all
     Array all = scene->flatten_tree();
     for (int i = 0; i < all.size(); i++) {
         Ref<VFXSceneNode> n = all[i];
         if (n.is_valid()) n->set_selected(false);
     }
 
-    // Set selected
     for (int i = 0; i < tree->get_selected_count(); i++) {
         TreeItem* it = tree->get_selected(i);
         Ref<VFXSceneNode> n = _get_node_for_item(it);
@@ -333,10 +329,8 @@ void VFXSceneTreePanel::_on_add_pressed() {
 
 void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx) {
     if (mouse_button_idx == MOUSE_BUTTON_RIGHT) {
-        // Could open context menu here
         TreeItem* item = tree->get_item_at_position(mouse_pos);
         if (item) {
-            // Select the right-clicked item
             tree->deselect_all();
             item->select(0);
             _sync_selection_to_scene();
@@ -346,7 +340,6 @@ void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, i
 
 // --- Drag & Drop Reparenting ---
 
-// Godot Tree supports built-in drag-drop. We override drop data.
 void VFXSceneTreePanel::_reparent_item(TreeItem* item, TreeItem* new_parent_item) {
     if (!scene.is_valid() || !item || !new_parent_item) return;
     if (item == new_parent_item) return;
@@ -359,12 +352,10 @@ void VFXSceneTreePanel::_reparent_item(TreeItem* item, TreeItem* new_parent_item
     if (new_parent->is_descendant_of(node)) return;
 
     // Do the reparent in scene
-    // Remove from old parent
     Ref<VFXSceneNode> old_parent = node->get_parent_node();
     if (old_parent.is_valid()) {
         old_parent->remove_child(node);
     }
-    // Add to new parent
     new_parent->add_child(node);
     node->set_parent_node(new_parent.ptr());
 
