@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/physics_direct_space_state3d.hpp>
 #include <godot_cpp/classes/physics_ray_query_parameters3d.hpp>
+#include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -89,7 +90,7 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_collision_sphere_radius", "radius"), &VFXParticles3D::set_collision_sphere_radius);
 	ClassDB::bind_method(D_METHOD("get_collision_sphere_radius"), &VFXParticles3D::get_collision_sphere_radius);
 
-	// Subemitters
+	// Subemitters — raw pointer because VFXParticles3D is a Node, not RefCounted
 	ClassDB::bind_method(D_METHOD("add_subemitter", "system", "trigger", "count", "probability"), &VFXParticles3D::add_subemitter);
 	ClassDB::bind_method(D_METHOD("clear_subemitters"), &VFXParticles3D::clear_subemitters);
 	ClassDB::bind_method(D_METHOD("get_subemitter_count"), &VFXParticles3D::get_subemitter_count);
@@ -487,12 +488,16 @@ void VFXParticles3D::_trigger_subemit(SubEmitTrigger trigger, const Vector3& pos
 	for (const auto& sub : sub_emitters) {
 		if (sub.trigger != trigger) continue;
 		if (Math::randf() > sub.probability) continue;
-		if (sub.system.is_null()) continue;
+		if (!sub.system) continue;
+
+		// Validate pointer with cast (returns null if object was freed)
+		VFXParticles3D* valid = Object::cast_to<VFXParticles3D>(sub.system);
+		if (!valid) continue;
 
 		// Position sub-emitter in world space at event location
 		Vector3 world_pos = get_global_transform().xform(pos);
-		sub.system->set_global_position(world_pos);
-		sub.system->emit_burst(sub.count);
+		valid->set_global_position(world_pos);
+		valid->emit_burst(sub.count);
 	}
 }
 
@@ -639,7 +644,8 @@ Vector3 VFXParticles3D::get_collision_sphere_center() const { return collision_s
 void VFXParticles3D::set_collision_sphere_radius(float r) { collision_sphere_radius = vfx::clampf(r, 0.0f, 1000.0f); }
 float VFXParticles3D::get_collision_sphere_radius() const { return collision_sphere_radius; }
 
-void VFXParticles3D::add_subemitter(const Ref<VFXParticles3D>& system, int trigger, int count, float probability) {
+void VFXParticles3D::add_subemitter(VFXParticles3D* system, int trigger, int count, float probability) {
+	if (!system) return;
 	SubEmitter se;
 	se.system = system;
 	se.trigger = (SubEmitTrigger)vfx::clampf(trigger, 0, 2);
