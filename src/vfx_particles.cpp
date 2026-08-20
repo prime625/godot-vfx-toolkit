@@ -78,6 +78,10 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_draw_mesh", "mesh"), &VFXParticles3D::set_draw_mesh);
 	ClassDB::bind_method(D_METHOD("get_draw_mesh"), &VFXParticles3D::get_draw_mesh);
 
+	// Material
+	ClassDB::bind_method(D_METHOD("set_material", "material"), &VFXParticles3D::set_material);
+	ClassDB::bind_method(D_METHOD("get_material"), &VFXParticles3D::get_material);
+
 	// Collision
 	ClassDB::bind_method(D_METHOD("set_collision_mode", "mode"), &VFXParticles3D::set_collision_mode);
 	ClassDB::bind_method(D_METHOD("get_collision_mode"), &VFXParticles3D::get_collision_mode);
@@ -102,8 +106,6 @@ void VFXParticles3D::_bind_methods() {
 	// Actions
 	ClassDB::bind_method(D_METHOD("restart"), &VFXParticles3D::restart);
 	ClassDB::bind_method(D_METHOD("emit_burst", "count"), &VFXParticles3D::emit_burst);
-	ClassDB::bind_method(D_METHOD("set_material", "material"), &VFXParticles3D::set_material);
-	ClassDB::bind_method(D_METHOD("get_material"), &VFXParticles3D::get_material);
 
 	// Properties
 	ADD_GROUP("Emission", "");
@@ -137,6 +139,9 @@ void VFXParticles3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "color_ramp", PROPERTY_HINT_RESOURCE_TYPE, "Gradient"), "set_color_ramp", "get_color_ramp");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "billboard_mode", PROPERTY_HINT_ENUM, "Camera,Y to Velocity,None,Fixed Y"), "set_billboard_mode", "get_billboard_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "draw_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_draw_mesh", "get_draw_mesh");
+
+	ADD_GROUP("Material", "");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "StandardMaterial3D,ShaderMaterial,CanvasItemMaterial"), "set_material", "get_material");
 
 	ADD_GROUP("Collision", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "Disabled,Raycast,Plane,Sphere"), "set_collision_mode", "get_collision_mode");
@@ -189,6 +194,9 @@ void VFXParticles3D::_notification(int p_what) {
 		array_mesh.instantiate();
 		mesh_instance->set_mesh(array_mesh);
 
+		// Apply material that was set before _ready
+		_apply_material();
+
 		particles.resize(max_particles);
 		r_verts.resize(max_particles * 4);
 		r_normals.resize(max_particles * 4);
@@ -200,6 +208,16 @@ void VFXParticles3D::_notification(int p_what) {
 		float delta = get_process_delta_time();
 		_simulate(delta);
 		_rebuild_mesh();
+	}
+}
+
+// ============================================================================
+// MATERIAL
+// ============================================================================
+
+void VFXParticles3D::_apply_material() {
+	if (mesh_instance && material.is_valid()) {
+		mesh_instance->set_material_override(material);
 	}
 }
 
@@ -322,7 +340,6 @@ void VFXParticles3D::_cache_custom_mesh() {
 		return;
 	}
 
-	// For now, cache only the first surface. Multi-surface meshes can be merged externally.
 	Array arrays = draw_mesh->surface_get_arrays(0);
 	if (arrays.size() < Mesh::ARRAY_MAX) {
 		cm_dirty = false;
@@ -813,6 +830,15 @@ void VFXParticles3D::set_draw_mesh(const Ref<Mesh>& mesh) {
 }
 Ref<Mesh> VFXParticles3D::get_draw_mesh() const { return draw_mesh; }
 
+void VFXParticles3D::set_material(const Ref<Material>& mat) {
+	material = mat;
+	_apply_material();
+}
+
+Ref<Material> VFXParticles3D::get_material() const {
+	return material;
+}
+
 void VFXParticles3D::set_collision_mode(int mode) { collision_mode = (CollisionMode)vfx::clampf(mode, 0, 3); }
 int VFXParticles3D::get_collision_mode() const { return (int)collision_mode; }
 
@@ -861,17 +887,4 @@ void VFXParticles3D::emit_burst(int count) {
 	for (int i = 0; i < count; i++) {
 		_emit(1, _random_emission_position(), Vector3());
 	}
-}
-
-void VFXParticles3D::set_material(const Ref<Material>& mat) {
-	if (mesh_instance) {
-		mesh_instance->set_material_override(mat);
-	}
-}
-
-Ref<Material> VFXParticles3D::get_material() const {
-	if (mesh_instance) {
-		return mesh_instance->get_material_override();
-	}
-	return Ref<Material>();
 }
