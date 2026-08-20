@@ -688,7 +688,7 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
         }
     }
 
-    am->add_surface_from_arrays(Mesh::ARRAY_PRIMITIVE_TRIANGLES, arrays);
+    am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
 
     if (p_show_weights && p_skin.is_valid()) {
         if (am->get_surface_count() > 0) {
@@ -698,7 +698,7 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
             if (colors.size() == verts.size()) {
                 a[Mesh::ARRAY_COLOR] = colors;
                 am->clear_surfaces();
-                am->add_surface_from_arrays(Mesh::ARRAY_PRIMITIVE_TRIANGLES, a);
+                am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, a);
             }
         }
     }
