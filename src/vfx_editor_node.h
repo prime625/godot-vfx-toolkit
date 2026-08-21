@@ -185,6 +185,9 @@ private:
     float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
     bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
 
+    // Proportional editing
+    void _apply_proportional(const Vector3& move, const Vector3& center);
+
 public:
     VFXEditorNode();
     ~VFXEditorNode();
