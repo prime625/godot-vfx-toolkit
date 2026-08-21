@@ -1991,8 +1991,9 @@ void VFXMesh::remove_face(int face_id) {
 }
 
 
+
 // ============================================================================
-// LOOP SELECTION
+// LOOP SELECTION — append this to the end of your vfx_mesh.cpp
 // ============================================================================
 
 void VFXMesh::get_ordered_edges_around_vertex(int vertex_id, std::vector<int>& out_edges) const {
@@ -2015,8 +2016,8 @@ PackedInt32Array VFXMesh::select_edge_loop(int edge_id) const {
     vfx::HEEdge* start = edges[edge_id];
     if (!start || start->deleted) return PackedInt32Array();
 
-    std::unordered_set<int> result;
-    result.insert(edge_id);
+    std::vector<int> result;
+    result.push_back(edge_id);
 
     int v0, v1;
     get_edge_endpoints(edge_id, v0, v1);
@@ -2050,8 +2051,8 @@ PackedInt32Array VFXMesh::select_edge_loop(int edge_id) const {
             int opposite_idx = (idx + n / 2) % n;
             int next_h = edges_around[opposite_idx];
 
-            if (result.count(next_h)) break;
-            result.insert(next_h);
+            if (std::find(result.begin(), result.end(), next_h) != result.end()) break;
+            result.push_back(next_h);
 
             int nh_v0, nh_v1;
             get_edge_endpoints(next_h, nh_v0, nh_v1);
@@ -2073,30 +2074,30 @@ PackedInt32Array VFXMesh::select_vertex_loop(int vertex_id) const {
     std::vector<int> incident_edges;
     get_ordered_edges_around_vertex(vertex_id, incident_edges);
 
-    std::unordered_set<int> best_loop;
+    std::vector<int> best_loop;
     for (int h_id : incident_edges) {
         PackedInt32Array loop = select_edge_loop(h_id);
         if (loop.size() > (int)best_loop.size()) {
             best_loop.clear();
-            for (int i = 0; i < loop.size(); i++) best_loop.insert(loop[i]);
+            for (int i = 0; i < loop.size(); i++) best_loop.push_back(loop[i]);
         }
         vfx::HEEdge* e = edges[h_id];
         if (e && e->twin) {
             PackedInt32Array loop_twin = select_edge_loop((int)e->twin->id);
             if (loop_twin.size() > (int)best_loop.size()) {
                 best_loop.clear();
-                for (int i = 0; i < loop_twin.size(); i++) best_loop.insert(loop_twin[i]);
+                for (int i = 0; i < loop_twin.size(); i++) best_loop.push_back(loop_twin[i]);
             }
         }
     }
 
-    std::unordered_set<int> verts;
-    verts.insert(vertex_id);
+    std::vector<int> verts;
+    verts.push_back(vertex_id);
     for (int eid : best_loop) {
         int ev0, ev1;
         get_edge_endpoints(eid, ev0, ev1);
-        if (ev0 >= 0) verts.insert(ev0);
-        if (ev1 >= 0) verts.insert(ev1);
+        if (ev0 >= 0 && std::find(verts.begin(), verts.end(), ev0) == verts.end()) verts.push_back(ev0);
+        if (ev1 >= 0 && std::find(verts.begin(), verts.end(), ev1) == verts.end()) verts.push_back(ev1);
     }
 
     PackedInt32Array arr;
@@ -2113,27 +2114,28 @@ PackedInt32Array VFXMesh::select_face_loop(int face_id) const {
     get_face_edges(face_id, f_edges);
     if (f_edges.empty()) return PackedInt32Array();
 
-    std::unordered_set<int> best_loop;
+    std::vector<int> best_loop;
     for (auto* e : f_edges) {
         if (!e) continue;
         PackedInt32Array loop = select_edge_loop((int)e->id);
         if (loop.size() > (int)best_loop.size()) {
             best_loop.clear();
-            for (int i = 0; i < loop.size(); i++) best_loop.insert(loop[i]);
+            for (int i = 0; i < loop.size(); i++) best_loop.push_back(loop[i]);
         }
     }
 
-    std::unordered_set<int> result;
-    result.insert(face_id);
+    std::vector<int> result;
+    result.push_back(face_id);
     for (int eid : best_loop) {
         vfx::HEEdge* e = edges[eid];
         if (!e) continue;
-        if (e->face && !e->face->deleted) result.insert((int)e->face->id);
-        if (e->twin && e->twin->face && !e->twin->face->deleted) result.insert((int)e->twin->face->id);
+        if (e->face && !e->face->deleted && std::find(result.begin(), result.end(), (int)e->face->id) == result.end())
+            result.push_back((int)e->face->id);
+        if (e->twin && e->twin->face && !e->twin->face->deleted && std::find(result.begin(), result.end(), (int)e->twin->face->id) == result.end())
+            result.push_back((int)e->twin->face->id);
     }
 
     PackedInt32Array arr;
     for (int id : result) arr.push_back(id);
     return arr;
 }
-
