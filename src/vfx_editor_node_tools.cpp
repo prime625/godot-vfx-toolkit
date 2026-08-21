@@ -73,7 +73,6 @@ void VFXEditorNode::extrude_selection(float distance) {
 
     if (edit_mode == MODE_FACE) {
         if (!selected_faces.empty()) {
-            // Descending order so indices don't shift
             std::vector<int> to_extrude = selected_faces;
             std::sort(to_extrude.begin(), to_extrude.end(), std::greater<int>());
             for (int fid : to_extrude) {
@@ -234,13 +233,13 @@ void VFXEditorNode::knife_selection(const Vector3& p0, const Vector3& p1) {
     if (edit_mode == MODE_FACE && !selected_faces.empty()) {
         for (int fid : selected_faces) {
             if (fid >= 0 && fid < (int)mesh->get_faces().size()) {
-                mesh->knife_face(fid, p0, p1);
+                mesh->knife_cut_face(fid, p0, p1);
             }
         }
         selected_faces.clear();
         selected_face = -1;
     } else if (edit_mode == MODE_FACE && selected_face >= 0) {
-        mesh->knife_face(selected_face, p0, p1);
+        mesh->knife_cut_face(selected_face, p0, p1);
         selected_face = -1;
     }
 
