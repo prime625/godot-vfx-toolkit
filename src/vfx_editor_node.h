@@ -25,6 +25,7 @@
 #include "vfx_texture_painter.h"
 #include "vfx_scene.h"
 #include "vfx_scene_node.h"
+#include "vfx_falloff.h"
 
 // Forward declare to avoid circular include in header
 class VFXSceneTreePanel;
@@ -284,6 +285,14 @@ public:
     bool get_symmetry_enabled() const;
     void set_symmetry_axis(int axis);
     int get_symmetry_axis() const;
+
+    // === PROPORTIONAL EDITING ===
+    void set_proportional_enabled(bool enabled);
+    bool get_proportional_enabled() const;
+    void set_proportional_radius(float radius);
+    float get_proportional_radius() const;
+    void set_proportional_falloff(int falloff);
+    int get_proportional_falloff() const;
 
     // === SCENE ===
     void set_scene(const Ref<VFXScene>& p_scene);
