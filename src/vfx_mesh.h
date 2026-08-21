@@ -123,6 +123,9 @@ public:
     void get_edge_endpoints(int edge_idx, int& out_v0, int& out_v1) const;
     Vector3 get_edge_midpoint(int edge_idx) const;
 
+
+    void link_twins();
+    void build_from_triangles(const PackedVector3Array& verts, const PackedInt32Array& indices);
     // === LOOP SELECTION ===
     void get_ordered_edges_around_vertex(int vertex_id, std::vector<int>& out_edges) const;
     PackedInt32Array select_edge_loop(int edge_id) const;
