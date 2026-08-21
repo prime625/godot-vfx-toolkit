@@ -990,3 +990,38 @@ void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_
         gizmo_drag(ray_origin, ray_dir);
     }
 }
+
+
+// ============================================================================
+// EXPORT (missing implementations)
+// ============================================================================
+bool VFXEditorNode::export_glb(const String& filepath) {
+    if (mesh.is_null()) return false;
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    exporter->set_mesh(mesh);
+    if (skeleton.is_valid()) exporter->set_skeleton(skeleton);
+    if (skin.is_valid()) exporter->set_skin(skin);
+    return exporter->export_glb(filepath);
+}
+
+bool VFXEditorNode::export_glb_animated(const String& filepath, int clip_idx) {
+    if (mesh.is_null() || animator.is_null()) return false;
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    exporter->set_mesh(mesh);
+    if (skeleton.is_valid()) exporter->set_skeleton(skeleton);
+    if (skin.is_valid()) exporter->set_skin(skin);
+    exporter->set_animator(animator);
+    return exporter->export_glb_animated(filepath, clip_idx);
+}
+
+bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fps) {
+    if (mesh.is_null() || skeleton.is_null() || skin.is_null()) return false;
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    exporter->set_mesh(mesh);
+    exporter->set_skeleton(skeleton);
+    exporter->set_skin(skin);
+    return exporter->export_vat(filepath, frame_count, fps);
+}
