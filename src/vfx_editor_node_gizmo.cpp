@@ -317,130 +317,254 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
 // GIZMO — DRAG UPDATE
 // ============================================================================
 void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
-    if (gizmo_drag_axis == GIZMO_NONE) return;
-    Vector3 hit;
-    if (!vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) return;
+    if (!gizmo_dragging || gizmo_drag_axis < 0) return;
 
-    Vector3 origin = gizmo_transform.get_origin();
+    float t = _ray_plane_intersect(ray_origin, ray_dir, gizmo_drag_plane_normal, gizmo_drag_plane_d);
+    if (t < 0.0f) return;
+    Vector3 hit = ray_origin + ray_dir * t;
 
-    if (gizmo_mode == GIZMO_TRANSLATE) {
-        Vector3 delta = hit - gizmo_drag_start_point;
-        Transform3D t = gizmo_drag_start_transform;
-        if (gizmo_drag_axis <= GIZMO_Z) {
-            Vector3 axis = t.basis.get_column(gizmo_drag_axis).normalized();
-            float proj = delta.dot(axis);
-            t.set_origin(t.get_origin() + axis * proj);
-        } else if (gizmo_drag_axis == GIZMO_XY || gizmo_drag_axis == GIZMO_XZ || gizmo_drag_axis == GIZMO_YZ) {
-            t.set_origin(t.get_origin() + delta);
-        }
-        gizmo_transform = t;
-    } else if (gizmo_mode == GIZMO_ROTATE) {
-        Vector3 v0 = (gizmo_drag_start_point - origin).normalized();
-        Vector3 v1 = (hit - origin).normalized();
-        if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
-        float dot = v0.dot(v1);
-        dot = vfx::clampf(dot, -1.0f, 1.0f);
-        float angle = acosf(dot);
-        Vector3 cross = v0.cross(v1);
-        if (cross.dot(gizmo_drag_plane.normal) < 0.0f) angle = -angle;
-        Vector3 axis_local;
-        if (gizmo_drag_axis == GIZMO_X) axis_local = Vector3(1,0,0);
-        else if (gizmo_drag_axis == GIZMO_Y) axis_local = Vector3(0,1,0);
-        else axis_local = Vector3(0,0,1);
-        Quaternion rot(axis_local, angle);
-        Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
-        gizmo_transform.set_basis(new_basis);
-    } else if (gizmo_mode == GIZMO_SCALE) {
-        Vector3 scale = gizmo_drag_start_scale;
-        if (gizmo_drag_axis <= GIZMO_Z) {
-            Vector3 world_axis = gizmo_drag_start_transform.basis.get_column(gizmo_drag_axis).normalized();
-            float current_proj = (hit - origin).dot(world_axis);
-            float start_proj = gizmo_drag_start_point.x;
-            if (fabs(start_proj) > 0.0001f) {
-                float ratio = current_proj / start_proj;
-                ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
-                scale[gizmo_drag_axis] = gizmo_drag_start_scale[gizmo_drag_axis] * ratio;
+    // --- OBJECT / BONE MODE ---
+    if (edit_mode == MODE_OBJECT) {
+        if (active_scene_node.is_valid()) {
+            if (gizmo_mode == GIZMO_TRANSLATE) {
+                Vector3 delta = hit - gizmo_drag_start_point;
+                Vector3 mask;
+                switch (gizmo_drag_axis) {
+                    case GIZMO_X:  mask = Vector3(1, 0, 0); break;
+                    case GIZMO_Y:  mask = Vector3(0, 1, 0); break;
+                    case GIZMO_Z:  mask = Vector3(0, 0, 1); break;
+                    case GIZMO_XY: mask = Vector3(1, 1, 0); break;
+                    case GIZMO_XZ: mask = Vector3(1, 0, 1); break;
+                    case GIZMO_YZ: mask = Vector3(0, 1, 1); break;
+                    case GIZMO_XYZ: mask = Vector3(1, 1, 1); break;
+                    default: mask = Vector3(1, 0, 0); break;
+                }
+                gizmo_transform.origin = gizmo_drag_start_transform.origin + delta * mask;
+                active_scene_node->set_local_position(gizmo_transform.origin);
+            } else if (gizmo_mode == GIZMO_ROTATE) {
+                Vector3 axis;
+                switch (gizmo_drag_axis) {
+                    case GIZMO_X: axis = Vector3(1, 0, 0); break;
+                    case GIZMO_Y: axis = Vector3(0, 1, 0); break;
+                    case GIZMO_Z: axis = Vector3(0, 0, 1); break;
+                    default: axis = Vector3(0, 1, 0); break;
+                }
+                Vector3 local_hit = gizmo_drag_start_transform.affine_inverse().xform(hit);
+                Vector3 local_start = gizmo_drag_start_transform.affine_inverse().xform(gizmo_drag_start_point);
+                float angle = atan2(local_hit.x - local_start.x, local_hit.y - local_start.y);
+                Quaternion delta_rot(axis, angle);
+                gizmo_transform.basis = Basis(delta_rot * gizmo_drag_start_rotation);
+                active_scene_node->set_local_rotation(Quaternion(gizmo_transform.basis.get_rotation_quaternion()));
+            } else if (gizmo_mode == GIZMO_SCALE) {
+                Vector3 delta = hit - gizmo_drag_start_point;
+                float s = 1.0f + delta.length() * (delta.dot(gizmo_drag_plane_normal) > 0 ? 1.0f : -1.0f);
+                s = MAX(s, 0.01f);
+                Vector3 mask;
+                switch (gizmo_drag_axis) {
+                    case GIZMO_X:  mask = Vector3(s, 1, 1); break;
+                    case GIZMO_Y:  mask = Vector3(1, s, 1); break;
+                    case GIZMO_Z:  mask = Vector3(1, 1, s); break;
+                    case GIZMO_XY: mask = Vector3(s, s, 1); break;
+                    case GIZMO_XZ: mask = Vector3(s, 1, s); break;
+                    case GIZMO_YZ: mask = Vector3(1, s, s); break;
+                    case GIZMO_XYZ: mask = Vector3(s, s, s); break;
+                    default: mask = Vector3(1, 1, 1); break;
+                }
+                gizmo_transform.basis = gizmo_drag_start_transform.basis;
+                gizmo_transform.basis.scale(mask);
+                active_scene_node->set_local_scale(gizmo_transform.basis.get_scale());
             }
-        } else if (gizmo_drag_axis == GIZMO_XYZ) {
-            float current_dist = (hit - origin).length();
-            float start_dist = gizmo_drag_start_point.x;
-            if (start_dist > 0.0001f) {
-                float ratio = current_dist / start_dist;
-                ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
-                scale = gizmo_drag_start_scale * ratio;
+            if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+            mark_scene_dirty();
+            return;
+        }
+
+        if (selected_bone >= 0 && skeleton.is_valid()) {
+            if (gizmo_mode == GIZMO_TRANSLATE) {
+                Vector3 delta = hit - gizmo_drag_start_point;
+                Vector3 mask;
+                switch (gizmo_drag_axis) {
+                    case GIZMO_X:  mask = Vector3(1, 0, 0); break;
+                    case GIZMO_Y:  mask = Vector3(0, 1, 0); break;
+                    case GIZMO_Z:  mask = Vector3(0, 0, 1); break;
+                    case GIZMO_XY: mask = Vector3(1, 1, 0); break;
+                    case GIZMO_XZ: mask = Vector3(1, 0, 1); break;
+                    case GIZMO_YZ: mask = Vector3(0, 1, 1); break;
+                    case GIZMO_XYZ: mask = Vector3(1, 1, 1); break;
+                    default: mask = Vector3(1, 0, 0); break;
+                }
+                gizmo_transform.origin = gizmo_drag_start_transform.origin + delta * mask;
+                skeleton->set_bone_position(selected_bone, gizmo_transform.origin);
+            } else if (gizmo_mode == GIZMO_ROTATE) {
+                Vector3 axis;
+                switch (gizmo_drag_axis) {
+                    case GIZMO_X: axis = Vector3(1, 0, 0); break;
+                    case GIZMO_Y: axis = Vector3(0, 1, 0); break;
+                    case GIZMO_Z: axis = Vector3(0, 0, 1); break;
+                    default: axis = Vector3(0, 1, 0); break;
+                }
+                Vector3 local_hit = gizmo_drag_start_transform.affine_inverse().xform(hit);
+                Vector3 local_start = gizmo_drag_start_transform.affine_inverse().xform(gizmo_drag_start_point);
+                float angle = atan2(local_hit.x - local_start.x, local_hit.y - local_start.y);
+                Quaternion delta_rot(axis, angle);
+                gizmo_transform.basis = Basis(delta_rot * gizmo_drag_start_rotation);
+                skeleton->set_bone_rotation(selected_bone, Quaternion(gizmo_transform.basis.get_rotation_quaternion()));
+            } else if (gizmo_mode == GIZMO_SCALE) {
+                Vector3 delta = hit - gizmo_drag_start_point;
+                float s = 1.0f + delta.length() * (delta.dot(gizmo_drag_plane_normal) > 0 ? 1.0f : -1.0f);
+                s = MAX(s, 0.01f);
+                Vector3 mask;
+                switch (gizmo_drag_axis) {
+                    case GIZMO_X:  mask = Vector3(s, 1, 1); break;
+                    case GIZMO_Y:  mask = Vector3(1, s, 1); break;
+                    case GIZMO_Z:  mask = Vector3(1, 1, s); break;
+                    case GIZMO_XY: mask = Vector3(s, s, 1); break;
+                    case GIZMO_XZ: mask = Vector3(s, 1, s); break;
+                    case GIZMO_YZ: mask = Vector3(1, s, s); break;
+                    case GIZMO_XYZ: mask = Vector3(s, s, s); break;
+                    default: mask = Vector3(1, 1, 1); break;
+                }
+                gizmo_transform.basis = gizmo_drag_start_transform.basis;
+                gizmo_transform.basis.scale(mask);
+                skeleton->set_bone_scale(selected_bone, gizmo_transform.basis.get_scale());
             }
+            if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+            _build_skeleton_mesh();
+            if (auto_update) _update_godot_mesh();
+            return;
         }
-        scale.x = vfx::clampf(scale.x, 0.001f, 1000.0f);
-        scale.y = vfx::clampf(scale.y, 0.001f, 1000.0f);
-        scale.z = vfx::clampf(scale.z, 0.001f, 1000.0f);
-        Basis b = gizmo_drag_start_transform.basis;
-        b.set_column(0, b.get_column(0).normalized() * scale.x);
-        b.set_column(1, b.get_column(1).normalized() * scale.y);
-        b.set_column(2, b.get_column(2).normalized() * scale.z);
-        gizmo_transform.set_basis(b);
-    }
-
-    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
-
-    // Apply to mesh elements
-    if (edit_mode != MODE_OBJECT && !mesh_edit_verts.empty() && mesh.is_valid()) {
-        Transform3D delta = gizmo_transform * gizmo_drag_start_transform.affine_inverse();
-        for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
-            Vector3 new_pos = delta.xform(mesh_edit_initial_positions[i]);
-            mesh->set_vertex_position(mesh_edit_verts[i], new_pos);
-        }
-        if (auto_update) _update_godot_mesh();
-        _build_selection_mesh();
-        _update_gizmo_for_selection();
         return;
     }
 
-    // Apply to bone with symmetry
-    if (selected_bone >= 0 && skeleton.is_valid()) {
-        int parent = skeleton->get_bone_parent(selected_bone);
-        Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
-        Transform3D local = parent_world.affine_inverse() * gizmo_transform;
-        skeleton->set_bone_pose(selected_bone, local);
+    // --- MESH EDIT MODE with PROPORTIONAL EDITING ---
+    auto _apply_proportional = [&](const Transform3D& t, const Vector3& center) {
+        std::unordered_set<int> selected_set;
+        for (int vi : mesh_edit_verts) selected_set.insert(vi);
 
-        if (symmetry_enabled) {
-            int sym_bone = skeleton->get_symmetric_bone(selected_bone);
-            if (sym_bone >= 0) {
-                Transform3D mirrored_local = local;
-                Vector3 pos = mirrored_local.get_origin();
-                if (symmetry_axis == 0) pos.x = -pos.x;
-                else if (symmetry_axis == 1) pos.y = -pos.y;
-                else if (symmetry_axis == 2) pos.z = -pos.z;
-                mirrored_local.set_origin(pos);
-
-                if (symmetry_axis == 0) {
-                    Basis b = mirrored_local.get_basis();
-                    Vector3 euler = b.get_euler();
-                    euler.x = -euler.x;
-                    euler.z = -euler.z;
-                    mirrored_local.set_basis(Basis::from_euler(euler));
-                }
-
-                skeleton->set_bone_pose(sym_bone, mirrored_local);
-            }
+        for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
+            int vi = mesh_edit_verts[i];
+            mesh->set_vertex_position(vi, t.xform(mesh_edit_initial_positions[i]));
         }
 
-        skeleton->update_transforms();
-        gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
-        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
-        _build_skeleton_mesh();
+        if (proportional_enabled && mesh.is_valid()) {
+            int vc = mesh->get_vertex_count();
+            for (int vi = 0; vi < vc; vi++) {
+                if (selected_set.find(vi) != selected_set.end()) continue;
+                Vector3 vpos = mesh->get_vertex_position(vi);
+                float dist = (vpos - center).length();
+                if (dist < proportional_radius) {
+                    float falloff = vfx::evaluate_falloff(dist / proportional_radius, proportional_falloff);
+                    mesh->set_vertex_position(vi, vpos.lerp(t.xform(vpos), falloff));
+                }
+            }
+        }
+    };
 
-        Vector3 bone_pos = skeleton->get_bone_model_transform(selected_bone).get_origin();
-        UtilityFunctions::print("Bone ", selected_bone, " pos: ", bone_pos);
-        _update_godot_mesh();
+    if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+        if (gizmo_mode == GIZMO_TRANSLATE) {
+            Vector3 delta = hit - gizmo_drag_start_point;
+            Transform3D t;
+            t.origin = delta;
+            _apply_proportional(t, gizmo_transform.origin);
+        } else if (gizmo_mode == GIZMO_ROTATE) {
+            Vector3 axis;
+            switch (gizmo_drag_axis) {
+                case GIZMO_X: axis = Vector3(1, 0, 0); break;
+                case GIZMO_Y: axis = Vector3(0, 1, 0); break;
+                case GIZMO_Z: axis = Vector3(0, 0, 1); break;
+                default: axis = Vector3(0, 1, 0); break;
+            }
+            Vector3 local_hit = gizmo_drag_start_transform.affine_inverse().xform(hit);
+            Vector3 local_start = gizmo_drag_start_transform.affine_inverse().xform(gizmo_drag_start_point);
+            float angle = atan2(local_hit.x - local_start.x, local_hit.y - local_start.y);
+            Quaternion delta_rot(axis, angle);
+            Transform3D t;
+            t.basis = Basis(delta_rot * gizmo_drag_start_rotation);
+            t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
+            _apply_proportional(t, gizmo_transform.origin);
+        } else if (gizmo_mode == GIZMO_SCALE) {
+            Vector3 delta = hit - gizmo_drag_start_point;
+            float s = 1.0f + delta.length() * (delta.dot(gizmo_drag_plane_normal) > 0 ? 1.0f : -1.0f);
+            s = MAX(s, 0.01f);
+            Transform3D t;
+            t.basis = Basis().scaled(Vector3(s, s, s));
+            t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
+            _apply_proportional(t, gizmo_transform.origin);
+        }
+        mesh->recompute_normals();
+        if (auto_update) _update_godot_mesh();
+        return;
     }
-}
 
-void VFXEditorNode::gizmo_end_drag() {
-    gizmo_drag_axis = GIZMO_NONE;
-}
+    if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+        if (gizmo_mode == GIZMO_TRANSLATE) {
+            Vector3 delta = hit - gizmo_drag_start_point;
+            Transform3D t; t.origin = delta;
+            _apply_proportional(t, gizmo_transform.origin);
+        } else if (gizmo_mode == GIZMO_ROTATE) {
+            Vector3 axis;
+            switch (gizmo_drag_axis) {
+                case GIZMO_X: axis = Vector3(1, 0, 0); break;
+                case GIZMO_Y: axis = Vector3(0, 1, 0); break;
+                case GIZMO_Z: axis = Vector3(0, 0, 1); break;
+                default: axis = Vector3(0, 1, 0); break;
+            }
+            Vector3 local_hit = gizmo_drag_start_transform.affine_inverse().xform(hit);
+            Vector3 local_start = gizmo_drag_start_transform.affine_inverse().xform(gizmo_drag_start_point);
+            float angle = atan2(local_hit.x - local_start.x, local_hit.y - local_start.y);
+            Quaternion delta_rot(axis, angle);
+            Transform3D t;
+            t.basis = Basis(delta_rot * gizmo_drag_start_rotation);
+            t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
+            _apply_proportional(t, gizmo_transform.origin);
+        } else if (gizmo_mode == GIZMO_SCALE) {
+            Vector3 delta = hit - gizmo_drag_start_point;
+            float s = 1.0f + delta.length() * (delta.dot(gizmo_drag_plane_normal) > 0 ? 1.0f : -1.0f);
+            s = MAX(s, 0.01f);
+            Transform3D t;
+            t.basis = Basis().scaled(Vector3(s, s, s));
+            t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
+            _apply_proportional(t, gizmo_transform.origin);
+        }
+        mesh->recompute_normals();
+        if (auto_update) _update_godot_mesh();
+        return;
+    }
 
-bool VFXEditorNode::is_gizmo_dragging() const {
-    return gizmo_drag_axis != GIZMO_NONE;
+    if (edit_mode == MODE_FACE && selected_face >= 0) {
+        if (gizmo_mode == GIZMO_TRANSLATE) {
+            Vector3 delta = hit - gizmo_drag_start_point;
+            Transform3D t; t.origin = delta;
+            _apply_proportional(t, gizmo_transform.origin);
+        } else if (gizmo_mode == GIZMO_ROTATE) {
+            Vector3 axis;
+            switch (gizmo_drag_axis) {
+                case GIZMO_X: axis = Vector3(1, 0, 0); break;
+                case GIZMO_Y: axis = Vector3(0, 1, 0); break;
+                case GIZMO_Z: axis = Vector3(0, 0, 1); break;
+                default: axis = Vector3(0, 1, 0); break;
+            }
+            Vector3 local_hit = gizmo_drag_start_transform.affine_inverse().xform(hit);
+            Vector3 local_start = gizmo_drag_start_transform.affine_inverse().xform(gizmo_drag_start_point);
+            float angle = atan2(local_hit.x - local_start.x, local_hit.y - local_start.y);
+            Quaternion delta_rot(axis, angle);
+            Transform3D t;
+            t.basis = Basis(delta_rot * gizmo_drag_start_rotation);
+            t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
+            _apply_proportional(t, gizmo_transform.origin);
+        } else if (gizmo_mode == GIZMO_SCALE) {
+            Vector3 delta = hit - gizmo_drag_start_point;
+            float s = 1.0f + delta.length() * (delta.dot(gizmo_drag_plane_normal) > 0 ? 1.0f : -1.0f);
+            s = MAX(s, 0.01f);
+            Transform3D t;
+            t.basis = Basis().scaled(Vector3(s, s, s));
+            t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
+            _apply_proportional(t, gizmo_transform.origin);
+        }
+        mesh->recompute_normals();
+        if (auto_update) _update_godot_mesh();
+        return;
+    }
 }
 
 // ============================================================================
