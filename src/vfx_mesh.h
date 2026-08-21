@@ -26,7 +26,7 @@ struct HEVertex {
     Vector3 normal;
     Vector2 uv;
     Color color = Color(1, 1, 1, 1);
-    HEVertex* halfedge = nullptr;
+    HEEdge* halfedge = nullptr;
     bool deleted = false;
     int bone_indices[4] = {-1, -1, -1, -1};
     float bone_weights[4] = {0, 0, 0, 0};
@@ -50,12 +50,13 @@ struct HEFace {
     Vector3 normal;
 };
 
+} // namespace vfx
+
+// Make VFXUVLayer accessible without namespace prefix (matches original usage)
 struct VFXUVLayer {
     std::vector<std::vector<int>> face_corners;
     std::vector<Vector2> coords;
 };
-
-} // namespace vfx
 
 class VFXMesh : public RefCounted {
     GDCLASS(VFXMesh, RefCounted)
@@ -102,6 +103,7 @@ public:
     void merge_vertices(int v0, int v1);
     void subdivide_face(int face_idx);
     void loop_cut(int face_idx, int v0, int v1, float t);
+    void knife_cut_face(int face_idx, const Vector3& p0, const Vector3& p1);
     void bevel_edge(int edge_idx, float amount);
     void bevel_vertex(int vidx, float amount);
     void dissolve_edge(int edge_idx);
@@ -123,9 +125,6 @@ public:
     void get_edge_endpoints(int edge_idx, int& out_v0, int& out_v1) const;
     Vector3 get_edge_midpoint(int edge_idx) const;
 
-
-    void link_twins();
-    void build_from_triangles(const PackedVector3Array& verts, const PackedInt32Array& indices);
     // === LOOP SELECTION ===
     void get_ordered_edges_around_vertex(int vertex_id, std::vector<int>& out_edges) const;
     PackedInt32Array select_edge_loop(int edge_id) const;
@@ -181,10 +180,15 @@ public:
     bool flip_edge(int edge_id);
     int split_edge(int edge_id);
     void remove_face(int face_id);
+    void link_twins();
+    void build_from_triangles(const PackedVector3Array& verts, const PackedInt32Array& indices);
 
     const std::vector<vfx::HEVertex*>& get_vertices() const { return vertices; }
     const std::vector<vfx::HEEdge*>& get_edges() const { return edges; }
     const std::vector<vfx::HEFace*>& get_faces() const { return faces; }
+
+    // === PUBLIC DATA (accessed by vfx_uv_editor and others) ===
+    std::vector<VFXUVLayer> uv_layers;
 
 protected:
     static void _bind_methods();
@@ -193,7 +197,6 @@ private:
     std::vector<vfx::HEVertex*> vertices;
     std::vector<vfx::HEEdge*> edges;
     std::vector<vfx::HEFace*> faces;
-    std::vector<vfx::VFXUVLayer> uv_layers;
 
     uint32_t next_vertex_id = 0;
     uint32_t next_edge_id = 0;
