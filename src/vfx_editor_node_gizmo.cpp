@@ -380,6 +380,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         }
 
         if (selected_bone >= 0 && skeleton.is_valid()) {
+            // Use set_bone_local_transform (the actual API)
             if (gizmo_mode == GIZMO_TRANSLATE) {
                 Vector3 delta = hit - gizmo_drag_start_point;
                 Vector3 mask;
@@ -394,7 +395,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
                     default: mask = Vector3(1, 0, 0); break;
                 }
                 gizmo_transform.origin = gizmo_drag_start_transform.origin + delta * mask;
-                skeleton->set_bone_position(selected_bone, gizmo_transform.origin);
             } else if (gizmo_mode == GIZMO_ROTATE) {
                 Vector3 axis;
                 switch (gizmo_drag_axis) {
@@ -408,7 +408,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
                 float angle = atan2(local_hit.x - local_start.x, local_hit.y - local_start.y);
                 Quaternion delta_rot(axis, angle);
                 gizmo_transform.basis = Basis(delta_rot * gizmo_drag_start_rotation);
-                skeleton->set_bone_rotation(selected_bone, Quaternion(gizmo_transform.basis.get_rotation_quaternion()));
             } else if (gizmo_mode == GIZMO_SCALE) {
                 Vector3 delta = hit - gizmo_drag_start_point;
                 float s = 1.0f + delta.length() * (delta.dot(gizmo_drag_plane_normal) > 0 ? 1.0f : -1.0f);
@@ -426,8 +425,8 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
                 }
                 gizmo_transform.basis = gizmo_drag_start_transform.basis;
                 gizmo_transform.basis.scale(mask);
-                skeleton->set_bone_scale(selected_bone, gizmo_transform.basis.get_scale());
             }
+            skeleton->set_bone_local_transform(selected_bone, gizmo_transform);
             if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
             _build_skeleton_mesh();
             if (auto_update) _update_godot_mesh();
@@ -491,7 +490,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
             _apply_proportional(t, gizmo_transform.origin);
         }
-        mesh->recompute_normals();
+        mesh->recalculate_normals();
         if (auto_update) _update_godot_mesh();
         return;
     }
@@ -526,7 +525,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
             _apply_proportional(t, gizmo_transform.origin);
         }
-        mesh->recompute_normals();
+        mesh->recalculate_normals();
         if (auto_update) _update_godot_mesh();
         return;
     }
@@ -561,15 +560,21 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             t.origin = gizmo_transform.origin - t.basis.xform(gizmo_transform.origin);
             _apply_proportional(t, gizmo_transform.origin);
         }
-        mesh->recompute_normals();
+        mesh->recalculate_normals();
         if (auto_update) _update_godot_mesh();
         return;
     }
 }
 
-// ============================================================================
-// GIZMO — MESH BUILDING
-// ============================================================================
+void VFXEditorNode::gizmo_end_drag() {
+    gizmo_drag_axis = GIZMO_NONE;
+}
+
+bool VFXEditorNode::is_gizmo_dragging() const {
+    return gizmo_drag_axis != GIZMO_NONE;
+}
+
+
 void VFXEditorNode::_build_gizmo_mesh() {
     if (!gizmo_node) _ensure_gizmo_node();
 
