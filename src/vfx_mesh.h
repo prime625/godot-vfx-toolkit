@@ -20,6 +20,8 @@ using namespace godot;
 
 namespace vfx {
 
+struct HEEdge; // forward declaration
+
 struct HEVertex {
     uint32_t id = 0;
     Vector3 position;
