@@ -1010,8 +1010,8 @@ bool VFXEditorNode::export_glb_animated(const String& filepath, int clip_idx) {
 }
 
 bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fps) {
-    if (mesh.is_null() || skeleton.is_null() || skin.is_null()) return false;
+    if (mesh.is_null() || skin.is_null()) return false;
     Ref<VFXGLTFExporter> exporter;
     exporter.instantiate();
-    return exporter->export_vat(mesh, skeleton, skin, filepath, frame_count, fps);
+    return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
 }
