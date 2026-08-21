@@ -134,6 +134,23 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_symmetry_axis", "axis"), &VFXEditorNode::set_symmetry_axis);
     ClassDB::bind_method(D_METHOD("get_symmetry_axis"), &VFXEditorNode::get_symmetry_axis);
 
+    // === PROPORTIONAL EDITING ===
+    ClassDB::bind_method(D_METHOD("set_proportional_enabled", "enabled"), &VFXEditorNode::set_proportional_enabled);
+    ClassDB::bind_method(D_METHOD("get_proportional_enabled"), &VFXEditorNode::get_proportional_enabled);
+    ClassDB::bind_method(D_METHOD("set_proportional_radius", "radius"), &VFXEditorNode::set_proportional_radius);
+    ClassDB::bind_method(D_METHOD("get_proportional_radius"), &VFXEditorNode::get_proportional_radius);
+    ClassDB::bind_method(D_METHOD("set_proportional_falloff", "falloff"), &VFXEditorNode::set_proportional_falloff);
+    ClassDB::bind_method(D_METHOD("get_proportional_falloff"), &VFXEditorNode::get_proportional_falloff);
+
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_SMOOTH", vfx::FALLOFF_SMOOTH);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_SPHERE", vfx::FALLOFF_SPHERE);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_ROOT", vfx::FALLOFF_ROOT);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_INVERSE_SQUARE", vfx::FALLOFF_INVERSE_SQUARE);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_SHARP", vfx::FALLOFF_SHARP);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_LINEAR", vfx::FALLOFF_LINEAR);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_CONSTANT", vfx::FALLOFF_CONSTANT);
+    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_RANDOM", vfx::FALLOFF_RANDOM);
+
     // === SCENE TREE ===
     ClassDB::bind_method(D_METHOD("set_scene", "scene"), &VFXEditorNode::set_scene);
     ClassDB::bind_method(D_METHOD("get_scene"), &VFXEditorNode::get_scene);
@@ -526,6 +543,16 @@ void VFXEditorNode::set_symmetry_enabled(bool enabled) { symmetry_enabled = enab
 bool VFXEditorNode::get_symmetry_enabled() const { return symmetry_enabled; }
 void VFXEditorNode::set_symmetry_axis(int axis) { symmetry_axis = axis; }
 int VFXEditorNode::get_symmetry_axis() const { return symmetry_axis; }
+
+// ============================================================================
+// PROPORTIONAL EDITING
+// ============================================================================
+void VFXEditorNode::set_proportional_enabled(bool enabled) { proportional_enabled = enabled; }
+bool VFXEditorNode::get_proportional_enabled() const { return proportional_enabled; }
+void VFXEditorNode::set_proportional_radius(float radius) { proportional_radius = MAX(radius, 0.001f); }
+float VFXEditorNode::get_proportional_radius() const { return proportional_radius; }
+void VFXEditorNode::set_proportional_falloff(int falloff) { proportional_falloff = falloff; }
+int VFXEditorNode::get_proportional_falloff() const { return proportional_falloff; }
 
 // ============================================================================
 // SCENE TREE — HIGH LEVEL
