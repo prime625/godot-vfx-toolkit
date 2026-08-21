@@ -380,9 +380,10 @@ void VFXSkin::_apply_weight(int vidx, float delta, int bone) {
 
     if (brush_mode == 0) { // ADD
         weights[slot] = vfx::clampf(weights[slot] + delta, 0.0f, 1.0f);
-    } else { // SUBTRACT
-        weights[slot] = vfx::clampf(weights[slot] - delta, 0.0f, 1.0f);
+    } else if (brush_mode == 1) { // SUBTRACT — delta is already negative
+        weights[slot] = vfx::clampf(weights[slot] + delta, 0.0f, 1.0f);
     }
+
     bones[slot] = bone;
 
     if (brush_normalize) {
