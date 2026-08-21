@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <vector>
 #include <unordered_set>
+#include <algorithm>
 
 using namespace godot;
 
@@ -109,6 +110,13 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_selected_vertex"), &VFXEditorNode::get_selected_vertex);
     ClassDB::bind_method(D_METHOD("raycast_select", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_select);
 
+    // === SELECT MODE ===
+    ClassDB::bind_method(D_METHOD("set_select_mode", "mode"), &VFXEditorNode::set_select_mode);
+    ClassDB::bind_method(D_METHOD("get_select_mode"), &VFXEditorNode::get_select_mode);
+    ClassDB::bind_method(D_METHOD("get_selected_faces"), &VFXEditorNode::get_selected_faces);
+    ClassDB::bind_method(D_METHOD("get_selected_edges"), &VFXEditorNode::get_selected_edges);
+    ClassDB::bind_method(D_METHOD("get_selected_vertices"), &VFXEditorNode::get_selected_vertices);
+
     // === MODELING (selection-aware) ===
     ClassDB::bind_method(D_METHOD("extrude_selection", "distance"), &VFXEditorNode::extrude_selection);
     ClassDB::bind_method(D_METHOD("inset_selection", "amount"), &VFXEditorNode::inset_selection);
@@ -122,6 +130,10 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_VERTEX", MODE_VERTEX);
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_EDGE", MODE_EDGE);
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_FACE", MODE_FACE);
+
+    ClassDB::bind_integer_constant(get_class_static(), "", "SELECT_SINGLE", SELECT_SINGLE);
+    ClassDB::bind_integer_constant(get_class_static(), "", "SELECT_MULTI", SELECT_MULTI);
+    ClassDB::bind_integer_constant(get_class_static(), "", "SELECT_LOOP", SELECT_LOOP);
 
     // === TEXTURE PAINTER ===
     ClassDB::bind_method(D_METHOD("set_texture_painter", "p"), &VFXEditorNode::set_texture_painter);
@@ -341,7 +353,8 @@ void VFXEditorNode::_update_gizmo_visibility() {
             show = true;
         }
     } else {
-        show = (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0);
+        show = (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
+                !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty());
     }
     gizmo_node->set_visible(show);
 }
@@ -442,6 +455,9 @@ void VFXEditorNode::clear_selection() {
     selected_face = -1;
     selected_edge = -1;
     selected_vertex = -1;
+    selected_faces.clear();
+    selected_edges.clear();
+    selected_vertices.clear();
     selected_bone = -1;
     _update_gizmo_for_selection();
     if (selection_visual) _build_selection_mesh();
@@ -451,6 +467,98 @@ void VFXEditorNode::clear_selection() {
 int VFXEditorNode::get_selected_face() const { return selected_face; }
 int VFXEditorNode::get_selected_edge() const { return selected_edge; }
 int VFXEditorNode::get_selected_vertex() const { return selected_vertex; }
+
+// ============================================================================
+// SELECT MODE
+// ============================================================================
+void VFXEditorNode::set_select_mode(int mode) {
+    select_mode = mode;
+    clear_selection();
+}
+
+int VFXEditorNode::get_select_mode() const { return select_mode; }
+
+PackedInt32Array VFXEditorNode::get_selected_faces() const {
+    PackedInt32Array arr;
+    for (int id : selected_faces) arr.push_back(id);
+    return arr;
+}
+
+PackedInt32Array VFXEditorNode::get_selected_edges() const {
+    PackedInt32Array arr;
+    for (int id : selected_edges) arr.push_back(id);
+    return arr;
+}
+
+PackedInt32Array VFXEditorNode::get_selected_vertices() const {
+    PackedInt32Array arr;
+    for (int id : selected_vertices) arr.push_back(id);
+    return arr;
+}
+
+void VFXEditorNode::_handle_mesh_selection(int hit) {
+    if (select_mode == SELECT_SINGLE) {
+        selected_faces.clear();
+        selected_edges.clear();
+        selected_vertices.clear();
+        if (edit_mode == MODE_VERTEX) {
+            selected_vertex = hit; selected_edge = -1; selected_face = -1;
+            selected_vertices.push_back(hit);
+        } else if (edit_mode == MODE_EDGE) {
+            selected_edge = hit; selected_vertex = -1; selected_face = -1;
+            selected_edges.push_back(hit);
+        } else if (edit_mode == MODE_FACE) {
+            selected_face = hit; selected_vertex = -1; selected_edge = -1;
+            selected_faces.push_back(hit);
+        }
+    } else if (select_mode == SELECT_MULTI) {
+        if (edit_mode == MODE_VERTEX) {
+            auto it = std::find(selected_vertices.begin(), selected_vertices.end(), hit);
+            if (it != selected_vertices.end()) {
+                selected_vertices.erase(it);
+            } else {
+                selected_vertices.push_back(hit);
+            }
+            selected_vertex = selected_vertices.empty() ? -1 : selected_vertices.back();
+            selected_edge = -1; selected_face = -1;
+        } else if (edit_mode == MODE_EDGE) {
+            auto it = std::find(selected_edges.begin(), selected_edges.end(), hit);
+            if (it != selected_edges.end()) {
+                selected_edges.erase(it);
+            } else {
+                selected_edges.push_back(hit);
+            }
+            selected_edge = selected_edges.empty() ? -1 : selected_edges.back();
+            selected_vertex = -1; selected_face = -1;
+        } else if (edit_mode == MODE_FACE) {
+            auto it = std::find(selected_faces.begin(), selected_faces.end(), hit);
+            if (it != selected_faces.end()) {
+                selected_faces.erase(it);
+            } else {
+                selected_faces.push_back(hit);
+            }
+            selected_face = selected_faces.empty() ? -1 : selected_faces.back();
+            selected_vertex = -1; selected_edge = -1;
+        }
+    } else if (select_mode == SELECT_LOOP) {
+        selected_faces.clear();
+        selected_edges.clear();
+        selected_vertices.clear();
+        if (edit_mode == MODE_VERTEX) {
+            PackedInt32Array loop = mesh->select_vertex_loop(hit);
+            for (int i = 0; i < loop.size(); i++) selected_vertices.push_back(loop[i]);
+            selected_vertex = hit; selected_edge = -1; selected_face = -1;
+        } else if (edit_mode == MODE_EDGE) {
+            PackedInt32Array loop = mesh->select_edge_loop(hit);
+            for (int i = 0; i < loop.size(); i++) selected_edges.push_back(loop[i]);
+            selected_edge = hit; selected_vertex = -1; selected_face = -1;
+        } else if (edit_mode == MODE_FACE) {
+            PackedInt32Array loop = mesh->select_face_loop(hit);
+            for (int i = 0; i < loop.size(); i++) selected_faces.push_back(loop[i]);
+            selected_face = hit; selected_vertex = -1; selected_edge = -1;
+        }
+    }
+}
 
 // ============================================================================
 // BRUSH CURSOR
@@ -517,6 +625,9 @@ void VFXEditorNode::set_selected_bone(int idx) {
     selected_face = -1;
     selected_edge = -1;
     selected_vertex = -1;
+    selected_faces.clear();
+    selected_edges.clear();
+    selected_vertices.clear();
     if (selection_visual) _build_selection_mesh();
 
     _update_gizmo_visibility();
@@ -806,7 +917,9 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
 
     // === MESH EDIT MODE ===
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        if ((selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
+        if ((selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
+             !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty())
+            && gizmo_node && gizmo_node->is_visible()) {
             int axis;
             if (camera && screen_pos.x >= 0.0f)
                 axis = screen_raycast_gizmo(screen_pos);
@@ -831,13 +944,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
         }
 
         if (hit >= 0) {
-            if (edit_mode == MODE_VERTEX) {
-                selected_vertex = hit; selected_edge = -1; selected_face = -1;
-            } else if (edit_mode == MODE_EDGE) {
-                selected_edge = hit; selected_vertex = -1; selected_face = -1;
-            } else if (edit_mode == MODE_FACE) {
-                selected_face = hit; selected_vertex = -1; selected_edge = -1;
-            }
+            _handle_mesh_selection(hit);
             _build_selection_mesh();
             _update_gizmo_for_selection();
             return hit;
