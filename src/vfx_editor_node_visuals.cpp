@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -43,23 +44,39 @@ void VFXEditorNode::_build_selection_mesh() {
     PackedColorArray cols;
     PackedInt32Array idx;
 
+    auto is_face_sel = [&](int fid) -> bool {
+        if (edit_mode == MODE_FACE && selected_face == fid) return true;
+        for (int sf : selected_faces) if (sf == fid) return true;
+        return false;
+    };
+    auto is_edge_sel = [&](int eid) -> bool {
+        if (edit_mode == MODE_EDGE && selected_edge == eid) return true;
+        for (int se : selected_edges) if (se == eid) return true;
+        return false;
+    };
+    auto is_vert_sel = [&](int vid) -> bool {
+        if (edit_mode == MODE_VERTEX && selected_vertex == vid) return true;
+        for (int sv : selected_vertices) if (sv == vid) return true;
+        return false;
+    };
+
     // Wireframe edges
     for (auto* e : mesh->get_edges()) {
         if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
         Vector3 a = e->next->vertex->position;
         Vector3 b = e->vertex->position;
-        bool is_sel = (edit_mode == MODE_EDGE && selected_edge == (int)e->id);
-        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.4f);
-        float r = is_sel ? 0.012f : 0.004f;
+        bool sel = is_edge_sel((int)e->id);
+        Color col = sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.4f);
+        float r = sel ? 0.012f : 0.004f;
         vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
     }
 
     // Vertices
     for (auto* v : mesh->get_vertices()) {
         if (v->deleted) continue;
-        bool is_sel = (edit_mode == MODE_VERTEX && selected_vertex == (int)v->id);
-        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.7f, 0.7f, 0.7f, 0.8f);
-        float s = is_sel ? 0.035f : 0.018f;
+        bool sel = is_vert_sel((int)v->id);
+        Color col = sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.7f, 0.7f, 0.7f, 0.8f);
+        float s = sel ? 0.035f : 0.018f;
         vfx_editor::append_box(verts, cols, idx, v->position, s, col);
     }
 
@@ -67,9 +84,9 @@ void VFXEditorNode::_build_selection_mesh() {
     for (auto* f : mesh->get_faces()) {
         if (f->deleted || !f->halfedge) continue;
         Vector3 c = mesh->get_face_center(f->id);
-        bool is_sel = (edit_mode == MODE_FACE && selected_face == (int)f->id);
-        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.3f, 0.6f, 1.0f, 0.6f);
-        float s = is_sel ? 0.045f : 0.028f;
+        bool sel = is_face_sel((int)f->id);
+        Color col = sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.3f, 0.6f, 1.0f, 0.6f);
+        float s = sel ? 0.045f : 0.028f;
         vfx_editor::append_box(verts, cols, idx, c, s, col);
     }
 
