@@ -1015,3 +1015,17 @@ bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fp
     exporter.instantiate();
     return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
 }
+
+// ============================================================================
+// CURVE TO MESH (missing implementation)
+// ============================================================================
+void VFXEditorNode::curve_to_mesh(float radius, int segments, int rings) {
+    if (active_curve.is_null()) return;
+    PackedVector3Array points = active_curve->get_points();
+    PackedVector3Array handles_in = active_curve->get_handles_in();
+    PackedVector3Array handles_out = active_curve->get_handles_out();
+    Ref<VFXMesh> new_mesh = VFXMesh::create_from_curve(points, handles_in, handles_out, radius, segments, rings, true, true);
+    if (new_mesh.is_valid()) {
+        set_vfx_mesh(new_mesh);
+    }
+}
