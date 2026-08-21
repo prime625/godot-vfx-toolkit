@@ -426,7 +426,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
                 gizmo_transform.basis = gizmo_drag_start_transform.basis;
                 gizmo_transform.basis.scale(mask);
             }
-            skeleton->set_bone_local_transform(selected_bone, gizmo_transform);
+            skeleton->set_bone_pose(selected_bone, gizmo_transform);
             if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
             _build_skeleton_mesh();
             if (auto_update) _update_godot_mesh();
