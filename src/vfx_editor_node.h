@@ -124,6 +124,11 @@ private:
     Plane gizmo_drag_plane;
     Vector3 gizmo_drag_start_point;
 
+    // === PROPORTIONAL EDITING ===
+    bool proportional_enabled = false;
+    float proportional_radius = 1.0f;
+    int proportional_falloff = 0;
+
     // === MESH EDIT STATE ===
     std::vector<int> mesh_edit_verts;
     std::vector<Vector3> mesh_edit_initial_positions;
