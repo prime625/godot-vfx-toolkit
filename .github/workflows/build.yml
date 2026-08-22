@@ -1,4 +1,4 @@
-name: Build GDExtension
+name: Build Android GDExtension
 
 on:
   push:
@@ -35,6 +35,7 @@ jobs:
 
       - name: Setup NDK r23c (Godot-tested version)
         run: |
+          # Download the exact NDK version Godot 4.x expects
           wget -q https://dl.google.com/android/repository/android-ndk-r23c-linux.zip
           unzip -q android-ndk-r23c-linux.zip
           sudo mkdir -p /usr/local/lib/android/sdk/ndk
@@ -83,94 +84,25 @@ jobs:
             demo/addons/vfx_toolkit/**/*.so
             demo/addons/vfx_toolkit/**/*.gdextension
 
-  build-ios:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        include:
-          - arch: arm64
-            target: template_debug
-          - arch: arm64
-            target: template_release
-          - arch: x86_64
-            target: template_debug
-          - arch: x86_64
-            target: template_release
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install SCons
-        run: pip install scons==4.8.0
-
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Clean cached artifacts
-        run: |
-          echo "=== Cleaning extension objects ==="
-          scons -c platform=ios arch=${{ matrix.arch }} target=${{ matrix.target }} 2>/dev/null || true
-
-          echo "=== Cleaning godot-cpp objects ==="
-          cd godot-cpp
-          scons -c platform=ios arch=${{ matrix.arch }} target=${{ matrix.target }} 2>/dev/null || true
-          cd ..
-
-          echo "=== Nuking build artifacts ==="
-          rm -f src/*.os src/*.o
-          find . -name "*.os" -delete 2>/dev/null || true
-          find . -name "*.o" -delete 2>/dev/null || true
-          rm -rf godot-cpp/gen 2>/dev/null || true
-          rm -rf godot-cpp/src/gen 2>/dev/null || true
-
-      - name: Generate godot-cpp bindings
-        run: |
-          cd godot-cpp
-          scons platform=ios arch=arm64 target=template_debug generate_bindings=yes -j$(sysctl -n hw.ncpu)
-
-      - name: Build Extension
-        run: |
-          scons platform=ios arch=${{ matrix.arch }} target=${{ matrix.target }} -j$(sysctl -n hw.ncpu)
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-${{ matrix.arch }}-${{ matrix.target }}
-          path: |
-            demo/addons/vfx_toolkit/**/*.dylib
-            demo/addons/vfx_toolkit/**/*.gdextension
-
   package:
-    needs: [build-android, build-ios]
+    needs: build-android
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (for .gdextension manifest)
-        uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: android-*
 
       - name: Package Addon
         run: |
           mkdir -p release/addons/vfx_toolkit
           cp -r artifacts/*/* release/addons/vfx_toolkit/ || true
           cp demo/addons/vfx_toolkit/*.gdextension release/addons/vfx_toolkit/ 2>/dev/null || true
-          cd release && zip -r ../godot_vfx_toolkit_all.zip addons/
+          cd release && zip -r ../godot_vfx_toolkit_android.zip addons/
 
       - name: Upload Release Package
         uses: actions/upload-artifact@v4
         with:
-          name: godot_vfx_toolkit_all
-          path: godot_vfx_toolkit_all.zip
+          name: godot_vfx_toolkit_android
+          path: godot_vfx_toolkit_android.zip
