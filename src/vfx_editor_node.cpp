@@ -143,6 +143,20 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("raycast_scene_node", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_scene_node);
 
     ClassDB::bind_integer_constant(get_class_static(), "", "SCENE_NODE_HIT", SCENE_NODE_HIT);
+    ClassDB::bind_method(D_METHOD("set_selection_mode", "mode"), &VFXEditorNode::set_selection_mode);
+    ClassDB::bind_method(D_METHOD("get_selection_mode"), &VFXEditorNode::get_selection_mode);
+    ClassDB::bind_method(D_METHOD("is_face_selected", "idx"), &VFXEditorNode::is_face_selected);
+    ClassDB::bind_method(D_METHOD("is_edge_selected", "idx"), &VFXEditorNode::is_edge_selected);
+    ClassDB::bind_method(D_METHOD("is_vertex_selected", "idx"), &VFXEditorNode::is_vertex_selected);
+    ClassDB::bind_method(D_METHOD("get_selected_faces"), &VFXEditorNode::get_selected_faces);
+    ClassDB::bind_method(D_METHOD("get_selected_edges"), &VFXEditorNode::get_selected_edges);
+    ClassDB::bind_method(D_METHOD("get_selected_vertices"), &VFXEditorNode::get_selected_vertices);
+
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "selection_mode", PROPERTY_HINT_ENUM, "Single,Multi,Loop"), "set_selection_mode", "get_selection_mode");
+
+    BIND_ENUM_CONSTANT(SELECTION_MODE_SINGLE);
+    BIND_ENUM_CONSTANT(SELECTION_MODE_MULTI);
+    BIND_ENUM_CONSTANT(SELECTION_MODE_LOOP);
 }
 
 // ============================================================================
@@ -422,16 +436,199 @@ void VFXEditorNode::set_show_wireframe(bool show) {
 bool VFXEditorNode::get_show_wireframe() const { return show_wireframe; }
 
 void VFXEditorNode::clear_selection() {
+    selected_faces.clear();
+    selected_edges.clear();
+    selected_vertices.clear();
     selected_face = -1;
     selected_edge = -1;
     selected_vertex = -1;
     selected_bone = -1;
+    last_loop_type = 0;
     _update_gizmo_for_selection();
     if (selection_visual) _build_selection_mesh();
     _build_skeleton_mesh();
 }
 
-int VFXEditorNode::get_selected_face() const { return selected_face; }
+void VFXEditorNode::set_selection_mode(int mode) {
+    if (mode < SELECTION_MODE_SINGLE || mode > SELECTION_MODE_LOOP) return;
+    selection_mode = mode;
+}
+
+int VFXEditorNode::get_selection_mode() const {
+    return selection_mode;
+}
+
+// ---------------------------------------------------------------------------
+// Selection query helpers
+// ---------------------------------------------------------------------------
+bool VFXEditorNode::is_face_selected(int idx) const {
+    return selected_faces.find(idx) != selected_faces.end();
+}
+
+bool VFXEditorNode::is_edge_selected(int idx) const {
+    return selected_edges.find(idx) != selected_edges.end();
+}
+
+bool VFXEditorNode::is_vertex_selected(int idx) const {
+    return selected_vertices.find(idx) != selected_vertices.end();
+}
+
+PackedInt32Array VFXEditorNode::get_selected_faces() const {
+    PackedInt32Array arr;
+    for (int f : selected_faces) arr.push_back(f);
+    return arr;
+}
+
+PackedInt32Array VFXEditorNode::get_selected_edges() const {
+    PackedInt32Array arr;
+    for (int e : selected_edges) arr.push_back(e);
+    return arr;
+}
+
+PackedInt32Array VFXEditorNode::get_selected_vertices() const {
+    PackedInt32Array arr;
+    for (int v : selected_vertices) arr.push_back(v);
+    return arr;
+}
+
+// ---------------------------------------------------------------------------
+// _handle_element_selection — dispatch by edit mode
+// ---------------------------------------------------------------------------
+void VFXEditorNode::_handle_element_selection(int hit) {
+    switch (edit_mode) {
+        case MODE_VERTEX: _handle_vertex_selection(hit); break;
+        case MODE_EDGE:   _handle_edge_selection(hit);   break;
+        case MODE_FACE:   _handle_face_selection(hit);   break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vertex selection handler
+// ---------------------------------------------------------------------------
+void VFXEditorNode::_handle_vertex_selection(int hit) {
+    switch (selection_mode) {
+        case SELECTION_MODE_SINGLE:
+            clear_selection();
+            selected_vertices.insert(hit);
+            selected_vertex = hit;
+            break;
+
+        case SELECTION_MODE_MULTI:
+            if (selected_vertices.find(hit) != selected_vertices.end()) {
+                selected_vertices.erase(hit);
+                if (selected_vertex == hit) selected_vertex = -1;
+            } else {
+                selected_vertices.insert(hit);
+                selected_vertex = hit;
+            }
+            break;
+
+        case SELECTION_MODE_LOOP:
+            clear_selection();
+            if (mesh.is_valid()) {
+                PackedInt32Array loop = mesh->get_vertex_loop(hit);
+                for (int i = 0; i < loop.size(); i++) selected_vertices.insert(loop[i]);
+            } else {
+                selected_vertices.insert(hit);
+            }
+            selected_vertex = hit;
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Edge selection handler  —  the core of the Blender-style loop/ring cycling
+// ---------------------------------------------------------------------------
+void VFXEditorNode::_handle_edge_selection(int hit) {
+    switch (selection_mode) {
+        case SELECTION_MODE_SINGLE:
+            clear_selection();
+            selected_edges.insert(hit);
+            selected_edge = hit;
+            last_loop_type = 0;
+            break;
+
+        case SELECTION_MODE_MULTI:
+            if (selected_edges.find(hit) != selected_edges.end()) {
+                selected_edges.erase(hit);
+                if (selected_edge == hit) { selected_edge = -1; last_loop_type = 0; }
+            } else {
+                selected_edges.insert(hit);
+                selected_edge = hit;
+            }
+            break;
+
+        case SELECTION_MODE_LOOP:
+            if (!mesh.is_valid()) {
+                clear_selection();
+                selected_edges.insert(hit);
+                selected_edge = hit;
+                last_loop_type = 0;
+                return;
+            }
+
+            // If clicking the SAME active edge again, cycle loop -> ring -> loop
+            if (selected_edge == hit && last_loop_type != 0) {
+                selected_edges.clear();
+                if (last_loop_type == 1) {
+                    // Switch to edge RING
+                    PackedInt32Array ring = mesh->get_edge_ring(hit);
+                    for (int i = 0; i < ring.size(); i++) selected_edges.insert(ring[i]);
+                    last_loop_type = 2;
+                } else {
+                    // Switch back to edge LOOP
+                    PackedInt32Array loop = mesh->get_edge_loop(hit);
+                    for (int i = 0; i < loop.size(); i++) selected_edges.insert(loop[i]);
+                    last_loop_type = 1;
+                }
+            } else {
+                // New edge clicked: start with its edge LOOP
+                clear_selection();
+                PackedInt32Array loop = mesh->get_edge_loop(hit);
+                for (int i = 0; i < loop.size(); i++) selected_edges.insert(loop[i]);
+                selected_edge = hit;
+                last_loop_type = 1;
+            }
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Face selection handler
+// ---------------------------------------------------------------------------
+void VFXEditorNode::_handle_face_selection(int hit) {
+    switch (selection_mode) {
+        case SELECTION_MODE_SINGLE:
+            clear_selection();
+            selected_faces.insert(hit);
+            selected_face = hit;
+            break;
+
+        case SELECTION_MODE_MULTI:
+            if (selected_faces.find(hit) != selected_faces.end()) {
+                selected_faces.erase(hit);
+                if (selected_face == hit) selected_face = -1;
+            } else {
+                selected_faces.insert(hit);
+                selected_face = hit;
+            }
+            break;
+
+        case SELECTION_MODE_LOOP:
+            clear_selection();
+            if (mesh.is_valid()) {
+                PackedInt32Array loop = mesh->get_face_loop(hit);
+                for (int i = 0; i < loop.size(); i++) selected_faces.insert(loop[i]);
+            } else {
+                selected_faces.insert(hit);
+            }
+            selected_face = hit;
+            break;
+    }
+}
+
+int VFXEditorNode::get_selected_face(
+) const { return selected_face; }
 int VFXEditorNode::get_selected_edge() const { return selected_edge; }
 int VFXEditorNode::get_selected_vertex() const { return selected_vertex; }
 
