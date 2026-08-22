@@ -1,79 +1,237 @@
 #include "vfx_editor_node.h"
 #include "vfx_editor_utils.h"
+#include "vfx_math.h"
+#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
-#include <algorithm>
+#include <cmath>
 
 using namespace godot;
 
 // ============================================================================
-// GIZMO RAYCAST
+// GIZMO — RAYCAST (3D)
 // ============================================================================
 int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (!gizmo_node || !gizmo_node->is_visible()) return GIZMO_NONE;
 
-    Transform3D world = get_global_transform() * _get_visual_gizmo_transform();
-    Vector3 origin = world.origin;
+    Transform3D inv = _get_visual_gizmo_transform().affine_inverse();
+    Vector3 ro = inv.xform(ray_origin);
+    Vector3 rd = inv.basis.xform(ray_dir).normalized();
 
+    float s = gizmo_screen_scale;
     float best_t = 1e20f;
-    int best_axis = GIZMO_NONE;
+    int best = GIZMO_NONE;
 
-    // === TRANSLATE / SCALE ===
-    if (gizmo_mode == GIZMO_TRANSLATE || gizmo_mode == GIZMO_SCALE) {
-        Vector3 axes[3] = { world.basis.get_column(0), world.basis.get_column(1), world.basis.get_column(2) };
-        for (int i = 0; i < 3; i++) {
-            Vector3 axis_dir = axes[i].normalized();
-            for (int s = 1; s <= 6; s++) {
-                Vector3 sp = origin + axis_dir * (s * 0.2f);
-                float t = _ray_sphere_intersect(ray_origin, ray_dir, sp, 0.06f);
-                if (t >= 0.0f && t < best_t) { best_t = t; best_axis = i; }
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        auto test_axis = [&](int axis, const Vector3& dir) {
+            float t;
+            if (vfx_editor::ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.18f, t)) {
+                if (t < best_t) { best_t = t; best = axis; }
             }
-        }
-        // Planes
-        Vector3 plane_normals[3] = { axes[2], axes[1], axes[0] };
-        for (int i = 0; i < 3; i++) {
-            Vector3 pn = plane_normals[i].normalized();
-            float pd = pn.dot(origin);
-            float t = _ray_plane_intersect(ray_origin, ray_dir, pn, pd);
-            if (t >= 0.0f && t < best_t) {
-                Vector3 hit = ray_origin + ray_dir * t;
-                Vector3 local = hit - origin;
-                float dx = fabs(local.dot(axes[0].normalized()));
-                float dy = fabs(local.dot(axes[1].normalized()));
-                float dz = fabs(local.dot(axes[2].normalized()));
-                bool in_plane = false;
-                if (i == 0 && dx < 0.25f && dy < 0.25f) in_plane = true;
-                if (i == 1 && dx < 0.25f && dz < 0.25f) in_plane = true;
-                if (i == 2 && dy < 0.25f && dz < 0.25f) in_plane = true;
-                if (in_plane) { best_t = t; best_axis = GIZMO_XY + i; }
+        };
+
+        test_axis(GIZMO_X, Vector3(1, 0, 0));
+        test_axis(GIZMO_Y, Vector3(0, 1, 0));
+        test_axis(GIZMO_Z, Vector3(0, 0, 1));
+
+        auto test_plane_axis = [&](int axis, const Plane& pl, float c1min, float c1max, float c2min, float c2max, int c1_axis, int c2_axis) {
+            Vector3 hit;
+            if (!vfx_editor::ray_vs_plane(ro, rd, pl, hit)) return;
+            float c1 = (c1_axis == 0) ? hit.x : (c1_axis == 1) ? hit.y : hit.z;
+            float c2 = (c2_axis == 0) ? hit.x : (c2_axis == 1) ? hit.y : hit.z;
+            if (c1 >= c1min && c1 <= c1max && c2 >= c2min && c2 <= c2max) {
+                float t = (hit - ro).dot(rd);
+                if (t >= 0.0f && t < best_t) { best_t = t; best = axis; }
             }
-        }
-        // Center sphere
-        float t = _ray_sphere_intersect(ray_origin, ray_dir, origin, 0.12f);
-        if (t >= 0.0f && t < best_t) { best_t = t; best_axis = GIZMO_XYZ; }
+        };
+
+        float p1 = s * 0.08f;
+        float p2 = s * 0.28f;
+        test_plane_axis(GIZMO_XY, Plane(Vector3(0, 0, 1), 0), p1, p2, p1, p2, 0, 1);
+        test_plane_axis(GIZMO_XZ, Plane(Vector3(0, 1, 0), 0), p1, p2, p1, p2, 0, 2);
+        test_plane_axis(GIZMO_YZ, Plane(Vector3(1, 0, 0), 0), p1, p2, p1, p2, 1, 2);
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        auto test_ring = [&](int axis, const Vector3& normal, float radius) {
+            Plane pl(normal, 0.0f);
+            Vector3 hit;
+            if (!vfx_editor::ray_vs_plane(ro, rd, pl, hit)) return;
+            float dist = hit.length();
+            float tol = s * 0.12f;
+            if (fabs(dist - radius) < tol) {
+                float t = (hit - ro).dot(rd);
+                if (t >= 0.0f && t < best_t) { best_t = t; best = axis; }
+            }
+        };
+        float ring_r = s * 0.85f;
+        test_ring(GIZMO_X, Vector3(1,0,0), ring_r);
+        test_ring(GIZMO_Y, Vector3(0,1,0), ring_r);
+        test_ring(GIZMO_Z, Vector3(0,0,1), ring_r);
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        auto test_axis = [&](int axis, const Vector3& dir) {
+            float t;
+            if (vfx_editor::ray_vs_segment(ro, rd, Vector3(), dir * s, s * 0.18f, t)) {
+                if (t < best_t) { best_t = t; best = axis; }
+            }
+        };
+        test_axis(GIZMO_X, Vector3(1, 0, 0));
+        test_axis(GIZMO_Y, Vector3(0, 1, 0));
+        test_axis(GIZMO_Z, Vector3(0, 0, 1));
+
+        float box = s * 0.08f;
+        float h = box * 0.5f;
+        auto test_box = [&](int axis, const Vector3& center) {
+            for (int f = 0; f < 6; f++) {
+                Vector3 n;
+                switch (f) {
+                    case 0: n = Vector3( 1, 0, 0); break;
+                    case 1: n = Vector3(-1, 0, 0); break;
+                    case 2: n = Vector3(0, 1, 0); break;
+                    case 3: n = Vector3(0, -1, 0); break;
+                    case 4: n = Vector3(0, 0, 1); break;
+                    case 5: n = Vector3(0, 0, -1); break;
+                }
+                Plane pl(n, -n.dot(center));
+                Vector3 hit;
+                if (!vfx_editor::ray_vs_plane(ro, rd, pl, hit)) continue;
+                Vector3 local = hit - center;
+                if (fabs(local.x) <= h && fabs(local.y) <= h && fabs(local.z) <= h) {
+                    float t = (hit - ro).dot(rd);
+                    if (t >= 0.0f && t < best_t) { best_t = t; best = axis; }
+                }
+            }
+        };
+        test_box(GIZMO_XYZ, Vector3());
     }
 
-    // === ROTATE ===
-    if (gizmo_mode == GIZMO_ROTATE) {
-        Vector3 axes[3] = { world.basis.get_column(0), world.basis.get_column(1), world.basis.get_column(2) };
-        for (int i = 0; i < 3; i++) {
-            Vector3 axis_dir = axes[i].normalized();
-            for (int s = 0; s < 24; s++) {
-                float angle = s * (Math_PI * 2.0f / 24.0f);
-                Vector3 perp = (fabs(axis_dir.dot(Vector3(0,1,0))) < 0.9f) ? Vector3(0,1,0) : Vector3(1,0,0);
-                perp = perp.cross(axis_dir).normalized();
-                Vector3 perp2 = axis_dir.cross(perp);
-                Vector3 sp = origin + (perp * cosf(angle) + perp2 * sinf(angle)) * 0.9f;
-                float t = _ray_sphere_intersect(ray_origin, ray_dir, sp, 0.04f);
-                if (t >= 0.0f && t < best_t) { best_t = t; best_axis = i; }
-            }
-        }
+    if (best != gizmo_hover_axis) {
+        gizmo_hover_axis = best;
+        _build_gizmo_mesh();
     }
-
-    return best_axis;
+    return best;
 }
 
 // ============================================================================
-// GIZMO BEGIN DRAG (multi-select aware)
+// GIZMO — SCREEN-SPACE RAYCAST
+// ============================================================================
+int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
+    if (!gizmo_node || !gizmo_node->is_visible() || !camera) return GIZMO_NONE;
+
+    Transform3D visual = _get_visual_gizmo_transform();
+    float s = gizmo_screen_scale;
+    float tol = select_pixel_tolerance;
+    float best_score = tol * tol;
+    int best = GIZMO_NONE;
+
+    auto to_screen = [&](const Vector3& wp) -> Vector2 {
+        return camera->unproject_position(wp);
+    };
+
+    Vector3 o = visual.get_origin();
+    Vector2 o_screen = to_screen(o);
+
+    Vector3 o_local = camera->get_global_transform().affine_inverse().xform(o);
+    if (o_local.z >= 0.0f) return GIZMO_NONE;
+
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        for (int i = 0; i < 3; i++) {
+            Vector3 tip = o + visual.basis.get_column(i).normalized() * s;
+            Vector2 tip_screen = to_screen(tip);
+            float d2 = _point_segment_dist_sq_2d(screen_pos, o_screen, tip_screen);
+            if (d2 < best_score) {
+                best_score = d2;
+                best = i;
+            }
+        }
+
+        float p1 = s * 0.18f;
+        float p2 = s * 0.38f;
+
+        auto test_plane = [&](int axis, const Vector3& local_a, const Vector3& local_b, const Vector3& local_c) {
+            Vector2 sa = to_screen(o + visual.basis.xform(local_a));
+            Vector2 sb = to_screen(o + visual.basis.xform(local_b));
+            Vector2 sc = to_screen(o + visual.basis.xform(local_c));
+
+            PackedVector2Array tri;
+            tri.push_back(sa);
+            tri.push_back(sb);
+            tri.push_back(sc);
+
+            if (_point_in_polygon_2d(screen_pos, tri)) {
+                Vector2 center = (sa + sb + sc) / 3.0f;
+                float d2 = screen_pos.distance_squared_to(center);
+                if (d2 < best_score) {
+                    best_score = d2;
+                    best = axis;
+                }
+            }
+        };
+
+        test_plane(GIZMO_XY, Vector3(p1, p2, 0), Vector3(p2, p1, 0), Vector3(p1, p1, 0));
+        test_plane(GIZMO_XZ, Vector3(p1, 0, p2), Vector3(p2, 0, p1), Vector3(p1, 0, p1));
+        test_plane(GIZMO_YZ, Vector3(0, p1, p2), Vector3(0, p2, p1), Vector3(0, p1, p1));
+    }
+    else if (gizmo_mode == GIZMO_ROTATE) {
+        float ring_r = s * 0.85f;
+        int segs = 32;
+        Transform3D cam_inv = camera->get_global_transform().affine_inverse();
+
+        for (int i = 0; i < 3; i++) {
+            Vector3 u = visual.basis.get_column((i + 1) % 3).normalized();
+            Vector3 v = visual.basis.get_column((i + 2) % 3).normalized();
+
+            float closest_d2 = 1e20f;
+            for (int j = 0; j < segs; j++) {
+                float ang0 = (float)j / segs * 3.14159265f * 2.0f;
+                float ang1 = (float)((j + 1) % segs) / segs * 3.14159265f * 2.0f;
+
+                Vector3 p0 = o + (u * cosf(ang0) + v * sinf(ang0)) * ring_r;
+                Vector3 p1 = o + (u * cosf(ang1) + v * sinf(ang1)) * ring_r;
+
+                Vector3 l0 = cam_inv.xform(p0);
+                Vector3 l1 = cam_inv.xform(p1);
+                if (l0.z >= 0.0f || l1.z >= 0.0f) continue;
+
+                Vector2 s0 = camera->unproject_position(p0);
+                Vector2 s1 = camera->unproject_position(p1);
+                float d2 = _point_segment_dist_sq_2d(screen_pos, s0, s1);
+                if (d2 < closest_d2) closest_d2 = d2;
+            }
+
+            if (closest_d2 < best_score) {
+                best_score = closest_d2;
+                best = i;
+            }
+        }
+    }
+    else if (gizmo_mode == GIZMO_SCALE) {
+        for (int i = 0; i < 3; i++) {
+            Vector3 tip = o + visual.basis.get_column(i).normalized() * s;
+            Vector2 tip_screen = to_screen(tip);
+            float d2 = _point_segment_dist_sq_2d(screen_pos, o_screen, tip_screen);
+            if (d2 < best_score) {
+                best_score = d2;
+                best = i;
+            }
+        }
+
+        float d2 = screen_pos.distance_squared_to(o_screen);
+        if (d2 < best_score) {
+            best_score = d2;
+            best = GIZMO_XYZ;
+        }
+    }
+
+    if (best != gizmo_hover_axis) {
+        gizmo_hover_axis = best;
+        _build_gizmo_mesh();
+    }
+    return best;
+}
+
+// ============================================================================
+// GIZMO — DRAG BEGIN
 // ============================================================================
 void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const Vector3& ray_dir) {
     gizmo_drag_axis = axis;
@@ -81,260 +239,290 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
 
     mesh_edit_verts.clear();
     mesh_edit_initial_positions.clear();
-
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        if (edit_mode == MODE_VERTEX) {
-            if (!selected_vertices.empty()) {
-                for (int vid : selected_vertices) {
-                    mesh_edit_verts.push_back(vid);
-                    mesh_edit_initial_positions.push_back(mesh->get_vertex_position(vid));
-                }
-            } else if (selected_vertex >= 0) {
-                mesh_edit_verts.push_back(selected_vertex);
-                mesh_edit_initial_positions.push_back(mesh->get_vertex_position(selected_vertex));
-            }
-        } else if (edit_mode == MODE_EDGE) {
-            std::vector<int> unique_verts;
-            if (!selected_edges.empty()) {
-                for (int eid : selected_edges) {
-                    int v0, v1;
-                    mesh->get_edge_endpoints(eid, v0, v1);
-                    if (v0 >= 0 && std::find(unique_verts.begin(), unique_verts.end(), v0) == unique_verts.end()) unique_verts.push_back(v0);
-                    if (v1 >= 0 && std::find(unique_verts.begin(), unique_verts.end(), v1) == unique_verts.end()) unique_verts.push_back(v1);
-                }
-            } else if (selected_edge >= 0) {
-                int v0, v1;
-                mesh->get_edge_endpoints(selected_edge, v0, v1);
-                if (v0 >= 0) unique_verts.push_back(v0);
-                if (v1 >= 0) unique_verts.push_back(v1);
-            }
-            for (int vid : unique_verts) {
-                mesh_edit_verts.push_back(vid);
-                mesh_edit_initial_positions.push_back(mesh->get_vertex_position(vid));
-            }
-        } else if (edit_mode == MODE_FACE) {
-            std::vector<int> unique_verts;
-            if (!selected_faces.empty()) {
-                for (int fid : selected_faces) {
-                    std::vector<vfx::HEVertex*> verts;
-                    mesh->get_face_vertices(fid, verts);
-                    for (auto* v : verts) {
-                        if (std::find(unique_verts.begin(), unique_verts.end(), (int)v->id) == unique_verts.end())
-                            unique_verts.push_back((int)v->id);
-                    }
-                }
-            } else if (selected_face >= 0) {
-                std::vector<vfx::HEVertex*> verts;
-                mesh->get_face_vertices(selected_face, verts);
-                for (auto* v : verts) {
-                    unique_verts.push_back((int)v->id);
-                }
-            }
-            for (int vid : unique_verts) {
-                mesh_edit_verts.push_back(vid);
-                mesh_edit_initial_positions.push_back(mesh->get_vertex_position(vid));
+        if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+            mesh_edit_verts.push_back(selected_vertex);
+            mesh_edit_initial_positions.push_back(mesh->get_vertex_position(selected_vertex));
+        } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+            int v0, v1;
+            mesh->get_edge_endpoints(selected_edge, v0, v1);
+            if (v0 >= 0) { mesh_edit_verts.push_back(v0); mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v0)); }
+            if (v1 >= 0) { mesh_edit_verts.push_back(v1); mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v1)); }
+        } else if (edit_mode == MODE_FACE && selected_face >= 0) {
+            std::vector<vfx::HEVertex*> verts;
+            mesh->get_face_vertices(selected_face, verts);
+            for (auto* v : verts) {
+                mesh_edit_verts.push_back((int)v->id);
+                mesh_edit_initial_positions.push_back(v->position);
             }
         }
     }
 
-    if (edit_mode == MODE_OBJECT) {
-        if (active_scene_node.is_valid()) {
-            gizmo_drag_start_transform = active_scene_node->get_local_transform();
-        } else if (skeleton.is_valid() && selected_bone >= 0) {
-            gizmo_drag_start_transform = skeleton->get_bone_model_transform(selected_bone);
+    Vector3 origin = gizmo_transform.get_origin();
+
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        Vector3 normal;
+        if (axis <= GIZMO_Z) {
+            Vector3 cam_dir = ray_dir.normalized();
+            Vector3 axis_vec = gizmo_transform.basis.get_column(axis).normalized();
+            if (fabs(axis_vec.dot(cam_dir)) < 0.3f) {
+                normal = cam_dir;
+            } else {
+                Vector3 alt = (fabs(axis_vec.dot(Vector3(0, 1, 0))) < 0.9f) ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+                normal = axis_vec.cross(alt).normalized();
+                if (fabs(normal.dot(cam_dir)) < 0.1f) normal = cam_dir;
+            }
+        } else if (axis == GIZMO_XY) {
+            normal = gizmo_transform.basis.xform(Vector3(0, 0, 1)).normalized();
+        } else if (axis == GIZMO_XZ) {
+            normal = gizmo_transform.basis.xform(Vector3(0, 1, 0)).normalized();
+        } else {
+            normal = gizmo_transform.basis.xform(Vector3(1, 0, 0)).normalized();
+        }
+        gizmo_drag_plane = Plane(normal, origin);
+        Vector3 hit;
+        if (vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit))
+            gizmo_drag_start_point = hit;
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        Vector3 normal;
+        if (axis == GIZMO_X) normal = gizmo_transform.basis.xform(Vector3(1,0,0)).normalized();
+        else if (axis == GIZMO_Y) normal = gizmo_transform.basis.xform(Vector3(0,1,0)).normalized();
+        else normal = gizmo_transform.basis.xform(Vector3(0,0,1)).normalized();
+
+        gizmo_drag_plane = Plane(normal, origin);
+        Vector3 hit;
+        if (vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
+            gizmo_drag_start_point = hit;
+            gizmo_drag_start_rotation = gizmo_transform.basis.get_rotation_quaternion();
+        }
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        Vector3 cam_dir = ray_dir.normalized();
+        Vector3 normal = cam_dir;
+        gizmo_drag_plane = Plane(normal, origin);
+        Vector3 hit;
+        if (vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
+            gizmo_drag_start_point = hit;
+            gizmo_drag_start_scale = gizmo_transform.basis.get_scale();
+            if (axis <= GIZMO_Z) {
+                Vector3 world_axis = gizmo_transform.basis.get_column(axis).normalized();
+                gizmo_drag_start_point = Vector3((hit - origin).dot(world_axis), 0, 0);
+            } else {
+                gizmo_drag_start_point = Vector3((hit - origin).length(), 0, 0);
+            }
         }
     }
-
-    if (gizmo_mode == GIZMO_ROTATE) {
-        gizmo_drag_start_rotation = gizmo_drag_start_transform.basis.get_rotation_quaternion();
-    }
-    if (gizmo_mode == GIZMO_SCALE) {
-        gizmo_drag_start_scale = gizmo_drag_start_transform.basis.get_scale();
-    }
-
-    // Build drag plane
-    Transform3D world = get_global_transform() * _get_visual_gizmo_transform();
-    Vector3 origin = world.origin;
-    Vector3 axis_dir;
-
-    if (axis < 3) {
-        axis_dir = world.basis.get_column(axis).normalized();
-    } else if (axis == GIZMO_XY) {
-        axis_dir = world.basis.get_column(2).normalized();
-    } else if (axis == GIZMO_XZ) {
-        axis_dir = world.basis.get_column(1).normalized();
-    } else if (axis == GIZMO_YZ) {
-        axis_dir = world.basis.get_column(0).normalized();
-    } else {
-        axis_dir = camera ? camera->get_global_transform().basis.get_column(2) : Vector3(0, 0, 1);
-    }
-
-    gizmo_drag_plane_normal = axis_dir;
-    gizmo_drag_plane_d = gizmo_drag_plane_normal.dot(origin);
-
-    float t = _ray_plane_intersect(ray_origin, ray_dir, gizmo_drag_plane_normal, gizmo_drag_plane_d);
-    if (t >= 0.0f) {
-        gizmo_drag_start_point = ray_origin + ray_dir * t;
-    } else {
-        gizmo_drag_start_point = origin;
-    }
-    gizmo_dragging = true;
 }
 
 // ============================================================================
-// GIZMO DRAG
+// GIZMO — DRAG UPDATE
 // ============================================================================
 void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
-    if (!gizmo_dragging) return;
+    if (gizmo_drag_axis == GIZMO_NONE) return;
+    Vector3 hit;
+    if (!vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) return;
 
-    float t = _ray_plane_intersect(ray_origin, ray_dir, gizmo_drag_plane_normal, gizmo_drag_plane_d);
-    if (t < 0.0f) return;
-    Vector3 current_point = ray_origin + ray_dir * t;
-    Vector3 delta = current_point - gizmo_drag_start_point;
+    Vector3 origin = gizmo_transform.get_origin();
 
-    Transform3D world = get_global_transform() * _get_visual_gizmo_transform();
-    Vector3 origin = world.origin;
-
-    // === TRANSLATE ===
     if (gizmo_mode == GIZMO_TRANSLATE) {
-        Vector3 move = Vector3();
-        if (gizmo_drag_axis < 3) {
-            Vector3 axis = world.basis.get_column(gizmo_drag_axis).normalized();
-            move = axis * delta.dot(axis);
-        } else if (gizmo_drag_axis == GIZMO_XY) {
-            Vector3 x = world.basis.get_column(0).normalized();
-            Vector3 y = world.basis.get_column(1).normalized();
-            move = x * delta.dot(x) + y * delta.dot(y);
-        } else if (gizmo_drag_axis == GIZMO_XZ) {
-            Vector3 x = world.basis.get_column(0).normalized();
-            Vector3 z = world.basis.get_column(2).normalized();
-            move = x * delta.dot(x) + z * delta.dot(z);
-        } else if (gizmo_drag_axis == GIZMO_YZ) {
-            Vector3 y = world.basis.get_column(1).normalized();
-            Vector3 z = world.basis.get_column(2).normalized();
-            move = y * delta.dot(y) + z * delta.dot(z);
-        } else {
-            move = delta;
+        Vector3 delta = hit - gizmo_drag_start_point;
+        Transform3D t = gizmo_drag_start_transform;
+        if (gizmo_drag_axis <= GIZMO_Z) {
+            Vector3 axis = t.basis.get_column(gizmo_drag_axis).normalized();
+            float proj = delta.dot(axis);
+            t.set_origin(t.get_origin() + axis * proj);
+        } else if (gizmo_drag_axis == GIZMO_XY || gizmo_drag_axis == GIZMO_XZ || gizmo_drag_axis == GIZMO_YZ) {
+            t.set_origin(t.get_origin() + delta);
         }
-
-        gizmo_transform = gizmo_drag_start_transform;
-        gizmo_transform.origin += move;
-
-        if (edit_mode == MODE_OBJECT) {
-            if (active_scene_node.is_valid()) {
-                Transform3D t = gizmo_drag_start_transform;
-                t.origin += move;
-                active_scene_node->set_local_transform(t);
-                if (mesh_instance) mesh_instance->set_transform(active_scene_node->get_local_transform());
-            } else if (skeleton.is_valid() && selected_bone >= 0) {
-                Transform3D t = gizmo_drag_start_transform;
-                t.origin += move;
-                skeleton->set_bone_model_transform(selected_bone, t);
+        gizmo_transform = t;
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        Vector3 v0 = (gizmo_drag_start_point - origin).normalized();
+        Vector3 v1 = (hit - origin).normalized();
+        if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
+        float dot = v0.dot(v1);
+        dot = vfx::clampf(dot, -1.0f, 1.0f);
+        float angle = acosf(dot);
+        Vector3 cross = v0.cross(v1);
+        if (cross.dot(gizmo_drag_plane.normal) < 0.0f) angle = -angle;
+        Vector3 axis_local;
+        if (gizmo_drag_axis == GIZMO_X) axis_local = Vector3(1,0,0);
+        else if (gizmo_drag_axis == GIZMO_Y) axis_local = Vector3(0,1,0);
+        else axis_local = Vector3(0,0,1);
+        Quaternion rot(axis_local, angle);
+        Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
+        gizmo_transform.set_basis(new_basis);
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        Vector3 scale = gizmo_drag_start_scale;
+        if (gizmo_drag_axis <= GIZMO_Z) {
+            Vector3 world_axis = gizmo_drag_start_transform.basis.get_column(gizmo_drag_axis).normalized();
+            float current_proj = (hit - origin).dot(world_axis);
+            float start_proj = gizmo_drag_start_point.x;
+            if (fabs(start_proj) > 0.0001f) {
+                float ratio = current_proj / start_proj;
+                ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
+                scale[gizmo_drag_axis] = gizmo_drag_start_scale[gizmo_drag_axis] * ratio;
             }
-        } else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-            if ((edit_mode == MODE_VERTEX && (selected_vertex >= 0 || !selected_vertices.empty())) ||
-                (edit_mode == MODE_EDGE   && (selected_edge >= 0   || !selected_edges.empty())) ||
-                (edit_mode == MODE_FACE   && (selected_face >= 0   || !selected_faces.empty()))) {
-                Vector3 center = gizmo_transform.origin;
-                for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
-                    Vector3 pos = mesh_edit_initial_positions[i];
-                    float weight = 1.0f;
-                    mesh->set_vertex_position(mesh_edit_verts[i], pos + move * weight);
-                }
-            }
-        }
-    }
-
-    // === ROTATE ===
-    if (gizmo_mode == GIZMO_ROTATE) {
-        if (gizmo_drag_axis < 3) {
-            Vector3 axis = world.basis.get_column(gizmo_drag_axis).normalized();
-            float angle = delta.length() * 0.05f;
-            if (delta.dot(axis.cross(camera ? camera->get_global_transform().basis.get_column(0) : Vector3(1,0,0))) < 0)
-                angle = -angle;
-            Quaternion rot(axis, angle);
-            gizmo_transform.basis = Basis(rot * gizmo_drag_start_rotation);
-
-            if (edit_mode == MODE_OBJECT) {
-                if (active_scene_node.is_valid()) {
-                    Transform3D t = gizmo_drag_start_transform;
-                    t.basis = gizmo_transform.basis;
-                    active_scene_node->set_local_transform(t);
-                } else if (skeleton.is_valid() && selected_bone >= 0) {
-                    Transform3D t = gizmo_drag_start_transform;
-                    t.basis = gizmo_transform.basis;
-                    skeleton->set_bone_model_transform(selected_bone, t);
-                }
-            } else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-                if ((edit_mode == MODE_VERTEX && (selected_vertex >= 0 || !selected_vertices.empty())) ||
-                    (edit_mode == MODE_EDGE   && (selected_edge >= 0   || !selected_edges.empty())) ||
-                    (edit_mode == MODE_FACE   && (selected_face >= 0   || !selected_faces.empty()))) {
-                    Vector3 center = gizmo_transform.origin;
-                    for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
-                        Vector3 local = mesh_edit_initial_positions[i] - center;
-                        Vector3 rotated = rot.xform(local);
-                        mesh->set_vertex_position(mesh_edit_verts[i], center + rotated);
-                    }
-                }
+        } else if (gizmo_drag_axis == GIZMO_XYZ) {
+            float current_dist = (hit - origin).length();
+            float start_dist = gizmo_drag_start_point.x;
+            if (start_dist > 0.0001f) {
+                float ratio = current_dist / start_dist;
+                ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
+                scale = gizmo_drag_start_scale * ratio;
             }
         }
-    }
-
-    // === SCALE ===
-    if (gizmo_mode == GIZMO_SCALE) {
-        Vector3 scale = Vector3(1, 1, 1);
-        float s = 1.0f + delta.dot(Vector3(1,1,1).normalized()) * 0.05f;
-        if (gizmo_drag_axis < 3) {
-            scale[gizmo_drag_axis] = s;
-        } else if (gizmo_drag_axis >= GIZMO_XY && gizmo_drag_axis <= GIZMO_YZ) {
-            if (gizmo_drag_axis == GIZMO_XY) { scale.x = s; scale.y = s; }
-            if (gizmo_drag_axis == GIZMO_XZ) { scale.x = s; scale.z = s; }
-            if (gizmo_drag_axis == GIZMO_YZ) { scale.y = s; scale.z = s; }
-        } else {
-            scale = Vector3(s, s, s);
-        }
-
-        gizmo_transform.basis = Basis();
-        gizmo_transform.basis.scale(gizmo_drag_start_scale * scale);
-
-        if (edit_mode == MODE_OBJECT) {
-            if (active_scene_node.is_valid()) {
-                Transform3D t = gizmo_drag_start_transform;
-                t.basis = Basis().scaled(gizmo_drag_start_scale * scale);
-                active_scene_node->set_local_transform(t);
-            } else if (skeleton.is_valid() && selected_bone >= 0) {
-                Transform3D t = gizmo_drag_start_transform;
-                t.basis = Basis().scaled(gizmo_drag_start_scale * scale);
-                skeleton->set_bone_model_transform(selected_bone, t);
-            }
-        } else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-            if ((edit_mode == MODE_VERTEX && (selected_vertex >= 0 || !selected_vertices.empty())) ||
-                (edit_mode == MODE_EDGE   && (selected_edge >= 0   || !selected_edges.empty())) ||
-                (edit_mode == MODE_FACE   && (selected_face >= 0   || !selected_faces.empty()))) {
-                Vector3 center = gizmo_transform.origin;
-                for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
-                    Vector3 local = mesh_edit_initial_positions[i] - center;
-                    mesh->set_vertex_position(mesh_edit_verts[i], center + local * scale);
-                }
-            }
-        }
+        scale.x = vfx::clampf(scale.x, 0.001f, 1000.0f);
+        scale.y = vfx::clampf(scale.y, 0.001f, 1000.0f);
+        scale.z = vfx::clampf(scale.z, 0.001f, 1000.0f);
+        Basis b = gizmo_drag_start_transform.basis;
+        b.set_column(0, b.get_column(0).normalized() * scale.x);
+        b.set_column(1, b.get_column(1).normalized() * scale.y);
+        b.set_column(2, b.get_column(2).normalized() * scale.z);
+        gizmo_transform.set_basis(b);
     }
 
     if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
-    if (auto_update) _update_godot_mesh();
-    _build_selection_mesh();
+
+    // Apply to mesh elements
+    if (edit_mode != MODE_OBJECT && !mesh_edit_verts.empty() && mesh.is_valid()) {
+        Transform3D delta = gizmo_transform * gizmo_drag_start_transform.affine_inverse();
+        for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
+            Vector3 new_pos = delta.xform(mesh_edit_initial_positions[i]);
+            mesh->set_vertex_position(mesh_edit_verts[i], new_pos);
+        }
+        if (auto_update) _update_godot_mesh();
+        _build_selection_mesh();
+        _update_gizmo_for_selection();
+        return;
+    }
+
+    // Apply to bone with symmetry
+    if (selected_bone >= 0 && skeleton.is_valid()) {
+        int parent = skeleton->get_bone_parent(selected_bone);
+        Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
+        Transform3D local = parent_world.affine_inverse() * gizmo_transform;
+        skeleton->set_bone_pose(selected_bone, local);
+
+        if (symmetry_enabled) {
+            int sym_bone = skeleton->get_symmetric_bone(selected_bone);
+            if (sym_bone >= 0) {
+                Transform3D mirrored_local = local;
+                Vector3 pos = mirrored_local.get_origin();
+                if (symmetry_axis == 0) pos.x = -pos.x;
+                else if (symmetry_axis == 1) pos.y = -pos.y;
+                else if (symmetry_axis == 2) pos.z = -pos.z;
+                mirrored_local.set_origin(pos);
+
+                if (symmetry_axis == 0) {
+                    Basis b = mirrored_local.get_basis();
+                    Vector3 euler = b.get_euler();
+                    euler.x = -euler.x;
+                    euler.z = -euler.z;
+                    mirrored_local.set_basis(Basis::from_euler(euler));
+                }
+
+                skeleton->set_bone_pose(sym_bone, mirrored_local);
+            }
+        }
+
+        skeleton->update_transforms();
+        gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
+        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+        _build_skeleton_mesh();
+
+        Vector3 bone_pos = skeleton->get_bone_model_transform(selected_bone).get_origin();
+        UtilityFunctions::print("Bone ", selected_bone, " pos: ", bone_pos);
+        _update_godot_mesh();
+    }
 }
 
-// ============================================================================
-// GIZMO END DRAG
-// ============================================================================
 void VFXEditorNode::gizmo_end_drag() {
-    gizmo_dragging = false;
     gizmo_drag_axis = GIZMO_NONE;
-    mesh_edit_verts.clear();
-    mesh_edit_initial_positions.clear();
 }
 
 bool VFXEditorNode::is_gizmo_dragging() const {
-    return gizmo_dragging;
+    return gizmo_drag_axis != GIZMO_NONE;
+}
+
+// ============================================================================
+// GIZMO — MESH BUILDING
+// ============================================================================
+void VFXEditorNode::_build_gizmo_mesh() {
+    if (!gizmo_node) _ensure_gizmo_node();
+
+    Ref<ArrayMesh> am;
+    am.instantiate();
+
+    PackedVector3Array verts;
+    PackedColorArray cols;
+    PackedInt32Array idx;
+
+    float s = gizmo_screen_scale;
+    float r = s * 0.025f;
+
+    if (gizmo_mode == GIZMO_TRANSLATE) {
+        Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
+        Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
+        Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
+
+        vfx_editor::append_cylinder(verts, cols, idx, Vector3(), Vector3(s, 0, 0), r, 8, cx);
+        vfx_editor::append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
+        vfx_editor::append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
+
+        float p1 = s * 0.18f;
+        float p2 = s * 0.38f;
+
+        Color cxy = (gizmo_hover_axis == GIZMO_XY) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 1.0f, 0.0f, 0.35f);
+        vfx_editor::append_triangle(verts, cols, idx, Vector3(p1, p2, 0), Vector3(p2, p1, 0), Vector3(p1, p1, 0), cxy);
+
+        Color cxz = (gizmo_hover_axis == GIZMO_XZ) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(1.0f, 0.0f, 1.0f, 0.35f);
+        vfx_editor::append_triangle(verts, cols, idx, Vector3(p1, 0, p2), Vector3(p2, 0, p1), Vector3(p1, 0, p1), cxz);
+
+        Color cyz = (gizmo_hover_axis == GIZMO_YZ) ? Color(1.0f, 1.0f, 0.0f, 0.8f) : Color(0.0f, 1.0f, 1.0f, 0.35f);
+        vfx_editor::append_triangle(verts, cols, idx, Vector3(0, p1, p2), Vector3(0, p2, p1), Vector3(0, p1, p1), cyz);
+    } else if (gizmo_mode == GIZMO_ROTATE) {
+        float ring_r = s * 0.85f;
+        float tube = s * 0.02f;
+
+        Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
+        Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
+        Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
+
+        vfx_editor::append_ring(verts, cols, idx, Vector3(), Vector3(1,0,0), ring_r, 32, tube, cx);
+        vfx_editor::append_ring(verts, cols, idx, Vector3(), Vector3(0,1,0), ring_r, 32, tube, cy);
+        vfx_editor::append_ring(verts, cols, idx, Vector3(), Vector3(0,0,1), ring_r, 32, tube, cz);
+    } else if (gizmo_mode == GIZMO_SCALE) {
+        Color cx = (gizmo_hover_axis == GIZMO_X) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 0.0f, 0.0f);
+        Color cy = (gizmo_hover_axis == GIZMO_Y) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 1.0f, 0.0f);
+        Color cz = (gizmo_hover_axis == GIZMO_Z) ? Color(1.0f, 1.0f, 0.0f) : Color(0.0f, 0.0f, 1.0f);
+        Color cxyz = (gizmo_hover_axis == GIZMO_XYZ) ? Color(1.0f, 1.0f, 0.0f) : Color(1.0f, 1.0f, 1.0f, 0.8f);
+
+        vfx_editor::append_cylinder(verts, cols, idx, Vector3(), Vector3(s, 0, 0), r, 8, cx);
+        vfx_editor::append_cylinder(verts, cols, idx, Vector3(), Vector3(0, s, 0), r, 8, cy);
+        vfx_editor::append_cylinder(verts, cols, idx, Vector3(), Vector3(0, 0, s), r, 8, cz);
+
+        float box = s * 0.08f;
+        vfx_editor::append_box(verts, cols, idx, Vector3(s, 0, 0), box, cx);
+        vfx_editor::append_box(verts, cols, idx, Vector3(0, s, 0), box, cy);
+        vfx_editor::append_box(verts, cols, idx, Vector3(0, 0, s), box, cz);
+        vfx_editor::append_box(verts, cols, idx, Vector3(), box * 0.8f, cxyz);
+    }
+
+    if (verts.size() > 0) {
+        Array arrays;
+        arrays.resize(Mesh::ARRAY_MAX);
+        arrays[Mesh::ARRAY_VERTEX] = verts;
+        arrays[Mesh::ARRAY_COLOR] = cols;
+        arrays[Mesh::ARRAY_INDEX] = idx;
+        am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    }
+
+    Ref<StandardMaterial3D> mat;
+    mat.instantiate();
+    mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
+    gizmo_node->set_material_override(mat);
+    gizmo_node->set_mesh(am);
+    gizmo_node->set_transform(_get_visual_gizmo_transform());
 }
