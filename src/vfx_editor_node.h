@@ -65,6 +65,10 @@ public:
         SELECTION_MODE_LOOP = 2,
     };
 
+    enum HitType {
+        SCENE_NODE_HIT = -3,
+    };
+
 protected:
     static void _bind_methods();
     void _notification(int p_what);
@@ -109,15 +113,15 @@ private:
     int selected_face = -1;
     int selected_edge = -1;
     int selected_vertex = -1;
-    float select_pixel_tolerance = 8.0f;
-    float gizmo_screen_scale = 1.0f;
 
-    // === SELECTION SETS (new) ===
+    // === SELECTION SETS ===
     std::unordered_set<int> selected_faces;
     std::unordered_set<int> selected_edges;
     std::unordered_set<int> selected_vertices;
     int selection_mode = SELECTION_MODE_SINGLE;
     int last_loop_type = 0; // 0=none, 1=loop, 2=ring
+    float select_pixel_tolerance = 8.0f;
+    float gizmo_screen_scale = 1.0f;
 
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
@@ -156,12 +160,6 @@ private:
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
 
-    // Selection mode internals (new)
-    void _handle_element_selection(int hit);
-    void _handle_vertex_selection(int hit);
-    void _handle_edge_selection(int hit);
-    void _handle_face_selection(int hit);
-
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
     void mark_scene_dirty();
@@ -180,6 +178,12 @@ private:
     // Screen-space selection helpers
     float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
     bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
+
+    // Selection mode internals
+    void _handle_element_selection(int hit);
+    void _handle_vertex_selection(int hit);
+    void _handle_edge_selection(int hit);
+    void _handle_face_selection(int hit);
 
 public:
     VFXEditorNode();
@@ -289,7 +293,7 @@ public:
     int get_selected_vertex() const;
     int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
 
-    // === SELECTION MODE (new) ===
+    // === SELECTION MODE ===
     void set_selection_mode(int mode);
     int get_selection_mode() const;
     bool is_face_selected(int idx) const;
@@ -298,14 +302,6 @@ public:
     PackedInt32Array get_selected_faces() const;
     PackedInt32Array get_selected_edges() const;
     PackedInt32Array get_selected_vertices() const;
-
-    // === MODELING (selection-aware) ===
-    void extrude_selection(float distance);
-    void inset_selection(float amount);
-    void delete_selection();
-    void subdivide_selection();
-    void bevel_selection(float amount);
-    void knife_selection(const Vector3& p0, const Vector3& p1);
 
     // === TEXTURE PAINTER ===
     void set_texture_painter(const Ref<VFXTexturePainter>& p);
