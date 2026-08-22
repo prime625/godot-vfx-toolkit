@@ -284,6 +284,8 @@ public:
     int screen_select_vertex(const Vector2& screen_pos);
     int screen_select_edge(const Vector2& screen_pos);
     int screen_select_face(const Vector2& screen_pos);
+    PackedInt32Array screen_select_box(const Rect2& screen_rect) const;
+    void box_select(const Rect2& screen_rect);
     int screen_raycast_gizmo(const Vector2& screen_pos);
 
     // === EDIT MODE ===
