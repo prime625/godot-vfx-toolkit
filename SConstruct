@@ -17,6 +17,14 @@ if env["platform"] == "android":
     # Link math library
     env.Append(LIBS=["m"])
 
+elif env["platform"] == "ios":
+    env.Append(CPPDEFINES=["IOS_ENABLED"])
+    # iOS arm64 has NEON implicitly; no extra flags needed.
+    # Ensure C++17 is respected (godot-cpp already sets this, but enforce)
+    env.Append(CXXFLAGS=["-std=c++17"])
+    # Static analysis / safety flags useful for mobile
+    env.Append(CCFLAGS=["-fvisibility=hidden"])
+
 # C++17 required for our data structures
 env.Append(CXXFLAGS=["-std=c++17"])
 
