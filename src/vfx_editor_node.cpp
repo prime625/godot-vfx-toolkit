@@ -965,6 +965,8 @@ void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_
 }
 
 
+// === MISSING IMPLEMENTATIONS ===
+
 bool VFXEditorNode::export_glb(const String& filepath) {
     if (mesh.is_null()) return false;
     Ref<VFXGLTFExporter> exporter;
@@ -985,3 +987,12 @@ bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fp
     exporter.instantiate();
     return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
 }
+
+void VFXEditorNode::curve_to_mesh(float radius, int segments, int rings) {
+    if (active_curve.is_null()) return;
+    Ref<VFXMesh> new_mesh = active_curve->to_tube_mesh(radius, segments, rings, true, true);
+    if (new_mesh.is_valid()) {
+        set_vfx_mesh(new_mesh);
+    }
+}
+
