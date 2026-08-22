@@ -67,6 +67,8 @@ int VFXEditorNode::screen_select_edge(const Vector2& screen_pos) {
     int best_idx = -1;
     Transform3D gt = get_global_transform();
     float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
+    float near_z = camera->get_near();  // positive value
+    Transform3D cam_inv = camera->get_global_transform().affine_inverse();
 
     for (auto* e : mesh->get_edges()) {
         if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
@@ -74,21 +76,36 @@ int VFXEditorNode::screen_select_edge(const Vector2& screen_pos) {
         Vector3 a_world = gt.xform(e->next->vertex->position);
         Vector3 b_world = gt.xform(e->vertex->position);
 
-        Vector3 a_local = camera->get_global_transform().affine_inverse().xform(a_world);
-        Vector3 b_local = camera->get_global_transform().affine_inverse().xform(b_world);
+        Vector3 a_local = cam_inv.xform(a_world);
+        Vector3 b_local = cam_inv.xform(b_world);
 
-        if (a_local.z >= 0.0f && b_local.z >= 0.0f) continue;
+        // Both behind camera — skip
+        if (a_local.z >= -near_z && b_local.z >= -near_z) continue;
 
-        Vector2 a_screen = camera->unproject_position(a_world);
-        Vector2 b_screen = camera->unproject_position(b_world);
+        // Clip to near plane if one point is behind
+        Vector2 a_screen, b_screen;
+        if (a_local.z >= -near_z) {
+            float t = (-near_z - b_local.z) / (a_local.z - b_local.z);
+            Vector3 clipped = b_local + (a_local - b_local) * t;
+            a_screen = camera->unproject_position(camera->get_global_transform().xform(clipped));
+            b_screen = camera->unproject_position(b_world);
+        } else if (b_local.z >= -near_z) {
+            float t = (-near_z - a_local.z) / (b_local.z - a_local.z);
+            Vector3 clipped = a_local + (b_local - a_local) * t;
+            b_screen = camera->unproject_position(camera->get_global_transform().xform(clipped));
+            a_screen = camera->unproject_position(a_world);
+        } else {
+            a_screen = camera->unproject_position(a_world);
+            b_screen = camera->unproject_position(b_world);
+        }
 
         float dist_sq = _point_segment_dist_sq_2d(screen_pos, a_screen, b_screen);
         if (dist_sq > tol_sq) continue;
 
         float depth = 0.0f;
         int count = 0;
-        if (a_local.z < 0.0f) { depth += -a_local.z; count++; }
-        if (b_local.z < 0.0f) { depth += -b_local.z; count++; }
+        if (a_local.z < -near_z) { depth += -a_local.z; count++; }
+        if (b_local.z < -near_z) { depth += -b_local.z; count++; }
         if (count > 0) depth /= count;
 
         if (depth < best_depth) {
@@ -105,7 +122,9 @@ int VFXEditorNode::screen_select_face(const Vector2& screen_pos) {
     float best_depth = 1e20f;
     int best_idx = -1;
     Transform3D gt = get_global_transform();
+    float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
 
+    // Pass 1: strict point-in-polygon
     for (auto* f : mesh->get_faces()) {
         if (f->deleted || !f->halfedge) continue;
 
@@ -134,6 +153,25 @@ int VFXEditorNode::screen_select_face(const Vector2& screen_pos) {
             best_idx = (int)f->id;
         }
     }
+
+    // Pass 2: fallback to face-center distance if polygon test missed
+    if (best_idx < 0) {
+        for (auto* f : mesh->get_faces()) {
+            if (f->deleted || !f->halfedge) continue;
+            Vector3 c_world = gt.xform(mesh->get_face_center(f->id));
+            Vector3 local = camera->get_global_transform().affine_inverse().xform(c_world);
+            if (local.z >= 0.0f) continue;
+            Vector2 c_screen = camera->unproject_position(c_world);
+            float dist_sq = c_screen.distance_squared_to(screen_pos);
+            if (dist_sq > tol_sq) continue;
+            float depth = -local.z;
+            if (depth < best_depth) {
+                best_depth = depth;
+                best_idx = (int)f->id;
+            }
+        }
+    }
+
     return best_idx;
 }
 
