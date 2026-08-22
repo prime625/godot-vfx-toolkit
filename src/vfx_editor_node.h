@@ -59,12 +59,6 @@ public:
         MODE_FACE = 3,
     };
 
-    enum SelectMode {
-        SELECT_SINGLE = 0,
-        SELECT_MULTI = 1,
-        SELECT_LOOP = 2,
-    };
-
     enum HitType {
         SCENE_NODE_HIT = -3,
     };
@@ -107,7 +101,6 @@ private:
     int visualize_bone = -1;
     int symmetry_axis = 0; // 0=x, 1=y, 2=z
     int edit_mode = MODE_OBJECT;
-    int select_mode = SELECT_SINGLE;
     int gizmo_mode = GIZMO_TRANSLATE;
     int gizmo_hover_axis = GIZMO_NONE;
     int selected_bone = -1;
@@ -116,11 +109,6 @@ private:
     int selected_vertex = -1;
     float select_pixel_tolerance = 8.0f;
     float gizmo_screen_scale = 1.0f;
-
-    // === MULTI-SELECT STORAGE ===
-    std::vector<int> selected_faces;
-    std::vector<int> selected_edges;
-    std::vector<int> selected_vertices;
 
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
@@ -158,7 +146,6 @@ private:
     void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
-    void _handle_mesh_selection(int hit);
 
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
@@ -287,13 +274,6 @@ public:
     int get_selected_vertex() const;
     int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
 
-    // === SELECT MODE ===
-    void set_select_mode(int mode);
-    int get_select_mode() const;
-    PackedInt32Array get_selected_faces() const;
-    PackedInt32Array get_selected_edges() const;
-    PackedInt32Array get_selected_vertices() const;
-
     // === TEXTURE PAINTER ===
     void set_texture_painter(const Ref<VFXTexturePainter>& p);
     Ref<VFXTexturePainter> get_texture_painter() const;
@@ -322,6 +302,5 @@ public:
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
 VARIANT_ENUM_CAST(VFXEditorNode::EditMode);
-VARIANT_ENUM_CAST(VFXEditorNode::SelectMode);
 
 #endif
