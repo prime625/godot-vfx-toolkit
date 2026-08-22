@@ -149,34 +149,13 @@ int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_
     if (edit_mode == MODE_FACE) {
         Vector3 hit;
         int face_idx;
-        if (mesh->raycast_select_face(ro, rd, hit, face_idx)) {
-            selected_face = face_idx;
-            selected_edge = -1;
-            selected_vertex = -1;
-            _build_selection_mesh();
-            _update_gizmo_for_selection();
-            return face_idx;
-        }
+        if (mesh->raycast_select_face(ro, rd, hit, face_idx)) return face_idx;
     } else if (edit_mode == MODE_EDGE) {
         int edge_idx;
-        if (mesh->raycast_select_edge(ro, rd, edge_idx)) {
-            selected_edge = edge_idx;
-            selected_face = -1;
-            selected_vertex = -1;
-            _build_selection_mesh();
-            _update_gizmo_for_selection();
-            return edge_idx;
-        }
+        if (mesh->raycast_select_edge(ro, rd, edge_idx)) return edge_idx;
     } else if (edit_mode == MODE_VERTEX) {
         int vert_idx;
-        if (mesh->raycast_select_vertex(ro, rd, vert_idx)) {
-            selected_vertex = vert_idx;
-            selected_face = -1;
-            selected_edge = -1;
-            _build_selection_mesh();
-            _update_gizmo_for_selection();
-            return vert_idx;
-        }
+        if (mesh->raycast_select_vertex(ro, rd, vert_idx)) return vert_idx;
     }
     return -1;
 }
@@ -186,19 +165,33 @@ int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_
 // ============================================================================
 void VFXEditorNode::_update_gizmo_for_selection() {
     Vector3 center;
-    bool has = false;
-    if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
-        center = mesh->get_vertex_position(selected_vertex);
-        has = true;
-    } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
-        center = mesh->get_edge_midpoint(selected_edge);
-        has = true;
-    } else if (edit_mode == MODE_FACE && selected_face >= 0) {
-        center = mesh->get_face_center(selected_face);
-        has = true;
+    int count = 0;
+
+    if (edit_mode == MODE_VERTEX) {
+        for (int v : selected_vertices) {
+            if (v >= 0 && v < mesh->get_vertex_count()) {
+                center += mesh->get_vertex_position(v);
+                count++;
+            }
+        }
+    } else if (edit_mode == MODE_EDGE) {
+        for (int e : selected_edges) {
+            int v0, v1;
+            mesh->get_edge_endpoints(e, v0, v1);
+            if (v0 >= 0) { center += mesh->get_vertex_position(v0); count++; }
+            if (v1 >= 0) { center += mesh->get_vertex_position(v1); count++; }
+        }
+    } else if (edit_mode == MODE_FACE) {
+        for (int f : selected_faces) {
+            if (f >= 0 && f < mesh->get_face_count()) {
+                center += mesh->get_face_center(f);
+                count++;
+            }
+        }
     }
 
-    if (has) {
+    if (count > 0) {
+        center /= count;
         gizmo_transform.set_origin(center);
         gizmo_transform.basis = Basis();
         if (gizmo_node) {
