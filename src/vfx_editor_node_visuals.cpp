@@ -48,18 +48,20 @@ void VFXEditorNode::_build_selection_mesh() {
         if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
         Vector3 a = e->next->vertex->position;
         Vector3 b = e->vertex->position;
-        bool is_sel = (edit_mode == MODE_EDGE && selected_edge == (int)e->id);
-        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.4f);
-        float r = is_sel ? 0.012f : 0.004f;
+        bool in_set = selected_edges.find((int)e->id) != selected_edges.end();
+        bool is_active = (edit_mode == MODE_EDGE && selected_edge == (int)e->id);
+        Color col = is_active ? Color(1.0f, 0.8f, 0.2f, 1.0f) : (in_set ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.4f));
+        float r = (in_set || is_active) ? 0.012f : 0.004f;
         vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
     }
 
     // Vertices
     for (auto* v : mesh->get_vertices()) {
         if (v->deleted) continue;
-        bool is_sel = (edit_mode == MODE_VERTEX && selected_vertex == (int)v->id);
-        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.7f, 0.7f, 0.7f, 0.8f);
-        float s = is_sel ? 0.035f : 0.018f;
+        bool in_set = selected_vertices.find((int)v->id) != selected_vertices.end();
+        bool is_active = (edit_mode == MODE_VERTEX && selected_vertex == (int)v->id);
+        Color col = is_active ? Color(1.0f, 0.8f, 0.2f, 1.0f) : (in_set ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.7f, 0.7f, 0.7f, 0.8f));
+        float s = (in_set || is_active) ? 0.035f : 0.018f;
         vfx_editor::append_box(verts, cols, idx, v->position, s, col);
     }
 
@@ -67,9 +69,10 @@ void VFXEditorNode::_build_selection_mesh() {
     for (auto* f : mesh->get_faces()) {
         if (f->deleted || !f->halfedge) continue;
         Vector3 c = mesh->get_face_center(f->id);
-        bool is_sel = (edit_mode == MODE_FACE && selected_face == (int)f->id);
-        Color col = is_sel ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.3f, 0.6f, 1.0f, 0.6f);
-        float s = is_sel ? 0.045f : 0.028f;
+        bool in_set = selected_faces.find((int)f->id) != selected_faces.end();
+        bool is_active = (edit_mode == MODE_FACE && selected_face == (int)f->id);
+        Color col = is_active ? Color(1.0f, 0.8f, 0.2f, 1.0f) : (in_set ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.3f, 0.6f, 1.0f, 0.6f));
+        float s = (in_set || is_active) ? 0.045f : 0.028f;
         vfx_editor::append_box(verts, cols, idx, c, s, col);
     }
 
