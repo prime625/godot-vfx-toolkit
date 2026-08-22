@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <set>
 
@@ -1991,13 +1992,12 @@ void VFXMesh::remove_face(int face_id) {
 }
 
 
-// ---------------------------------------------------------------------------
-// Helper: find the edge opposite to 'he' inside its face (quad-only)
-// ---------------------------------------------------------------------------
+// ============================================================================
+// EDGE LOOPS, EDGE RINGS, VERTEX LOOPS, FACE LOOPS
+// ============================================================================
+
 static vfx::HEEdge* _get_opposite_edge_in_face(vfx::HEEdge* he) {
     if (!he || !he->face || he->face->deleted) return nullptr;
-
-    // Walk the face to count edges and locate 'he'
     vfx::HEEdge* start = he->face->halfedge;
     vfx::HEEdge* cur = start;
     int count = 0;
@@ -2006,10 +2006,7 @@ static vfx::HEEdge* _get_opposite_edge_in_face(vfx::HEEdge* he) {
         count++;
         cur = cur->next;
     } while (cur && cur != start);
-
-    if (count != 4) return nullptr; // only valid for quads
-
-    // In a quad, opposite is 2 steps ahead
+    if (count != 4) return nullptr;
     cur = start;
     do {
         if (cur == he) {
@@ -2018,33 +2015,23 @@ static vfx::HEEdge* _get_opposite_edge_in_face(vfx::HEEdge* he) {
         }
         cur = cur->next;
     } while (cur && cur != start);
-
     return nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// get_edge_loop: returns all half-edge IDs in the edge loop containing edge_id
-// ---------------------------------------------------------------------------
 PackedInt32Array VFXMesh::get_edge_loop(int edge_id) const {
     PackedInt32Array result;
     if (edge_id < 0 || edge_id >= (int)edges.size() || edges[edge_id]->deleted) return result;
-
     vfx::HEEdge* start = edges[edge_id];
     if (!start) return result;
-
     std::unordered_set<int> visited;
-
     auto walk = [&](vfx::HEEdge* he_start) {
         vfx::HEEdge* he = he_start;
         int safety = 0;
         while (he && visited.find(he->id) == visited.end() && safety++ < 100000) {
             visited.insert(he->id);
             if (he->twin) visited.insert(he->twin->id);
-
             vfx::HEVertex* v = he->vertex;
             if (!v || v->deleted) break;
-
-            // Count valence (number of half-edges pointing into v)
             int valence = 0;
             vfx::HEEdge* walk_he = he;
             do {
@@ -2052,88 +2039,56 @@ PackedInt32Array VFXMesh::get_edge_loop(int edge_id) const {
                 walk_he = walk_he->next->twin;
                 if (!walk_he) break;
             } while (walk_he != he);
-
-            // Edge loops require even valence and at least 4 (interior quad vertex)
             if (!walk_he || valence % 2 != 0 || valence < 4) break;
-
-            // Find the half-edge opposite 'he' in the radial order around v
             vfx::HEEdge* opposite = he;
             for (int i = 0; i < valence / 2; i++) {
                 opposite = opposite->next->twin;
                 if (!opposite) break;
             }
             if (!opposite || opposite == he) break;
-
-            // Continue from the other end of the edge we just found
             he = opposite->twin;
         }
     };
-
     walk(start);
     if (start->twin) walk(start->twin);
-
     for (int id : visited) result.push_back(id);
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// get_edge_ring: returns all half-edge IDs in the edge ring containing edge_id
-// ---------------------------------------------------------------------------
 PackedInt32Array VFXMesh::get_edge_ring(int edge_id) const {
     PackedInt32Array result;
     if (edge_id < 0 || edge_id >= (int)edges.size() || edges[edge_id]->deleted) return result;
-
     vfx::HEEdge* start = edges[edge_id];
     if (!start) return result;
-
     std::unordered_set<int> visited;
     std::vector<vfx::HEEdge*> stack;
     stack.push_back(start);
-
     while (!stack.empty()) {
         vfx::HEEdge* e = stack.back();
         stack.pop_back();
-
         if (!e || e->deleted || visited.find(e->id) != visited.end()) continue;
         visited.insert(e->id);
         if (e->twin) visited.insert(e->twin->id);
-
-        // Opposite edge in the face on the "left" side
         vfx::HEEdge* opp = _get_opposite_edge_in_face(e);
-        if (opp && !opp->deleted && visited.find(opp->id) == visited.end()) {
-            stack.push_back(opp);
-        }
-
-        // Opposite edge in the face on the "right" side (via twin)
+        if (opp && !opp->deleted && visited.find(opp->id) == visited.end()) stack.push_back(opp);
         if (e->twin) {
             vfx::HEEdge* opp_twin = _get_opposite_edge_in_face(e->twin);
-            if (opp_twin && !opp_twin->deleted && visited.find(opp_twin->id) == visited.end()) {
-                stack.push_back(opp_twin);
-            }
+            if (opp_twin && !opp_twin->deleted && visited.find(opp_twin->id) == visited.end()) stack.push_back(opp_twin);
         }
     }
-
     for (int id : visited) result.push_back(id);
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// get_vertex_loop: returns vertex IDs along the vertex loop through vertex_id
-// ---------------------------------------------------------------------------
 PackedInt32Array VFXMesh::get_vertex_loop(int vertex_id) const {
     PackedInt32Array result;
     if (vertex_id < 0 || vertex_id >= (int)vertices.size() || vertices[vertex_id]->deleted) return result;
-
-    // Find a good edge to derive the loop from:
-    // pick the first non-boundary edge whose loop contains more than 2 edges.
     std::vector<int> nbrs;
     get_vertex_neighbors(vertex_id, nbrs);
-
     for (int nbr : nbrs) {
         vfx::HEEdge* e = find_edge_between(vertex_id, nbr);
         if (!e) e = find_edge_between(nbr, vertex_id);
         if (!e) continue;
-
         PackedInt32Array edge_loop = get_edge_loop(e->id);
         if (edge_loop.size() > 2) {
             std::unordered_set<int> verts;
@@ -2147,23 +2102,15 @@ PackedInt32Array VFXMesh::get_vertex_loop(int vertex_id) const {
             return result;
         }
     }
-
-    // Fallback: just return the vertex itself
     result.push_back(vertex_id);
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// get_face_loop: returns face IDs along the face loop through face_id
-// ---------------------------------------------------------------------------
 PackedInt32Array VFXMesh::get_face_loop(int face_id) const {
     PackedInt32Array result;
     if (face_id < 0 || face_id >= (int)faces.size() || faces[face_id]->deleted) return result;
-
-    // Find an edge of this face to derive a loop from
     std::vector<vfx::HEEdge*> face_edges;
     get_face_edges(face_id, face_edges);
-
     for (vfx::HEEdge* e : face_edges) {
         if (!e || e->deleted) continue;
         PackedInt32Array edge_loop = get_edge_loop(e->id);
@@ -2173,15 +2120,12 @@ PackedInt32Array VFXMesh::get_face_loop(int face_id) const {
                 vfx::HEEdge* he = edges[edge_loop[i]];
                 if (!he) continue;
                 if (he->face && !he->face->deleted) face_set.insert(he->face->id);
-                if (he->twin && he->twin->face && !he->twin->face->deleted)
-                    face_set.insert(he->twin->face->id);
+                if (he->twin && he->twin->face && !he->twin->face->deleted) face_set.insert(he->twin->face->id);
             }
             for (int f : face_set) result.push_back(f);
             return result;
         }
     }
-
-    // Fallback: just return the face itself
     result.push_back(face_id);
     return result;
 }
