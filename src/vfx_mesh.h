@@ -180,7 +180,7 @@ public:
     void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
     void get_vertex_faces(int vidx, std::vector<int>& out_faces) const;
 
-    // === EDGE LOOPS & RINGS (new) ===
+    // === EDGE LOOPS & RINGS ===
     PackedInt32Array get_edge_loop(int edge_id) const;
     PackedInt32Array get_edge_ring(int edge_id) const;
     PackedInt32Array get_vertex_loop(int vertex_id) const;
