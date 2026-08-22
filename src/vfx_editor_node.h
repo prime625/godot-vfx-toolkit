@@ -123,6 +123,7 @@ private:
     int last_loop_type = 0; // 0=none, 1=loop, 2=ring
     float select_pixel_tolerance = 8.0f;
     float gizmo_screen_scale = 1.0f;
+    float gizmo_select_pixel_tolerance = 12.0f;
 
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
@@ -276,6 +277,8 @@ public:
     Camera3D* get_camera() const;
     void set_select_pixel_tolerance(float px);
     float get_select_pixel_tolerance() const;
+    void set_gizmo_select_pixel_tolerance(float px);
+    float get_gizmo_select_pixel_tolerance() const;
 
     // === SCREEN SELECT ===
     int screen_select_vertex(const Vector2& screen_pos);
