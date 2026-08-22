@@ -6,7 +6,7 @@
 using namespace godot;
 
 // ============================================================================
-// GIZMO RAYCAST (simplified — uses sphere intersections along axes)
+// GIZMO RAYCAST
 // ============================================================================
 int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (!gizmo_node || !gizmo_node->is_visible()) return GIZMO_NONE;
@@ -22,14 +22,13 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
         Vector3 axes[3] = { world.basis.get_column(0), world.basis.get_column(1), world.basis.get_column(2) };
         for (int i = 0; i < 3; i++) {
             Vector3 axis_dir = axes[i].normalized();
-            // Sample points along axis as small spheres
             for (int s = 1; s <= 6; s++) {
                 Vector3 sp = origin + axis_dir * (s * 0.2f);
                 float t = _ray_sphere_intersect(ray_origin, ray_dir, sp, 0.06f);
                 if (t >= 0.0f && t < best_t) { best_t = t; best_axis = i; }
             }
         }
-        // Planes — test center area
+        // Planes
         Vector3 plane_normals[3] = { axes[2], axes[1], axes[0] };
         for (int i = 0; i < 3; i++) {
             Vector3 pn = plane_normals[i].normalized();
@@ -42,9 +41,9 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
                 float dy = fabs(local.dot(axes[1].normalized()));
                 float dz = fabs(local.dot(axes[2].normalized()));
                 bool in_plane = false;
-                if (i == 0 && dx < 0.25f && dy < 0.25f) in_plane = true; // XY
-                if (i == 1 && dx < 0.25f && dz < 0.25f) in_plane = true; // XZ
-                if (i == 2 && dy < 0.25f && dz < 0.25f) in_plane = true; // YZ
+                if (i == 0 && dx < 0.25f && dy < 0.25f) in_plane = true;
+                if (i == 1 && dx < 0.25f && dz < 0.25f) in_plane = true;
+                if (i == 2 && dy < 0.25f && dz < 0.25f) in_plane = true;
                 if (in_plane) { best_t = t; best_axis = GIZMO_XY + i; }
             }
         }
@@ -58,7 +57,6 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
         Vector3 axes[3] = { world.basis.get_column(0), world.basis.get_column(1), world.basis.get_column(2) };
         for (int i = 0; i < 3; i++) {
             Vector3 axis_dir = axes[i].normalized();
-            // Sample torus as ring of spheres
             for (int s = 0; s < 24; s++) {
                 float angle = s * (Math_PI * 2.0f / 24.0f);
                 Vector3 perp = (fabs(axis_dir.dot(Vector3(0,1,0))) < 0.9f) ? Vector3(0,1,0) : Vector3(1,0,0);
@@ -237,7 +235,12 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             if ((edit_mode == MODE_VERTEX && (selected_vertex >= 0 || !selected_vertices.empty())) ||
                 (edit_mode == MODE_EDGE   && (selected_edge >= 0   || !selected_edges.empty())) ||
                 (edit_mode == MODE_FACE   && (selected_face >= 0   || !selected_faces.empty()))) {
-                _apply_proportional(move, gizmo_transform.origin);
+                Vector3 center = gizmo_transform.origin;
+                for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
+                    Vector3 pos = mesh_edit_initial_positions[i];
+                    float weight = 1.0f;
+                    mesh->set_vertex_position(mesh_edit_verts[i], pos + move * weight);
+                }
             }
         }
     }
@@ -334,22 +337,4 @@ void VFXEditorNode::gizmo_end_drag() {
 
 bool VFXEditorNode::is_gizmo_dragging() const {
     return gizmo_dragging;
-}
-
-// ============================================================================
-// PROPORTIONAL EDITING APPLY
-// ============================================================================
-void VFXEditorNode::_apply_proportional(const Vector3& move, const Vector3& center) {
-    if (mesh.is_null()) return;
-    for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
-        int vid = mesh_edit_verts[i];
-        Vector3 pos = mesh_edit_initial_positions[i];
-        float weight = 1.0f;
-        if (proportional_enabled) {
-            float dist = (pos - center).length();
-            if (dist > proportional_radius) continue;
-            weight = vfx::evaluate_falloff(dist / proportional_radius, proportional_falloff);
-        }
-        mesh->set_vertex_position(vid, pos + move * weight);
-    }
 }
