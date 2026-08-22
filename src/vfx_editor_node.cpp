@@ -963,3 +963,25 @@ void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_
         gizmo_drag(ray_origin, ray_dir);
     }
 }
+
+
+bool VFXEditorNode::export_glb(const String& filepath) {
+    if (mesh.is_null()) return false;
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    return exporter->export_glb(mesh, skeleton, filepath);
+}
+
+bool VFXEditorNode::export_glb_animated(const String& filepath, int clip_idx) {
+    if (mesh.is_null() || animator.is_null()) return false;
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    return exporter->export_glb_animated(mesh, skeleton, animator, clip_idx, filepath);
+}
+
+bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fps) {
+    if (mesh.is_null() || skin.is_null()) return false;
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
+}
