@@ -277,3 +277,214 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
     }
     return best;
 }
+
+
+// ============================================================================
+// BOX / MARQUEE SELECTION
+// ============================================================================
+
+static bool _segment_intersects_rect_2d(const Vector2& a, const Vector2& b, const Rect2& rect) {
+    // Endpoint inside rect
+    if (rect.has_point(a) || rect.has_point(b)) return true;
+    // Check intersection with each edge of the rect
+    Vector2 tl = rect.position;
+    Vector2 tr = rect.position + Vector2(rect.size.x, 0);
+    Vector2 br = rect.position + rect.size;
+    Vector2 bl = rect.position + Vector2(0, rect.size.y);
+
+    auto ccw = [](const Vector2& A, const Vector2& B, const Vector2& C) -> float {
+        return (C.y - A.y) * (B.x - A.x) - (B.y - A.y) * (C.x - A.x);
+    };
+    auto intersect = [&](const Vector2& p1, const Vector2& p2, const Vector2& p3, const Vector2& p4) -> bool {
+        float d1 = ccw(p3, p4, p1);
+        float d2 = ccw(p3, p4, p2);
+        float d3 = ccw(p1, p2, p3);
+        float d4 = ccw(p1, p2, p4);
+        if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)))
+            return true;
+        // Collinear on segment — simplified, check bounding box overlap
+        if (d1 == 0 && d2 == 0 && d3 == 0 && d4 == 0) {
+            return (MAX(MIN(p1.x, p2.x), MIN(p3.x, p4.x)) <= MIN(MAX(p1.x, p2.x), MAX(p3.x, p4.x))) &&
+                   (MAX(MIN(p1.y, p2.y), MIN(p3.y, p4.y)) <= MIN(MAX(p1.y, p2.y), MAX(p3.y, p4.y)));
+        }
+        return false;
+    };
+    return intersect(a, b, tl, tr) || intersect(a, b, tr, br) ||
+           intersect(a, b, br, bl) || intersect(a, b, bl, tl);
+}
+
+PackedInt32Array VFXEditorNode::screen_select_box(const Rect2& screen_rect) const {
+    PackedInt32Array result;
+    if (!mesh.is_valid() || !camera || screen_rect.size.x < 2.0f || screen_rect.size.y < 2.0f)
+        return result;
+
+    Transform3D gt = get_global_transform();
+    Transform3D cam_inv = camera->get_global_transform().affine_inverse();
+    float near_z = camera->get_near();
+
+    if (edit_mode == MODE_VERTEX) {
+        for (auto* v : mesh->get_vertices()) {
+            if (v->deleted) continue;
+            Vector3 world = gt.xform(v->position);
+            Vector3 local = cam_inv.xform(world);
+            if (local.z >= -near_z) continue;
+            Vector2 sp = camera->unproject_position(world);
+            if (screen_rect.has_point(sp))
+                result.push_back((int)v->id);
+        }
+    }
+    else if (edit_mode == MODE_EDGE) {
+        for (auto* e : mesh->get_edges()) {
+            if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+
+            Vector3 a_world = gt.xform(e->next->vertex->position);
+            Vector3 b_world = gt.xform(e->vertex->position);
+            Vector3 a_local = cam_inv.xform(a_world);
+            Vector3 b_local = cam_inv.xform(b_world);
+
+            if (a_local.z >= -near_z && b_local.z >= -near_z) continue;
+
+            Vector2 a_screen, b_screen;
+            if (a_local.z >= -near_z) {
+                float t = (-near_z - b_local.z) / (a_local.z - b_local.z);
+                Vector3 clipped = b_local + (a_local - b_local) * t;
+                a_screen = camera->unproject_position(camera->get_global_transform().xform(clipped));
+                b_screen = camera->unproject_position(b_world);
+            } else if (b_local.z >= -near_z) {
+                float t = (-near_z - a_local.z) / (b_local.z - a_local.z);
+                Vector3 clipped = a_local + (b_local - a_local) * t;
+                b_screen = camera->unproject_position(camera->get_global_transform().xform(clipped));
+                a_screen = camera->unproject_position(a_world);
+            } else {
+                a_screen = camera->unproject_position(a_world);
+                b_screen = camera->unproject_position(b_world);
+            }
+
+            if (_segment_intersects_rect_2d(a_screen, b_screen, screen_rect))
+                result.push_back((int)e->id);
+        }
+    }
+    else if (edit_mode == MODE_FACE) {
+        for (auto* f : mesh->get_faces()) {
+            if (f->deleted || !f->halfedge) continue;
+
+            std::vector<vfx::HEVertex*> fverts;
+            mesh->get_face_vertices(f->id, fverts);
+            if (fverts.size() < 3) continue;
+
+            bool any_inside = false;
+            bool all_in_front = true;
+            float avg_depth = 0.0f;
+            int in_front_count = 0;
+
+            for (auto* v : fverts) {
+                Vector3 world = gt.xform(v->position);
+                Vector3 local = cam_inv.xform(world);
+                if (local.z < -near_z) {
+                    Vector2 sp = camera->unproject_position(world);
+                    if (screen_rect.has_point(sp)) any_inside = true;
+                    avg_depth += -local.z;
+                    in_front_count++;
+                } else {
+                    all_in_front = false;
+                }
+            }
+
+            if (any_inside && in_front_count > 0) {
+                result.push_back((int)f->id);
+                continue;
+            }
+
+            // Fallback: face center inside rect
+            if (!all_in_front && in_front_count > 0) {
+                Vector3 c_world = gt.xform(mesh->get_face_center(f->id));
+                Vector3 c_local = cam_inv.xform(c_world);
+                if (c_local.z < -near_z) {
+                    Vector2 c_screen = camera->unproject_position(c_world);
+                    if (screen_rect.has_point(c_screen))
+                        result.push_back((int)f->id);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+void VFXEditorNode::box_select(const Rect2& screen_rect) {
+    PackedInt32Array hits = screen_select_box(screen_rect);
+    if (hits.size() == 0) {
+        if (selection_mode == SELECTION_MODE_SINGLE)
+            clear_selection();
+        return;
+    }
+
+    switch (selection_mode) {
+        case SELECTION_MODE_SINGLE:
+            clear_selection();
+            // fallthrough to populate
+        case SELECTION_MODE_MULTI:
+            if (edit_mode == MODE_VERTEX) {
+                for (int i = 0; i < hits.size(); i++) selected_vertices.insert(hits[i]);
+                selected_vertex = hits[0];
+            } else if (edit_mode == MODE_EDGE) {
+                for (int i = 0; i < hits.size(); i++) selected_edges.insert(hits[i]);
+                selected_edge = hits[0];
+            } else if (edit_mode == MODE_FACE) {
+                for (int i = 0; i < hits.size(); i++) selected_faces.insert(hits[i]);
+                selected_face = hits[0];
+            }
+            break;
+
+        case SELECTION_MODE_LOOP:
+            if (!mesh.is_valid()) {
+                // Fallback to raw selection
+                if (edit_mode == MODE_VERTEX) {
+                    clear_selection();
+                    for (int i = 0; i < hits.size(); i++) selected_vertices.insert(hits[i]);
+                    selected_vertex = hits[0];
+                } else if (edit_mode == MODE_EDGE) {
+                    clear_selection();
+                    for (int i = 0; i < hits.size(); i++) selected_edges.insert(hits[i]);
+                    selected_edge = hits[0];
+                } else if (edit_mode == MODE_FACE) {
+                    clear_selection();
+                    for (int i = 0; i < hits.size(); i++) selected_faces.insert(hits[i]);
+                    selected_face = hits[0];
+                }
+                break;
+            }
+            if (edit_mode == MODE_VERTEX) {
+                clear_selection();
+                std::unordered_set<int> all_verts;
+                for (int i = 0; i < hits.size(); i++) {
+                    PackedInt32Array loop = mesh->get_vertex_loop(hits[i]);
+                    for (int j = 0; j < loop.size(); j++) all_verts.insert(loop[j]);
+                }
+                for (int v : all_verts) selected_vertices.insert(v);
+                selected_vertex = hits[0];
+            } else if (edit_mode == MODE_EDGE) {
+                clear_selection();
+                std::unordered_set<int> all_edges;
+                for (int i = 0; i < hits.size(); i++) {
+                    PackedInt32Array loop = mesh->get_edge_loop(hits[i]);
+                    for (int j = 0; j < loop.size(); j++) all_edges.insert(loop[j]);
+                }
+                for (int e : all_edges) selected_edges.insert(e);
+                selected_edge = hits[0];
+            } else if (edit_mode == MODE_FACE) {
+                clear_selection();
+                std::unordered_set<int> all_faces;
+                for (int i = 0; i < hits.size(); i++) {
+                    PackedInt32Array loop = mesh->get_face_loop(hits[i]);
+                    for (int j = 0; j < loop.size(); j++) all_faces.insert(loop[j]);
+                }
+                for (int f : all_faces) selected_faces.insert(f);
+                selected_face = hits[0];
+            }
+            break;
+    }
+
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
