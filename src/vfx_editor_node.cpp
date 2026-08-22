@@ -90,6 +90,8 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("screen_select_vertex", "screen_pos"), &VFXEditorNode::screen_select_vertex);
     ClassDB::bind_method(D_METHOD("screen_select_edge", "screen_pos"), &VFXEditorNode::screen_select_edge);
     ClassDB::bind_method(D_METHOD("screen_select_face", "screen_pos"), &VFXEditorNode::screen_select_face);
+    ClassDB::bind_method(D_METHOD("screen_select_box", "screen_rect"), &VFXEditorNode::screen_select_box);
+    ClassDB::bind_method(D_METHOD("box_select", "screen_rect"), &VFXEditorNode::box_select);
     ClassDB::bind_method(D_METHOD("screen_raycast_gizmo", "screen_pos"), &VFXEditorNode::screen_raycast_gizmo);
 
     ClassDB::bind_method(D_METHOD("on_touch_down", "ray_origin", "ray_dir", "screen_pos"), &VFXEditorNode::on_touch_down);
