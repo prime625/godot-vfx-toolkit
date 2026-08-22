@@ -180,6 +180,12 @@ public:
     void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
     void get_vertex_faces(int vidx, std::vector<int>& out_faces) const;
 
+    // === EDGE LOOPS & RINGS (new) ===
+    PackedInt32Array get_edge_loop(int edge_id) const;
+    PackedInt32Array get_edge_ring(int edge_id) const;
+    PackedInt32Array get_vertex_loop(int vertex_id) const;
+    PackedInt32Array get_face_loop(int face_id) const;
+
     // === RAYCAST ===
     bool raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance = 1e20f) const;
 
