@@ -240,20 +240,37 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
     mesh_edit_verts.clear();
     mesh_edit_initial_positions.clear();
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
-            mesh_edit_verts.push_back(selected_vertex);
-            mesh_edit_initial_positions.push_back(mesh->get_vertex_position(selected_vertex));
-        } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
-            int v0, v1;
-            mesh->get_edge_endpoints(selected_edge, v0, v1);
-            if (v0 >= 0) { mesh_edit_verts.push_back(v0); mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v0)); }
-            if (v1 >= 0) { mesh_edit_verts.push_back(v1); mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v1)); }
-        } else if (edit_mode == MODE_FACE && selected_face >= 0) {
-            std::vector<vfx::HEVertex*> verts;
-            mesh->get_face_vertices(selected_face, verts);
-            for (auto* v : verts) {
-                mesh_edit_verts.push_back((int)v->id);
-                mesh_edit_initial_positions.push_back(v->position);
+        std::unordered_set<int> unique_verts;
+        if (edit_mode == MODE_VERTEX) {
+            for (int v : selected_vertices) {
+                if (v >= 0 && v < mesh->get_vertex_count() && unique_verts.insert(v).second) {
+                    mesh_edit_verts.push_back(v);
+                    mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v));
+                }
+            }
+        } else if (edit_mode == MODE_EDGE) {
+            for (int e : selected_edges) {
+                int v0, v1;
+                mesh->get_edge_endpoints(e, v0, v1);
+                if (v0 >= 0 && unique_verts.insert(v0).second) {
+                    mesh_edit_verts.push_back(v0);
+                    mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v0));
+                }
+                if (v1 >= 0 && unique_verts.insert(v1).second) {
+                    mesh_edit_verts.push_back(v1);
+                    mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v1));
+                }
+            }
+        } else if (edit_mode == MODE_FACE) {
+            for (int f : selected_faces) {
+                std::vector<vfx::HEVertex*> fverts;
+                mesh->get_face_vertices(f, fverts);
+                for (auto* v : fverts) {
+                    if (unique_verts.insert((int)v->id).second) {
+                        mesh_edit_verts.push_back((int)v->id);
+                        mesh_edit_initial_positions.push_back(v->position);
+                    }
+                }
             }
         }
     }
