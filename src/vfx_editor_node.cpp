@@ -85,6 +85,8 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_camera"), &VFXEditorNode::get_camera);
     ClassDB::bind_method(D_METHOD("set_select_pixel_tolerance", "px"), &VFXEditorNode::set_select_pixel_tolerance);
     ClassDB::bind_method(D_METHOD("get_select_pixel_tolerance"), &VFXEditorNode::get_select_pixel_tolerance);
+    ClassDB::bind_method(D_METHOD("set_gizmo_select_pixel_tolerance", "px"), &VFXEditorNode::set_gizmo_select_pixel_tolerance);
+    ClassDB::bind_method(D_METHOD("get_gizmo_select_pixel_tolerance"), &VFXEditorNode::get_gizmo_select_pixel_tolerance);
     ClassDB::bind_method(D_METHOD("screen_select_vertex", "screen_pos"), &VFXEditorNode::screen_select_vertex);
     ClassDB::bind_method(D_METHOD("screen_select_edge", "screen_pos"), &VFXEditorNode::screen_select_edge);
     ClassDB::bind_method(D_METHOD("screen_select_face", "screen_pos"), &VFXEditorNode::screen_select_face);
@@ -120,6 +122,7 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_selected_vertices"), &VFXEditorNode::get_selected_vertices);
 
     ADD_PROPERTY(PropertyInfo(Variant::INT, "selection_mode", PROPERTY_HINT_ENUM, "Single,Multi,Loop"), "set_selection_mode", "get_selection_mode");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_select_pixel_tolerance"), "set_gizmo_select_pixel_tolerance", "get_gizmo_select_pixel_tolerance");
 
     BIND_ENUM_CONSTANT(SELECTION_MODE_SINGLE);
     BIND_ENUM_CONSTANT(SELECTION_MODE_MULTI);
@@ -648,6 +651,9 @@ Camera3D* VFXEditorNode::get_camera() const { return camera; }
 void VFXEditorNode::set_select_pixel_tolerance(float px) { select_pixel_tolerance = MAX(px, 4.0f); }
 float VFXEditorNode::get_select_pixel_tolerance() const { return select_pixel_tolerance; }
 
+void VFXEditorNode::set_gizmo_select_pixel_tolerance(float px) { gizmo_select_pixel_tolerance = MAX(px, 2.0f); }
+float VFXEditorNode::get_gizmo_select_pixel_tolerance() const { return gizmo_select_pixel_tolerance; }
+
 // ============================================================================
 // GIZMO — SIMPLE ACCESSORS
 // ============================================================================
@@ -988,6 +994,9 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
 
         if (selection_mode == SELECTION_MODE_SINGLE) {
             clear_selection();
+        } else {
+            // Multi/Loop: hide gizmo on empty click so next click isn't stolen by gizmo raycast
+            if (gizmo_node) gizmo_node->set_visible(false);
         }
         return -1;
     }
