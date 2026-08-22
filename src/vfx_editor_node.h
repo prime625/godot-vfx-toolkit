@@ -25,7 +25,6 @@
 #include "vfx_texture_painter.h"
 #include "vfx_scene.h"
 #include "vfx_scene_node.h"
-#include "vfx_falloff.h"
 
 // Forward declare to avoid circular include in header
 class VFXSceneTreePanel;
@@ -136,11 +135,6 @@ private:
     Plane gizmo_drag_plane;
     Vector3 gizmo_drag_start_point;
 
-    // === PROPORTIONAL EDITING ===
-    bool proportional_enabled = false;
-    float proportional_radius = 1.0f;
-    int proportional_falloff = 0;
-
     // === MESH EDIT STATE ===
     std::vector<int> mesh_edit_verts;
     std::vector<Vector3> mesh_edit_initial_positions;
@@ -184,9 +178,6 @@ private:
     // Screen-space selection helpers
     float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
     bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
-
-    // Proportional editing
-    void _apply_proportional(const Vector3& move, const Vector3& center);
 
 public:
     VFXEditorNode();
@@ -313,14 +304,6 @@ public:
     bool get_symmetry_enabled() const;
     void set_symmetry_axis(int axis);
     int get_symmetry_axis() const;
-
-    // === PROPORTIONAL EDITING ===
-    void set_proportional_enabled(bool enabled);
-    bool get_proportional_enabled() const;
-    void set_proportional_radius(float radius);
-    float get_proportional_radius() const;
-    void set_proportional_falloff(int falloff);
-    int get_proportional_falloff() const;
 
     // === SCENE ===
     void set_scene(const Ref<VFXScene>& p_scene);
