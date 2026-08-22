@@ -59,8 +59,10 @@ public:
         MODE_FACE = 3,
     };
 
-    enum HitType {
-        SCENE_NODE_HIT = -3,
+    enum SelectionMode {
+        SELECTION_MODE_SINGLE = 0,
+        SELECTION_MODE_MULTI = 1,
+        SELECTION_MODE_LOOP = 2,
     };
 
 protected:
@@ -110,6 +112,13 @@ private:
     float select_pixel_tolerance = 8.0f;
     float gizmo_screen_scale = 1.0f;
 
+    // === SELECTION SETS (new) ===
+    std::unordered_set<int> selected_faces;
+    std::unordered_set<int> selected_edges;
+    std::unordered_set<int> selected_vertices;
+    int selection_mode = SELECTION_MODE_SINGLE;
+    int last_loop_type = 0; // 0=none, 1=loop, 2=ring
+
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
     int gizmo_drag_axis = GIZMO_NONE;
@@ -146,6 +155,12 @@ private:
     void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
+
+    // Selection mode internals (new)
+    void _handle_element_selection(int hit);
+    void _handle_vertex_selection(int hit);
+    void _handle_edge_selection(int hit);
+    void _handle_face_selection(int hit);
 
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
@@ -274,6 +289,24 @@ public:
     int get_selected_vertex() const;
     int raycast_select(const Vector3& ray_origin, const Vector3& ray_dir);
 
+    // === SELECTION MODE (new) ===
+    void set_selection_mode(int mode);
+    int get_selection_mode() const;
+    bool is_face_selected(int idx) const;
+    bool is_edge_selected(int idx) const;
+    bool is_vertex_selected(int idx) const;
+    PackedInt32Array get_selected_faces() const;
+    PackedInt32Array get_selected_edges() const;
+    PackedInt32Array get_selected_vertices() const;
+
+    // === MODELING (selection-aware) ===
+    void extrude_selection(float distance);
+    void inset_selection(float amount);
+    void delete_selection();
+    void subdivide_selection();
+    void bevel_selection(float amount);
+    void knife_selection(const Vector3& p0, const Vector3& p1);
+
     // === TEXTURE PAINTER ===
     void set_texture_painter(const Ref<VFXTexturePainter>& p);
     Ref<VFXTexturePainter> get_texture_painter() const;
@@ -302,5 +335,6 @@ public:
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
 VARIANT_ENUM_CAST(VFXEditorNode::EditMode);
+VARIANT_ENUM_CAST(VFXEditorNode::SelectionMode);
 
 #endif
