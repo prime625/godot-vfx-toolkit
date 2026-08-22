@@ -120,8 +120,7 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
 
     Transform3D visual = _get_visual_gizmo_transform();
     float s = gizmo_screen_scale;
-    float tol = select_pixel_tolerance;
-    float best_score = tol * tol;
+    float best_score = gizmo_select_pixel_tolerance * gizmo_select_pixel_tolerance;
     int best = GIZMO_NONE;
 
     auto to_screen = [&](const Vector3& wp) -> Vector2 {
