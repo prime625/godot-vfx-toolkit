@@ -180,12 +180,6 @@ public:
     void get_vertex_neighbors(int vidx, std::vector<int>& out_neighbors) const;
     void get_vertex_faces(int vidx, std::vector<int>& out_faces) const;
 
-    // === LOOP SELECTION ===
-    void get_ordered_edges_around_vertex(int vertex_id, std::vector<int>& out_edges) const;
-    PackedInt32Array select_edge_loop(int edge_id) const;
-    PackedInt32Array select_vertex_loop(int vertex_id) const;
-    PackedInt32Array select_face_loop(int face_id) const;
-
     // === RAYCAST ===
     bool raycast(const Vector3& ray_origin, const Vector3& ray_dir, Vector3& out_hit, float max_distance = 1e20f) const;
 
