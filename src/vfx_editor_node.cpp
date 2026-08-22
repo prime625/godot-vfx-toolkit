@@ -146,23 +146,6 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_symmetry_axis", "axis"), &VFXEditorNode::set_symmetry_axis);
     ClassDB::bind_method(D_METHOD("get_symmetry_axis"), &VFXEditorNode::get_symmetry_axis);
 
-    // === PROPORTIONAL EDITING ===
-    ClassDB::bind_method(D_METHOD("set_proportional_enabled", "enabled"), &VFXEditorNode::set_proportional_enabled);
-    ClassDB::bind_method(D_METHOD("get_proportional_enabled"), &VFXEditorNode::get_proportional_enabled);
-    ClassDB::bind_method(D_METHOD("set_proportional_radius", "radius"), &VFXEditorNode::set_proportional_radius);
-    ClassDB::bind_method(D_METHOD("get_proportional_radius"), &VFXEditorNode::get_proportional_radius);
-    ClassDB::bind_method(D_METHOD("set_proportional_falloff", "falloff"), &VFXEditorNode::set_proportional_falloff);
-    ClassDB::bind_method(D_METHOD("get_proportional_falloff"), &VFXEditorNode::get_proportional_falloff);
-
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_SMOOTH", vfx::FALLOFF_SMOOTH);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_SPHERE", vfx::FALLOFF_SPHERE);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_ROOT", vfx::FALLOFF_ROOT);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_INVERSE_SQUARE", vfx::FALLOFF_INVERSE_SQUARE);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_SHARP", vfx::FALLOFF_SHARP);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_LINEAR", vfx::FALLOFF_LINEAR);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_CONSTANT", vfx::FALLOFF_CONSTANT);
-    ClassDB::bind_integer_constant(get_class_static(), "", "FALLOFF_RANDOM", vfx::FALLOFF_RANDOM);
-
     // === SCENE TREE ===
     ClassDB::bind_method(D_METHOD("set_scene", "scene"), &VFXEditorNode::set_scene);
     ClassDB::bind_method(D_METHOD("get_scene"), &VFXEditorNode::get_scene);
@@ -656,16 +639,6 @@ void VFXEditorNode::set_symmetry_axis(int axis) { symmetry_axis = axis; }
 int VFXEditorNode::get_symmetry_axis() const { return symmetry_axis; }
 
 // ============================================================================
-// PROPORTIONAL EDITING
-// ============================================================================
-void VFXEditorNode::set_proportional_enabled(bool enabled) { proportional_enabled = enabled; }
-bool VFXEditorNode::get_proportional_enabled() const { return proportional_enabled; }
-void VFXEditorNode::set_proportional_radius(float radius) { proportional_radius = MAX(radius, 0.001f); }
-float VFXEditorNode::get_proportional_radius() const { return proportional_radius; }
-void VFXEditorNode::set_proportional_falloff(int falloff) { proportional_falloff = falloff; }
-int VFXEditorNode::get_proportional_falloff() const { return proportional_falloff; }
-
-// ============================================================================
 // SCENE TREE — HIGH LEVEL
 // ============================================================================
 void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
@@ -704,7 +677,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     set_vfx_animator(active_scene_node->get_animator());
 
     // Update transform gizmo to match node's world transform
-    set_gizmo_transform(active_scene_node->get_global_transform());
+    set_gizmo_transform(active_scene_node->get_local_transform());
 
     // Rebuild gizmo and clear mesh selection
     if (gizmo_node) {
@@ -738,7 +711,7 @@ Ref<VFXSceneNode> VFXEditorNode::raycast_scene_node(const Vector3& ray_origin, c
         Ref<VFXMesh> vmesh = sn->get_mesh();
         if (vmesh.is_null()) continue;
 
-        Transform3D global = sn->get_global_transform();
+        Transform3D global = sn->get_local_transform();
         Transform3D inv = global.affine_inverse();
         Vector3 local_origin = inv.xform(ray_origin);
         Vector3 local_dir = inv.basis.xform(ray_dir).normalized();
@@ -867,7 +840,7 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 
         MeshInstance3D* visual = _get_scene_visual(id);
         visual->set_visible(true);
-        visual->set_transform(p_node->get_global_transform());
+        visual->set_transform(p_node->get_local_transform());
 
         Ref<VFXMesh> vmesh = p_node->get_mesh();
         Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, p_node->get_skeleton(), p_node->get_skin(), show_weights, visualize_bone);
@@ -988,41 +961,5 @@ void VFXEditorNode::on_touch_up() {
 void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (is_gizmo_dragging()) {
         gizmo_drag(ray_origin, ray_dir);
-    }
-}
-
-
-// ============================================================================
-// EXPORT (missing implementations)
-// ============================================================================
-bool VFXEditorNode::export_glb(const String& filepath) {
-    if (mesh.is_null()) return false;
-    Ref<VFXGLTFExporter> exporter;
-    exporter.instantiate();
-    return exporter->export_glb(mesh, skeleton, filepath);
-}
-
-bool VFXEditorNode::export_glb_animated(const String& filepath, int clip_idx) {
-    if (mesh.is_null() || animator.is_null()) return false;
-    Ref<VFXGLTFExporter> exporter;
-    exporter.instantiate();
-    return exporter->export_glb_animated(mesh, skeleton, animator, clip_idx, filepath);
-}
-
-bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fps) {
-    if (mesh.is_null() || skin.is_null()) return false;
-    Ref<VFXGLTFExporter> exporter;
-    exporter.instantiate();
-    return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
-}
-
-// ============================================================================
-// CURVE TO MESH (missing implementation)
-// ============================================================================
-void VFXEditorNode::curve_to_mesh(float radius, int segments, int rings) {
-    if (active_curve.is_null()) return;
-    Ref<VFXMesh> new_mesh = active_curve->to_tube_mesh(radius, segments, rings, true, true);
-    if (new_mesh.is_valid()) {
-        set_vfx_mesh(new_mesh);
     }
 }
