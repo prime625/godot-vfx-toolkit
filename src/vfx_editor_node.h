@@ -67,6 +67,7 @@ public:
 
     enum HitType {
         SCENE_NODE_HIT = -3,
+        MESH_ELEMENT_HIT = -5,
     };
 
 protected:
