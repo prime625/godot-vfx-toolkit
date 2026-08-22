@@ -159,6 +159,7 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("raycast_scene_node", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_scene_node);
 
     ClassDB::bind_integer_constant(get_class_static(), "", "SCENE_NODE_HIT", SCENE_NODE_HIT);
+    ClassDB::bind_integer_constant(get_class_static(), "", "MESH_ELEMENT_HIT", MESH_ELEMENT_HIT);
 }
 
 // ============================================================================
@@ -982,7 +983,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             _handle_element_selection(hit);
             _build_selection_mesh();
             _update_gizmo_for_selection();
-            return hit;
+            return MESH_ELEMENT_HIT;
         }
 
         if (selection_mode == SELECTION_MODE_SINGLE) {
