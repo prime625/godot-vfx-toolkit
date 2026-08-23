@@ -123,12 +123,20 @@ void VFXEditorNode::mesh_cleanup() {
 // ============================================================================
 void VFXEditorNode::extrude_selection(float distance) {
     if (mesh.is_null()) return;
-    if (edit_mode == MODE_FACE && selected_face >= 0) {
-        mesh->extrude_face(selected_face, distance);
-        selected_face = -1;
-    } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
-        mesh->bevel_edge(selected_edge, distance);
-        selected_edge = -1;
+    if (edit_mode == MODE_FACE && !selected_faces.empty()) {
+        std::vector<int> faces(selected_faces.begin(), selected_faces.end());
+        for (int f : faces) {
+            if (f >= 0 && f < mesh->get_face_count() && !mesh->get_faces()[f]->deleted)
+                mesh->extrude_face(f, distance);
+        }
+        clear_selection();
+    } else if (edit_mode == MODE_EDGE && !selected_edges.empty()) {
+        std::vector<int> edges(selected_edges.begin(), selected_edges.end());
+        for (int e : edges) {
+            if (e >= 0 && e < mesh->get_edge_count() && !mesh->get_edges()[e]->deleted)
+                mesh->bevel_edge(e, distance);
+        }
+        clear_selection();
     }
     if (auto_update) _update_godot_mesh();
     _build_selection_mesh();
@@ -137,9 +145,13 @@ void VFXEditorNode::extrude_selection(float distance) {
 
 void VFXEditorNode::inset_selection(float amount) {
     if (mesh.is_null()) return;
-    if (edit_mode == MODE_FACE && selected_face >= 0) {
-        mesh->inset_face(selected_face, amount);
-        selected_face = -1;
+    if (edit_mode == MODE_FACE && !selected_faces.empty()) {
+        std::vector<int> faces(selected_faces.begin(), selected_faces.end());
+        for (int f : faces) {
+            if (f >= 0 && f < mesh->get_face_count() && !mesh->get_faces()[f]->deleted)
+                mesh->inset_face(f, amount);
+        }
+        clear_selection();
     }
     if (auto_update) _update_godot_mesh();
     _build_selection_mesh();
@@ -148,15 +160,27 @@ void VFXEditorNode::inset_selection(float amount) {
 
 void VFXEditorNode::delete_selection() {
     if (mesh.is_null()) return;
-    if (edit_mode == MODE_FACE && selected_face >= 0) {
-        mesh->delete_face(selected_face);
-        selected_face = -1;
-    } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
-        mesh->dissolve_edge(selected_edge);
-        selected_edge = -1;
-    } else if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
-        mesh->dissolve_vertex(selected_vertex);
-        selected_vertex = -1;
+    if (edit_mode == MODE_FACE && !selected_faces.empty()) {
+        std::vector<int> faces(selected_faces.begin(), selected_faces.end());
+        for (int f : faces) {
+            if (f >= 0 && f < mesh->get_face_count() && !mesh->get_faces()[f]->deleted)
+                mesh->delete_face(f);
+        }
+        clear_selection();
+    } else if (edit_mode == MODE_EDGE && !selected_edges.empty()) {
+        std::vector<int> edges(selected_edges.begin(), selected_edges.end());
+        for (int e : edges) {
+            if (e >= 0 && e < mesh->get_edge_count() && !mesh->get_edges()[e]->deleted)
+                mesh->dissolve_edge(e);
+        }
+        clear_selection();
+    } else if (edit_mode == MODE_VERTEX && !selected_vertices.empty()) {
+        std::vector<int> verts(selected_vertices.begin(), selected_vertices.end());
+        for (int v : verts) {
+            if (v >= 0 && v < mesh->get_vertex_count() && !mesh->get_vertices()[v]->deleted)
+                mesh->dissolve_vertex(v);
+        }
+        clear_selection();
     }
     if (auto_update) _update_godot_mesh();
     _build_selection_mesh();
@@ -165,9 +189,13 @@ void VFXEditorNode::delete_selection() {
 
 void VFXEditorNode::subdivide_selection() {
     if (mesh.is_null()) return;
-    if (edit_mode == MODE_FACE && selected_face >= 0) {
-        mesh->subdivide_face(selected_face);
-        selected_face = -1;
+    if (edit_mode == MODE_FACE && !selected_faces.empty()) {
+        std::vector<int> faces(selected_faces.begin(), selected_faces.end());
+        for (int f : faces) {
+            if (f >= 0 && f < mesh->get_face_count() && !mesh->get_faces()[f]->deleted)
+                mesh->subdivide_face(f);
+        }
+        clear_selection();
     }
     if (auto_update) _update_godot_mesh();
     _build_selection_mesh();
@@ -176,12 +204,20 @@ void VFXEditorNode::subdivide_selection() {
 
 void VFXEditorNode::bevel_selection(float amount) {
     if (mesh.is_null()) return;
-    if (edit_mode == MODE_EDGE && selected_edge >= 0) {
-        mesh->bevel_edge(selected_edge, amount);
-        selected_edge = -1;
-    } else if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
-        mesh->bevel_vertex(selected_vertex, amount);
-        selected_vertex = -1;
+    if (edit_mode == MODE_EDGE && !selected_edges.empty()) {
+        std::vector<int> edges(selected_edges.begin(), selected_edges.end());
+        for (int e : edges) {
+            if (e >= 0 && e < mesh->get_edge_count() && !mesh->get_edges()[e]->deleted)
+                mesh->bevel_edge(e, amount);
+        }
+        clear_selection();
+    } else if (edit_mode == MODE_VERTEX && !selected_vertices.empty()) {
+        std::vector<int> verts(selected_vertices.begin(), selected_vertices.end());
+        for (int v : verts) {
+            if (v >= 0 && v < mesh->get_vertex_count() && !mesh->get_vertices()[v]->deleted)
+                mesh->bevel_vertex(v, amount);
+        }
+        clear_selection();
     }
     if (auto_update) _update_godot_mesh();
     _build_selection_mesh();
