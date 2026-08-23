@@ -65,6 +65,17 @@ public:
         SELECTION_MODE_LOOP = 2,
     };
 
+    enum FalloffMode {
+        FALLOFF_SMOOTH = 0,
+        FALLOFF_SPHERE = 1,
+        FALLOFF_ROOT = 2,
+        FALLOFF_INVERSE_SQUARE = 3,
+        FALLOFF_SHARP = 4,
+        FALLOFF_LINEAR = 5,
+        FALLOFF_CONSTANT = 6,
+        FALLOFF_RANDOM = 7,
+    };
+
     enum HitType {
         SCENE_NODE_HIT = -3,
         MESH_ELEMENT_HIT = -5,
@@ -141,6 +152,11 @@ private:
     // === MESH EDIT STATE ===
     std::vector<int> mesh_edit_verts;
     std::vector<Vector3> mesh_edit_initial_positions;
+    std::vector<float> mesh_edit_weights;
+    bool proportional_editing = false;
+    float proportional_radius = 1.0f;
+    int falloff_mode = FALLOFF_SMOOTH;
+    MeshInstance3D* proportional_cursor = nullptr;
 
     // === SCENE VISUALS ===
     HashMap<uint64_t, MeshInstance3D*> scene_visuals;
@@ -186,6 +202,9 @@ private:
     void _handle_vertex_selection(int hit);
     void _handle_edge_selection(int hit);
     void _handle_face_selection(int hit);
+    float _falloff_weight(float t) const;
+    void _ensure_proportional_cursor();
+    void _update_proportional_cursor();
 
 public:
     VFXEditorNode();
@@ -309,6 +328,14 @@ public:
     PackedInt32Array get_selected_edges() const;
     PackedInt32Array get_selected_vertices() const;
 
+    // === PROPORTIONAL EDITING ===
+    void set_proportional_editing_enabled(bool enabled);
+    bool get_proportional_editing_enabled() const;
+    void set_proportional_radius(float radius);
+    float get_proportional_radius() const;
+    void set_falloff_mode(int mode);
+    int get_falloff_mode() const;
+
     // === TEXTURE PAINTER ===
     void set_texture_painter(const Ref<VFXTexturePainter>& p);
     Ref<VFXTexturePainter> get_texture_painter() const;
@@ -338,5 +365,6 @@ VARIANT_ENUM_CAST(VFXEditorNode::GizmoMode);
 VARIANT_ENUM_CAST(VFXEditorNode::GizmoAxis);
 VARIANT_ENUM_CAST(VFXEditorNode::EditMode);
 VARIANT_ENUM_CAST(VFXEditorNode::SelectionMode);
+VARIANT_ENUM_CAST(VFXEditorNode::FalloffMode);
 
 #endif
