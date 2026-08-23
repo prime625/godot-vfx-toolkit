@@ -126,6 +126,26 @@ void VFXEditorNode::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::INT, "selection_mode", PROPERTY_HINT_ENUM, "Single,Multi,Loop"), "set_selection_mode", "get_selection_mode");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_select_pixel_tolerance"), "set_gizmo_select_pixel_tolerance", "get_gizmo_select_pixel_tolerance");
 
+    ClassDB::bind_method(D_METHOD("set_proportional_editing_enabled", "enabled"), &VFXEditorNode::set_proportional_editing_enabled);
+    ClassDB::bind_method(D_METHOD("get_proportional_editing_enabled"), &VFXEditorNode::get_proportional_editing_enabled);
+    ClassDB::bind_method(D_METHOD("set_proportional_radius", "radius"), &VFXEditorNode::set_proportional_radius);
+    ClassDB::bind_method(D_METHOD("get_proportional_radius"), &VFXEditorNode::get_proportional_radius);
+    ClassDB::bind_method(D_METHOD("set_falloff_mode", "mode"), &VFXEditorNode::set_falloff_mode);
+    ClassDB::bind_method(D_METHOD("get_falloff_mode"), &VFXEditorNode::get_falloff_mode);
+
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "proportional_editing"), "set_proportional_editing_enabled", "get_proportional_editing_enabled");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "proportional_radius"), "set_proportional_radius", "get_proportional_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "falloff_mode", PROPERTY_HINT_ENUM, "Smooth,Sphere,Root,Inverse Square,Sharp,Linear,Constant,Random"), "set_falloff_mode", "get_falloff_mode");
+
+    BIND_ENUM_CONSTANT(FALLOFF_SMOOTH);
+    BIND_ENUM_CONSTANT(FALLOFF_SPHERE);
+    BIND_ENUM_CONSTANT(FALLOFF_ROOT);
+    BIND_ENUM_CONSTANT(FALLOFF_INVERSE_SQUARE);
+    BIND_ENUM_CONSTANT(FALLOFF_SHARP);
+    BIND_ENUM_CONSTANT(FALLOFF_LINEAR);
+    BIND_ENUM_CONSTANT(FALLOFF_CONSTANT);
+    BIND_ENUM_CONSTANT(FALLOFF_RANDOM);
+
     BIND_ENUM_CONSTANT(SELECTION_MODE_SINGLE);
     BIND_ENUM_CONSTANT(SELECTION_MODE_MULTI);
     BIND_ENUM_CONSTANT(SELECTION_MODE_LOOP);
@@ -432,6 +452,7 @@ void VFXEditorNode::set_edit_mode(int mode) {
     edit_mode = mode;
     clear_selection();
     _build_selection_mesh();
+    _update_proportional_cursor();
 }
 
 int VFXEditorNode::get_edit_mode() const { return edit_mode; }
@@ -655,6 +676,23 @@ float VFXEditorNode::get_select_pixel_tolerance() const { return select_pixel_to
 
 void VFXEditorNode::set_gizmo_select_pixel_tolerance(float px) { gizmo_select_pixel_tolerance = MAX(px, 2.0f); }
 float VFXEditorNode::get_gizmo_select_pixel_tolerance() const { return gizmo_select_pixel_tolerance; }
+
+void VFXEditorNode::set_proportional_editing_enabled(bool enabled) {
+    proportional_editing = enabled;
+    _update_proportional_cursor();
+}
+bool VFXEditorNode::get_proportional_editing_enabled() const { return proportional_editing; }
+
+void VFXEditorNode::set_proportional_radius(float radius) {
+    proportional_radius = MAX(radius, 0.001f);
+    _update_proportional_cursor();
+}
+float VFXEditorNode::get_proportional_radius() const { return proportional_radius; }
+
+void VFXEditorNode::set_falloff_mode(int mode) {
+    if (mode >= FALLOFF_SMOOTH && mode <= FALLOFF_RANDOM) falloff_mode = mode;
+}
+int VFXEditorNode::get_falloff_mode() const { return falloff_mode; }
 
 // ============================================================================
 // GIZMO — SIMPLE ACCESSORS
