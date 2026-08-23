@@ -88,6 +88,9 @@ jobs:
     needs: build-android
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4   # <-- add this
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -96,11 +99,12 @@ jobs:
 
       - name: Package Addon
         run: |
-          mkdir -p release/addons/vfx_toolkit
+          mkdir -p release/addons/vfx_toolkit/icons   # <-- create icons dir
           cp -r artifacts/*/* release/addons/vfx_toolkit/ || true
           cp demo/addons/vfx_toolkit/*.gdextension release/addons/vfx_toolkit/ 2>/dev/null || true
           cp demo/addons/vfx_toolkit/icons/*.svg release/addons/vfx_toolkit/icons/ 2>/dev/null || true
           cd release && zip -r ../godot_vfx_toolkit_android.zip addons/
+
 
       - name: Upload Release Package
         uses: actions/upload-artifact@v4
