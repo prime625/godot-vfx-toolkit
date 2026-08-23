@@ -241,6 +241,7 @@ void VFXEditorNode::_update_gizmo_for_selection() {
         if (gizmo_node) gizmo_node->set_visible(false);
     }
     _update_gizmo_visibility();
+    _update_proportional_cursor();
 }
 
 // ============================================================================
