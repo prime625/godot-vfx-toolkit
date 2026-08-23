@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
+#include <cstdlib>
 
 using namespace godot;
 
@@ -238,26 +239,34 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
 
     mesh_edit_verts.clear();
     mesh_edit_initial_positions.clear();
+    mesh_edit_weights.clear();
+
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
         std::unordered_set<int> unique_verts;
+        Vector3 center = gizmo_transform.get_origin();
+
+        // First: collect selected vertices
         if (edit_mode == MODE_VERTEX) {
             for (int v : selected_vertices) {
-                if (v >= 0 && v < mesh->get_vertex_count() && unique_verts.insert(v).second) {
+                if (v >= 0 && v < mesh->get_vertex_count() && !mesh->get_vertices()[v]->deleted && unique_verts.insert(v).second) {
                     mesh_edit_verts.push_back(v);
                     mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v));
+                    mesh_edit_weights.push_back(1.0f);
                 }
             }
         } else if (edit_mode == MODE_EDGE) {
             for (int e : selected_edges) {
                 int v0, v1;
                 mesh->get_edge_endpoints(e, v0, v1);
-                if (v0 >= 0 && unique_verts.insert(v0).second) {
+                if (v0 >= 0 && !mesh->get_vertices()[v0]->deleted && unique_verts.insert(v0).second) {
                     mesh_edit_verts.push_back(v0);
                     mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v0));
+                    mesh_edit_weights.push_back(1.0f);
                 }
-                if (v1 >= 0 && unique_verts.insert(v1).second) {
+                if (v1 >= 0 && !mesh->get_vertices()[v1]->deleted && unique_verts.insert(v1).second) {
                     mesh_edit_verts.push_back(v1);
                     mesh_edit_initial_positions.push_back(mesh->get_vertex_position(v1));
+                    mesh_edit_weights.push_back(1.0f);
                 }
             }
         } else if (edit_mode == MODE_FACE) {
@@ -265,9 +274,27 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
                 std::vector<vfx::HEVertex*> fverts;
                 mesh->get_face_vertices(f, fverts);
                 for (auto* v : fverts) {
-                    if (unique_verts.insert((int)v->id).second) {
+                    if (!v->deleted && unique_verts.insert((int)v->id).second) {
                         mesh_edit_verts.push_back((int)v->id);
                         mesh_edit_initial_positions.push_back(v->position);
+                        mesh_edit_weights.push_back(1.0f);
+                    }
+                }
+            }
+        }
+
+        // Proportional editing: add nearby unselected vertices
+        if (proportional_editing && proportional_radius > 0.001f) {
+            for (auto* v : mesh->get_vertices()) {
+                if (v->deleted || unique_verts.find((int)v->id) != unique_verts.end()) continue;
+                float dist = (v->position - center).length();
+                if (dist < proportional_radius) {
+                    float t = dist / proportional_radius;
+                    float w = _falloff_weight(t);
+                    if (w > 0.001f) {
+                        mesh_edit_verts.push_back((int)v->id);
+                        mesh_edit_initial_positions.push_back(v->position);
+                        mesh_edit_weights.push_back(w);
                     }
                 }
             }
@@ -398,11 +425,13 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
     if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
 
-    // Apply to mesh elements
+    // Apply to mesh elements (with proportional falloff)
     if (edit_mode != MODE_OBJECT && !mesh_edit_verts.empty() && mesh.is_valid()) {
         Transform3D delta = gizmo_transform * gizmo_drag_start_transform.affine_inverse();
         for (size_t i = 0; i < mesh_edit_verts.size(); i++) {
-            Vector3 new_pos = delta.xform(mesh_edit_initial_positions[i]);
+            Vector3 fully_transformed = delta.xform(mesh_edit_initial_positions[i]);
+            Vector3 offset = fully_transformed - mesh_edit_initial_positions[i];
+            Vector3 new_pos = mesh_edit_initial_positions[i] + offset * mesh_edit_weights[i];
             mesh->set_vertex_position(mesh_edit_verts[i], new_pos);
         }
         if (auto_update) _update_godot_mesh();
@@ -542,3 +571,112 @@ void VFXEditorNode::_build_gizmo_mesh() {
     gizmo_node->set_mesh(am);
     gizmo_node->set_transform(_get_visual_gizmo_transform());
 }
+
+
+// ============================================================================
+// PROPORTIONAL EDITING — FALLOFF & CURSOR
+// ============================================================================
+
+float VFXEditorNode::_falloff_weight(float t) const {
+    t = vfx::clampf(t, 0.0f, 1.0f);
+    switch (falloff_mode) {
+        case FALLOFF_SMOOTH:
+            return 1.0f - t * t * (3.0f - 2.0f * t);                    // smoothstep
+        case FALLOFF_SPHERE:
+            return sqrtf(vfx::clampf(1.0f - t * t, 0.0f, 1.0f));        // spherical
+        case FALLOFF_ROOT:
+            return 1.0f - sqrtf(t);                                      // root
+        case FALLOFF_INVERSE_SQUARE:
+            return (1.0f - t) * (1.0f - t);                             // parabolic
+        case FALLOFF_SHARP:
+            return 1.0f - t * t;                                         // sharp
+        case FALLOFF_LINEAR:
+            return 1.0f - t;                                             // linear
+        case FALLOFF_CONSTANT:
+            return 1.0f;                                                 // constant
+        case FALLOFF_RANDOM: {
+            float r = (float)rand() / (float)RAND_MAX;
+            return r * (1.0f - t);                                      // random
+        }
+        default:
+            return 1.0f - t;
+    }
+}
+
+void VFXEditorNode::_ensure_proportional_cursor() {
+    if (!proportional_cursor) {
+        proportional_cursor = memnew(MeshInstance3D);
+        proportional_cursor->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+        proportional_cursor->set_visible(false);
+        add_child(proportional_cursor);
+        proportional_cursor->set_owner(this);
+    }
+}
+
+void VFXEditorNode::_update_proportional_cursor() {
+    _ensure_proportional_cursor();
+    if (!proportional_cursor) return;
+
+    bool show = proportional_editing && edit_mode != MODE_OBJECT && (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0);
+    if (!show) {
+        proportional_cursor->set_visible(false);
+        return;
+    }
+
+    // Build wireframe sphere
+    Ref<ArrayMesh> am;
+    am.instantiate();
+    PackedVector3Array verts;
+    PackedColorArray cols;
+    PackedInt32Array idx;
+
+    int rings = 16;
+    int segs = 32;
+    float r = proportional_radius;
+    Color col(0.2f, 0.8f, 1.0f, 0.5f);
+
+    // Three orthogonal rings (XY, XZ, YZ planes)
+    auto add_ring = [&](const Vector3& axis, float radius) {
+        Vector3 up = fabs(axis.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+        Vector3 right = axis.cross(up).normalized();
+        up = right.cross(axis).normalized();
+
+        int base = verts.size();
+        for (int i = 0; i <= segs; i++) {
+            float ang = (float)i / segs * 3.14159265f * 2.0f;
+            Vector3 p = right * cosf(ang) * radius + up * sinf(ang) * radius;
+            verts.push_back(p);
+            cols.push_back(col);
+        }
+        for (int i = 0; i < segs; i++) {
+            idx.push_back(base + i);
+            idx.push_back(base + i + 1);
+        }
+    };
+
+    add_ring(Vector3(1, 0, 0), r);  // YZ plane
+    add_ring(Vector3(0, 1, 0), r);  // XZ plane
+    add_ring(Vector3(0, 0, 1), r);  // XY plane
+
+    if (verts.size() > 0) {
+        Array arrays;
+        arrays.resize(Mesh::ARRAY_MAX);
+        arrays[Mesh::ARRAY_VERTEX] = verts;
+        arrays[Mesh::ARRAY_COLOR] = cols;
+        arrays[Mesh::ARRAY_INDEX] = idx;
+        am->add_surface_from_arrays(Mesh::PRIMITIVE_LINES, arrays);
+    }
+
+    Ref<StandardMaterial3D> mat;
+    mat.instantiate();
+    mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    proportional_cursor->set_material_override(mat);
+    proportional_cursor->set_mesh(am);
+
+    Vector3 center = gizmo_transform.get_origin();
+    proportional_cursor->set_position(center);
+    proportional_cursor->set_visible(true);
+}
+
