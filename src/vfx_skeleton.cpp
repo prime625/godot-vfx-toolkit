@@ -322,60 +322,77 @@ bool VFXSkeleton::is_bone_symmetric(int bone_id) const {
 void VFXSkeleton::create_mixamo_skeleton() {
     clear();
 
+    // === ROOT === (1)
     int hips = add_bone("mixamorig_Hips", -1);
 
-    int spine = add_bone("mixamorig_Spine", hips);
+    // === SPINE CHAIN === (3)
+    int spine  = add_bone("mixamorig_Spine", hips);
     int spine1 = add_bone("mixamorig_Spine1", spine);
     int spine2 = add_bone("mixamorig_Spine2", spine1);
 
+    // === HEAD CHAIN === (2 + 1 end = 3)
     int neck = add_bone("mixamorig_Neck", spine2);
     int head = add_bone("mixamorig_Head", neck);
+    int head_top_end = add_bone("mixamorig_HeadTop_End", head);
 
+    // === LEFT ARM === (4)
     int l_shoulder = add_bone("mixamorig_LeftShoulder", spine2);
-    int l_arm = add_bone("mixamorig_LeftArm", l_shoulder);
-    int l_forearm = add_bone("mixamorig_LeftForeArm", l_arm);
-    int l_hand = add_bone("mixamorig_LeftHand", l_forearm);
+    int l_arm      = add_bone("mixamorig_LeftArm", l_shoulder);
+    int l_forearm  = add_bone("mixamorig_LeftForeArm", l_arm);
+    int l_hand     = add_bone("mixamorig_LeftHand", l_forearm);
 
+    // === RIGHT ARM === (4)
     int r_shoulder = add_bone("mixamorig_RightShoulder", spine2);
-    int r_arm = add_bone("mixamorig_RightArm", r_shoulder);
-    int r_forearm = add_bone("mixamorig_RightForeArm", r_arm);
-    int r_hand = add_bone("mixamorig_RightHand", r_forearm);
+    int r_arm      = add_bone("mixamorig_RightArm", r_shoulder);
+    int r_forearm  = add_bone("mixamorig_RightForeArm", r_arm);
+    int r_hand     = add_bone("mixamorig_RightHand", r_forearm);
 
+    // === LEFT LEG === (4 + 1 end = 5)
     int l_upleg = add_bone("mixamorig_LeftUpLeg", hips);
-    int l_leg = add_bone("mixamorig_LeftLeg", l_upleg);
-    int l_foot = add_bone("mixamorig_LeftFoot", l_leg);
-    int l_toe = add_bone("mixamorig_LeftToeBase", l_foot);
+    int l_leg   = add_bone("mixamorig_LeftLeg", l_upleg);
+    int l_foot  = add_bone("mixamorig_LeftFoot", l_leg);
+    int l_toe   = add_bone("mixamorig_LeftToeBase", l_foot);
+    int l_toe_end = add_bone("mixamorig_LeftToe_End", l_toe);
 
+    // === RIGHT LEG === (4 + 1 end = 5)
     int r_upleg = add_bone("mixamorig_RightUpLeg", hips);
-    int r_leg = add_bone("mixamorig_RightLeg", r_upleg);
-    int r_foot = add_bone("mixamorig_RightFoot", r_leg);
-    int r_toe = add_bone("mixamorig_RightToeBase", r_foot);
+    int r_leg   = add_bone("mixamorig_RightLeg", r_upleg);
+    int r_foot  = add_bone("mixamorig_RightFoot", r_leg);
+    int r_toe   = add_bone("mixamorig_RightToeBase", r_foot);
+    int r_toe_end = add_bone("mixamorig_RightToe_End", r_toe);
 
-    set_bone_local_position(spine, Vector3(0, 1.0f, 0));
-    set_bone_local_position(spine1, Vector3(0, 0.15f, 0));
-    set_bone_local_position(spine2, Vector3(0, 0.15f, 0));
-    set_bone_local_position(neck, Vector3(0, 0.15f, 0));
-    set_bone_local_position(head, Vector3(0, 0.1f, 0));
+    // Total: 1 + 3 + 3 + 4 + 4 + 5 + 5 = 25 bones  (Mixamo "No Fingers")
+
+    // === POSITIONS (local, meters) ===
+    // Hips at origin — mesh should be positioned so feet touch ground
+    set_bone_local_position(spine,  Vector3(0, 0.10f, 0));
+    set_bone_local_position(spine1, Vector3(0, 0.12f, 0));
+    set_bone_local_position(spine2, Vector3(0, 0.12f, 0));
+    set_bone_local_position(neck,    Vector3(0, 0.12f, 0));
+    set_bone_local_position(head,    Vector3(0, 0.10f, 0));
+    set_bone_local_position(head_top_end, Vector3(0, 0.15f, 0));  // leaf
 
     set_bone_local_position(l_shoulder, Vector3(0.15f, 0.05f, 0));
-    set_bone_local_position(l_arm, Vector3(0.1f, 0, 0));
-    set_bone_local_position(l_forearm, Vector3(0.25f, 0, 0));
-    set_bone_local_position(l_hand, Vector3(0.25f, 0, 0));
+    set_bone_local_position(l_arm,        Vector3(0.10f, 0, 0));
+    set_bone_local_position(l_forearm,    Vector3(0.25f, 0, 0));
+    set_bone_local_position(l_hand,       Vector3(0.25f, 0, 0));
 
     set_bone_local_position(r_shoulder, Vector3(-0.15f, 0.05f, 0));
-    set_bone_local_position(r_arm, Vector3(-0.1f, 0, 0));
-    set_bone_local_position(r_forearm, Vector3(-0.25f, 0, 0));
-    set_bone_local_position(r_hand, Vector3(-0.25f, 0, 0));
+    set_bone_local_position(r_arm,      Vector3(-0.10f, 0, 0));
+    set_bone_local_position(r_forearm,  Vector3(-0.25f, 0, 0));
+    set_bone_local_position(r_hand,     Vector3(-0.25f, 0, 0));
 
-    set_bone_local_position(l_upleg, Vector3(0.1f, 0, 0));
-    set_bone_local_position(l_leg, Vector3(0, -0.45f, 0));
-    set_bone_local_position(l_foot, Vector3(0, -0.45f, 0));
-    set_bone_local_position(l_toe, Vector3(0, 0, 0.15f));
+    set_bone_local_position(l_upleg, Vector3(0.10f, 0, 0));
+    set_bone_local_position(l_leg,   Vector3(0, -0.45f, 0));
+    set_bone_local_position(l_foot,  Vector3(0, -0.45f, 0));
+    set_bone_local_position(l_toe,   Vector3(0, 0, 0.15f));
+    set_bone_local_position(l_toe_end, Vector3(0, 0, 0.05f));  // leaf
 
-    set_bone_local_position(r_upleg, Vector3(-0.1f, 0, 0));
-    set_bone_local_position(r_leg, Vector3(0, -0.45f, 0));
-    set_bone_local_position(r_foot, Vector3(0, -0.45f, 0));
-    set_bone_local_position(r_toe, Vector3(0, 0, 0.15f));
+    set_bone_local_position(r_upleg, Vector3(-0.10f, 0, 0));
+    set_bone_local_position(r_leg,   Vector3(0, -0.45f, 0));
+    set_bone_local_position(r_foot,  Vector3(0, -0.45f, 0));
+    set_bone_local_position(r_toe,   Vector3(0, 0, 0.15f));
+    set_bone_local_position(r_toe_end, Vector3(0, 0, 0.05f));  // leaf
 
     update_transforms();
     for (auto& b : bones) {
