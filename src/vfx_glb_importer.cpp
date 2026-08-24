@@ -9,9 +9,6 @@
 
 using namespace godot;
 
-// ============================================================================
-// Godot API bindings
-// ============================================================================
 void VFXGLBImporter::_bind_methods() {
     ClassDB::bind_method(D_METHOD("import_glb", "path"), &VFXGLBImporter::import_glb);
     ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_position", "gltf_pos"), &VFXGLBImporter::convert_position);
@@ -23,9 +20,6 @@ void VFXGLBImporter::_bind_methods() {
 VFXGLBImporter::VFXGLBImporter() {}
 VFXGLBImporter::~VFXGLBImporter() {}
 
-// ============================================================================
-// Coordinate conversion: glTF (+Y up, RH) -> Godot (+Y up, LH)
-// ============================================================================
 Vector3 VFXGLBImporter::convert_position(const Vector3& gltf_pos) {
     return Vector3(-gltf_pos.x, gltf_pos.y, -gltf_pos.z);
 }
@@ -62,9 +56,18 @@ Basis VFXGLBImporter::_gltf_to_godot_b(const Basis& b) {
     return convert_transform(Transform3D(b, Vector3())).get_basis();
 }
 
-// ============================================================================
-// Document cleanup
-// ============================================================================
+Transform3D VFXGLBImporter::_get_node_local_transform(const GLBNode& node) const {
+    if (node.has_matrix) {
+        return _gltf_to_godot_t(node.matrix);
+    }
+    Transform3D t;
+    t.set_origin(_gltf_to_godot_v3(node.translation));
+    Basis b(_gltf_to_godot_q(node.rotation));
+    b.scale(node.scale);
+    t.set_basis(b);
+    return t;
+}
+
 void VFXGLBImporter::_clear_document() {
     buffers.clear();
     buffer_views.clear();
@@ -76,13 +79,12 @@ void VFXGLBImporter::_clear_document() {
     scene_nodes.clear();
 }
 
-// ============================================================================
-// Main import entry point
-// ============================================================================
 Dictionary VFXGLBImporter::import_glb(const String& path) {
     Dictionary result;
     result[KEY_SUCCESS] = false;
     result[KEY_ERROR] = "";
+    result[KEY_SCENE] = Variant();
+    result[KEY_MESH_NODES] = Array();
     result[KEY_MESH] = Variant();
     result[KEY_SKELETON] = Variant();
     result[KEY_SKIN] = Variant();
@@ -111,82 +113,130 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     result[KEY_MESH_COUNT] = (int)meshes.size();
     result[KEY_ANIMATION_COUNT] = (int)animations.size();
 
-    int mesh_node_idx = -1;
-    int skin_idx = -1;
-    for (int node_idx : scene_nodes) {
-        if (node_idx >= 0 && node_idx < (int)nodes.size()) {
-            if (nodes[node_idx].mesh >= 0) {
-                mesh_node_idx = node_idx;
-                skin_idx = nodes[node_idx].skin;
-                break;
+    // Create VFXScene and build node hierarchy
+    Ref<VFXScene> scene;
+    scene.instantiate();
+    scene->create_default_root();
+
+    // Create a VFXSceneNode for every glTF node
+    std::vector<Ref<VFXSceneNode>> vfx_nodes(nodes.size());
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        vfx_nodes[i].instantiate();
+        vfx_nodes[i]->set_node_name(nodes[i].name);
+        vfx_nodes[i]->set_local_transform(_get_node_local_transform(nodes[i]));
+        vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_EMPTY);
+    }
+
+    // Build hierarchy: parent -> child links
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        if (nodes[i].parent >= 0 && nodes[i].parent < (int)nodes.size()) {
+            vfx_nodes[nodes[i].parent]->add_child(vfx_nodes[i]);
+        }
+    }
+
+    // Attach root-level scene nodes to the scene root
+    for (int scene_node_idx : scene_nodes) {
+        if (scene_node_idx >= 0 && scene_node_idx < (int)nodes.size()) {
+            if (nodes[scene_node_idx].parent < 0) {
+                bool already_child = false;
+                for (int j = 0; j < scene->get_root()->get_child_count(); j++) {
+                    if (scene->get_root()->get_child(j) == vfx_nodes[scene_node_idx]) {
+                        already_child = true;
+                        break;
+                    }
+                }
+                if (!already_child) {
+                    scene->get_root()->add_child(vfx_nodes[scene_node_idx]);
+                }
             }
         }
     }
-    if (mesh_node_idx < 0) {
+
+    // If no scene nodes were attached, attach all orphan nodes
+    if (scene->get_root()->get_child_count() == 0) {
         for (int i = 0; i < (int)nodes.size(); i++) {
-            if (nodes[i].mesh >= 0) {
-                mesh_node_idx = i;
-                skin_idx = nodes[i].skin;
-                break;
+            if (nodes[i].parent < 0) {
+                scene->get_root()->add_child(vfx_nodes[i]);
             }
         }
     }
 
-    if (mesh_node_idx < 0) {
-        result[KEY_ERROR] = "No mesh node found in glTF";
-        return result;
-    }
+    // Build meshes, skeletons, skins, animators per node
+    std::vector<Ref<VFXSkeleton>> built_skeletons(skins.size());
+    std::vector<Ref<VFXAnimator>> built_animators(skins.size());
+    Array mesh_nodes_array;
 
-    const GLBMesh& glb_mesh = meshes[nodes[mesh_node_idx].mesh];
-    Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error);
-    if (mesh.is_null()) {
-        result[KEY_ERROR] = "Mesh build failed: " + error;
-        return result;
-    }
-    result[KEY_MESH] = mesh;
+    Ref<VFXMesh> first_mesh;
+    Ref<VFXSkeleton> first_skeleton;
+    Ref<VFXSkin> first_skin;
+    Ref<VFXAnimator> first_animator;
 
-    Ref<VFXSkeleton> skeleton;
-    Ref<VFXSkin> skin;
-    std::vector<int> node_to_bone(nodes.size(), -1);
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        if (nodes[i].mesh >= 0 && nodes[i].mesh < (int)meshes.size()) {
+            const GLBMesh& glb_mesh = meshes[nodes[i].mesh];
+            Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error);
+            if (mesh.is_null()) continue;
 
-    if (skin_idx >= 0 && skin_idx < (int)skins.size()) {
-        skeleton = _build_skeleton(skins[skin_idx], error);
-        if (skeleton.is_null()) {
-            result[KEY_ERROR] = "Skeleton build failed: " + error;
-            return result;
-        }
-        result[KEY_SKELETON] = skeleton;
+            vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_MESH);
+            vfx_nodes[i]->set_mesh(mesh);
+            mesh_nodes_array.append(vfx_nodes[i]);
 
-        const GLBSkin& glb_skin = skins[skin_idx];
-        for (int i = 0; i < glb_skin.joints.size(); i++) {
-            int node_idx = glb_skin.joints[i];
-            if (node_idx >= 0 && node_idx < (int)nodes.size()) {
-                node_to_bone[node_idx] = i;
+            if (!first_mesh.is_valid()) first_mesh = mesh;
+
+            // Skin
+            if (nodes[i].skin >= 0 && nodes[i].skin < (int)skins.size()) {
+                int skin_idx = nodes[i].skin;
+
+                if (!built_skeletons[skin_idx].is_valid()) {
+                    built_skeletons[skin_idx] = _build_skeleton(skins[skin_idx], error);
+                }
+
+                if (built_skeletons[skin_idx].is_valid()) {
+                    Ref<VFXSkin> vfx_skin;
+                    vfx_skin.instantiate();
+                    vfx_skin->set_mesh(mesh);
+                    vfx_skin->set_skeleton(built_skeletons[skin_idx]);
+                    vfx_nodes[i]->set_skeleton(built_skeletons[skin_idx]);
+                    vfx_nodes[i]->set_skin(vfx_skin);
+
+                    if (!first_skeleton.is_valid()) first_skeleton = built_skeletons[skin_idx];
+                    if (!first_skin.is_valid()) first_skin = vfx_skin;
+
+                    // Build animator once per skin
+                    if (!built_animators[skin_idx].is_valid()) {
+                        Ref<VFXAnimator> animator;
+                        animator.instantiate();
+                        std::vector<int> node_to_bone(nodes.size(), -1);
+                        for (int j = 0; j < skins[skin_idx].joints.size(); j++) {
+                            int joint_node = skins[skin_idx].joints[j];
+                            if (joint_node >= 0 && joint_node < (int)nodes.size()) {
+                                node_to_bone[joint_node] = j;
+                            }
+                        }
+                        _build_animations(animator, node_to_bone);
+                        if (animator->get_clip_count() > 0) {
+                            built_animators[skin_idx] = animator;
+                        }
+                    }
+                    if (built_animators[skin_idx].is_valid()) {
+                        vfx_nodes[i]->set_animator(built_animators[skin_idx]);
+                        if (!first_animator.is_valid()) first_animator = built_animators[skin_idx];
+                    }
+                }
             }
         }
-
-        skin.instantiate();
-        skin->set_mesh(mesh);
-        skin->set_skeleton(skeleton);
-        result[KEY_SKIN] = skin;
     }
 
-    if (!animations.empty() && skeleton.is_valid()) {
-        Ref<VFXAnimator> animator;
-        animator.instantiate();
-        _build_animations(animator, node_to_bone);
-        if (animator->get_clip_count() > 0) {
-            result[KEY_ANIMATOR] = animator;
-        }
-    }
-
+    result[KEY_SCENE] = scene;
+    result[KEY_MESH_NODES] = mesh_nodes_array;
+    if (first_mesh.is_valid()) result[KEY_MESH] = first_mesh;
+    if (first_skeleton.is_valid()) result[KEY_SKELETON] = first_skeleton;
+    if (first_skin.is_valid()) result[KEY_SKIN] = first_skin;
+    if (first_animator.is_valid()) result[KEY_ANIMATOR] = first_animator;
     result[KEY_SUCCESS] = true;
     return result;
 }
 
-// ============================================================================
-// GLB binary parsing
-// ============================================================================
 bool VFXGLBImporter::_parse_glb(const PackedByteArray& data, String& out_error) {
     _clear_document();
 
@@ -248,12 +298,8 @@ bool VFXGLBImporter::_parse_glb(const PackedByteArray& data, String& out_error) 
     String json_text;
     json_text.parse_utf8((const char*)json_chunk.ptr(), json_chunk.size());
     return _parse_json(json_text, bin_chunk, out_error);
-
 }
 
-// ============================================================================
-// JSON parsing
-// ============================================================================
 bool VFXGLBImporter::_parse_json(const String& json_text, const PackedByteArray& bin_chunk, String& out_error) {
     Ref<JSON> json;
     json.instantiate();
@@ -498,7 +544,7 @@ bool VFXGLBImporter::_parse_buffers(const Array& buf_arr, const PackedByteArray&
         Dictionary b = buf_arr[i];
         GLBBuffer buf;
         if (b.has("uri")) {
-            // External / data URI not supported in this version
+            // External / data URI not supported
         } else if (i == 0 && !bin_chunk.is_empty()) {
             buf.data = bin_chunk;
         }
@@ -508,10 +554,6 @@ bool VFXGLBImporter::_parse_buffers(const Array& buf_arr, const PackedByteArray&
 }
 
 
-
-// ============================================================================
-// Accessor helpers
-// ============================================================================
 int VFXGLBImporter::_accessor_component_count(const String& type) const {
     if (type == "SCALAR") return 1;
     if (type == "VEC2") return 2;
@@ -586,7 +628,6 @@ bool VFXGLBImporter::_read_accessor_floats(int accessor_idx, PackedFloat32Array&
 
     const GLBAccessor& acc = accessors[accessor_idx];
     int comp_count = _accessor_component_count(acc.type);
-    int comp_size = _accessor_component_size(acc.component_type);
     int total_elements = acc.count * comp_count;
 
     out.resize(total_elements);
@@ -763,9 +804,6 @@ bool VFXGLBImporter::_read_accessor_mat4(int accessor_idx, std::vector<Transform
     return true;
 }
 
-// ============================================================================
-// Build VFXMesh from glTF primitive
-// ============================================================================
 Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_error) {
     Ref<VFXMesh> mesh;
     mesh.instantiate();
@@ -876,9 +914,6 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
     return mesh;
 }
 
-// ============================================================================
-// Build VFXSkeleton from glTF skin
-// ============================================================================
 Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String& out_error) {
     Ref<VFXSkeleton> skeleton;
     skeleton.instantiate();
@@ -900,7 +935,6 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String
         for (int i = 0; i < joint_count; i++) ibms[i] = Transform3D();
     }
 
-    std::vector<int> node_to_bone(nodes.size(), -1);
     for (int i = 0; i < joint_count; i++) {
         int node_idx = glb_skin.joints[i];
         String name = (node_idx >= 0 && node_idx < (int)nodes.size()) ? nodes[node_idx].name : ("bone_" + String::num_int64(i));
@@ -915,7 +949,6 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String
             }
         }
         skeleton->add_bone(name, parent_bone);
-        if (node_idx >= 0) node_to_bone[node_idx] = i;
     }
 
     std::vector<Transform3D> bind_poses(joint_count);
@@ -945,9 +978,6 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String
     return skeleton;
 }
 
-// ============================================================================
-// Build VFXAnimator from glTF animations
-// ============================================================================
 void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone) {
     for (const GLBAnimation& anim : animations) {
         float duration = 0.0f;
