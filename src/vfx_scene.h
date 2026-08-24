@@ -35,23 +35,19 @@ public:
     void delete_node(const Ref<VFXSceneNode>& node);
     void clear();
 
-    // Legacy Godot ResourceLoader import (kept for compat)
     bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
 
-    // NEW: Custom GLB import using VFXGLBImporter -- merges into this scene
     bool import_glb_model(const String& filepath,
                           const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>(),
                           const Transform3D& transform = Transform3D());
 
-    // NEW: Merge another VFXScene into this one (Blender-like Append)
     bool merge_scene(const Ref<VFXScene>& other,
                      const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>(),
                      const Transform3D& transform = Transform3D());
 
-    // NEW: Ensure a node name is unique in the entire scene (appends .001, .002, etc.)
-    void ensure_unique_name(String& name) const;
+    // FIXED: Returns String instead of modifying via non-const reference
+    String ensure_unique_name(const String& name) const;
 
-    // NEW: Total node count in the scene
     int get_node_count() const;
 
     Ref<VFXSceneNode> find_node_by_name(const String& name) const;
