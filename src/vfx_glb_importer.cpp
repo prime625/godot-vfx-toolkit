@@ -247,13 +247,14 @@ bool VFXGLBImporter::_parse_glb(const PackedByteArray& data, String& out_error) 
 
     String json_text;
     json_text.parse_utf8((const char*)json_chunk.ptr(), json_chunk.size());
-    return _parse_json(json_text, out_error);
+    return _parse_json(json_text, bin_chunk, out_error);
+
 }
 
 // ============================================================================
 // JSON parsing
 // ============================================================================
-bool VFXGLBImporter::_parse_json(const String& json_text, String& out_error) {
+bool VFXGLBImporter::_parse_json(const String& json_text, const PackedByteArray& bin_chunk, String& out_error) {
     Ref<JSON> json;
     json.instantiate();
     Error err = json->parse(json_text);
@@ -328,8 +329,7 @@ bool VFXGLBImporter::_parse_json(const String& json_text, String& out_error) {
         }
     }
     if (doc.has("buffers")) {
-        PackedByteArray empty;
-        if (!_parse_buffers(doc["buffers"], empty)) {
+        if (!_parse_buffers(doc["buffers"], bin_chunk)) {
             out_error = "Failed to parse buffers";
             return false;
         }
