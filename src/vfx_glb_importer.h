@@ -136,7 +136,7 @@ private:
     // Parsing
     // ------------------------------------------------------------------------
     bool _parse_glb(const PackedByteArray& data, String& out_error);
-    bool _parse_json(const String& json_text, String& out_error);
+    bool _parse_json(const String& json_text, const PackedByteArray& bin_chunk, String& out_error);
     bool _parse_nodes(const Array& nodes_arr);
     bool _parse_meshes(const Array& meshes_arr);
     bool _parse_skins(const Array& skins_arr);
