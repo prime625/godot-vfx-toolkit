@@ -299,7 +299,8 @@ String VFXScene::ensure_unique_name(const String& name) const {
         if (!_name_exists_recursive(root, candidate)) return candidate;
     }
 
-    return name + "_dup";
+    return name + String("_dup");
+
 }
 
 bool VFXScene::_name_exists_recursive(const Ref<VFXSceneNode>& node, const String& name) const {
