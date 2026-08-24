@@ -76,7 +76,7 @@ void VFXScene::clear() {
 }
 
 // ============================================================================
-// Legacy Godot ResourceLoader import (kept for backward compatibility)
+// Legacy Godot ResourceLoader import
 // ============================================================================
 bool VFXScene::import_model(const String& filepath, const Ref<VFXSceneNode>& parent) {
     Ref<Resource> res = ResourceLoader::get_singleton()->load(filepath);
@@ -170,7 +170,7 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
 }
 
 // ============================================================================
-// NEW: Custom GLB import -- uses VFXGLBImporter and merges into this scene
+// NEW: Custom GLB import
 // ============================================================================
 bool VFXScene::import_glb_model(const String& filepath,
                                 const Ref<VFXSceneNode>& parent,
@@ -206,7 +206,6 @@ bool VFXScene::merge_scene(const Ref<VFXScene>& other,
 
     Ref<VFXSceneNode> target = parent.is_valid() ? parent : root;
 
-    // Clone each top-level child from the other scene's root
     Array other_children = other->get_root()->get_children();
     for (int i = 0; i < other_children.size(); i++) {
         Ref<VFXSceneNode> node = other_children[i];
@@ -215,17 +214,12 @@ bool VFXScene::merge_scene(const Ref<VFXScene>& other,
         Ref<VFXSceneNode> cloned = _clone_node_recursive(node);
         if (cloned.is_null()) continue;
 
-        // Apply offset transform to the root of the cloned tree
         if (transform != Transform3D()) {
             cloned->set_local_transform(transform * cloned->get_local_transform());
         }
 
-        // Ensure unique name
-        String name = cloned->get_node_name();
-        ensure_unique_name(name);
-        cloned->set_node_name(name);
-
-        // Reassign IDs so they don't collide
+        String unique_name = ensure_unique_name(cloned->get_node_name());
+        cloned->set_node_name(unique_name);
         _reassign_ids_recursive(cloned);
 
         target->add_child(cloned);
@@ -235,7 +229,7 @@ bool VFXScene::merge_scene(const Ref<VFXScene>& other,
 }
 
 // ============================================================================
-// NEW: Deep-clone a node subtree (shares mesh/skel refs, clones hierarchy)
+// NEW: Deep-clone a node subtree
 // ============================================================================
 Ref<VFXSceneNode> VFXScene::_clone_node_recursive(const Ref<VFXSceneNode>& source) const {
     if (source.is_null()) return Ref<VFXSceneNode>();
@@ -249,13 +243,11 @@ Ref<VFXSceneNode> VFXScene::_clone_node_recursive(const Ref<VFXSceneNode>& sourc
     clone->set_expanded(source->get_expanded());
     clone->set_selected(source->get_selected());
 
-    // Share component refs (memory-efficient: same mesh data, different node)
     if (source->has_mesh())      clone->set_mesh(source->get_mesh());
     if (source->has_skeleton())  clone->set_skeleton(source->get_skeleton());
     if (source->has_skin())      clone->set_skin(source->get_skin());
     if (source->has_animator())  clone->set_animator(source->get_animator());
 
-    // Recurse children
     Array children = source->get_children();
     for (int i = 0; i < children.size(); i++) {
         Ref<VFXSceneNode> child = children[i];
@@ -279,11 +271,11 @@ void VFXScene::_reassign_ids_recursive(const Ref<VFXSceneNode>& node) {
 }
 
 // ============================================================================
-// NEW: Name uniqueness (Blender-style .001, .002 suffixes)
+// FIXED: Returns String instead of using non-const reference
 // ============================================================================
-void VFXScene::ensure_unique_name(String& name) const {
-    if (root.is_null()) return;
-    if (!_name_exists_recursive(root, name)) return;
+String VFXScene::ensure_unique_name(const String& name) const {
+    if (root.is_null()) return name;
+    if (!_name_exists_recursive(root, name)) return name;
 
     String base = name;
     int start_num = 1;
@@ -293,7 +285,8 @@ void VFXScene::ensure_unique_name(String& name) const {
         String suffix = base.substr(dot_pos + 1);
         bool all_digits = true;
         for (int i = 0; i < suffix.length(); i++) {
-            if (!suffix[i].is_digit()) { all_digits = false; break; }
+            char32_t c = suffix[i];
+            if (c < '0' || c > '9') { all_digits = false; break; }
         }
         if (all_digits && suffix.length() > 0) {
             base = base.substr(0, dot_pos);
@@ -303,11 +296,10 @@ void VFXScene::ensure_unique_name(String& name) const {
 
     for (int n = start_num; n < 9999; n++) {
         String candidate = base + "." + String::num_int64(n).pad_zeros(3);
-        if (!_name_exists_recursive(root, candidate)) {
-            name = candidate;
-            return;
-        }
+        if (!_name_exists_recursive(root, candidate)) return candidate;
     }
+
+    return name + "_dup";
 }
 
 bool VFXScene::_name_exists_recursive(const Ref<VFXSceneNode>& node, const String& name) const {
