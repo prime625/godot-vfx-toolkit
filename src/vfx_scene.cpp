@@ -1,4 +1,5 @@
 #include "vfx_scene.h"
+#include "vfx_glb_importer.h"
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/packed_scene.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -17,6 +18,10 @@ void VFXScene::_bind_methods() {
     ClassDB::bind_method(D_METHOD("delete_node", "node"), &VFXScene::delete_node);
     ClassDB::bind_method(D_METHOD("clear"), &VFXScene::clear);
     ClassDB::bind_method(D_METHOD("import_model", "filepath", "parent"), &VFXScene::import_model, DEFVAL(Ref<VFXSceneNode>()));
+    ClassDB::bind_method(D_METHOD("import_glb_model", "filepath", "parent", "transform"), &VFXScene::import_glb_model, DEFVAL(Ref<VFXSceneNode>()), DEFVAL(Transform3D()));
+    ClassDB::bind_method(D_METHOD("merge_scene", "other", "parent", "transform"), &VFXScene::merge_scene, DEFVAL(Ref<VFXSceneNode>()), DEFVAL(Transform3D()));
+    ClassDB::bind_method(D_METHOD("ensure_unique_name", "name"), &VFXScene::ensure_unique_name);
+    ClassDB::bind_method(D_METHOD("get_node_count"), &VFXScene::get_node_count);
     ClassDB::bind_method(D_METHOD("find_node_by_name", "name"), &VFXScene::find_node_by_name);
     ClassDB::bind_method(D_METHOD("get_all_mesh_nodes"), &VFXScene::get_all_mesh_nodes);
     ClassDB::bind_method(D_METHOD("flatten_tree"), &VFXScene::flatten_tree);
@@ -40,13 +45,13 @@ Ref<VFXSceneNode> VFXScene::create_node(const String& name, int type, const Ref<
     node.instantiate();
     node->set_node_name(name.is_empty() ? "Node_" + String::num_int64(node_counter++) : name);
     node->set_node_type(type);
+    node->set_node_id(get_unique_id());
 
     Ref<VFXSceneNode> p = parent;
     if (!p.is_valid() && root.is_valid()) p = root;
     if (p.is_valid()) {
         p->add_child(node);
     } else {
-        // No root yet, this becomes root
         root = node;
     }
     return node;
@@ -70,8 +75,10 @@ void VFXScene::clear() {
     node_counter = 0;
 }
 
+// ============================================================================
+// Legacy Godot ResourceLoader import (kept for backward compatibility)
+// ============================================================================
 bool VFXScene::import_model(const String& filepath, const Ref<VFXSceneNode>& parent) {
-    // NOTE: on Android copy files to user:// first, then load from there
     Ref<Resource> res = ResourceLoader::get_singleton()->load(filepath);
     if (res.is_null()) {
         UtilityFunctions::print("Import failed: cannot load ", filepath);
@@ -87,7 +94,6 @@ bool VFXScene::import_model(const String& filepath, const Ref<VFXSceneNode>& par
         return true;
     }
 
-    // Direct mesh resource (e.g. .obj imported as Mesh)
     Ref<Mesh> mesh = res;
     if (mesh.is_valid()) {
         Ref<VFXSceneNode> node = create_node(filepath.get_file(), VFXSceneNode::NODE_MESH, parent);
@@ -121,7 +127,6 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
             vmesh->from_godot_mesh(gmesh);
             vfx_node->set_mesh(vmesh);
         }
-        // Skeleton reference on MeshInstance3D (use property access, not getter)
         Variant skel_var = mi->get("skeleton");
         if (skel_var.get_type() == Variant::NODE_PATH) {
             NodePath skel_path = skel_var;
@@ -164,6 +169,166 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
     }
 }
 
+// ============================================================================
+// NEW: Custom GLB import -- uses VFXGLBImporter and merges into this scene
+// ============================================================================
+bool VFXScene::import_glb_model(const String& filepath,
+                                const Ref<VFXSceneNode>& parent,
+                                const Transform3D& transform) {
+    if (root.is_null()) create_default_root();
+
+    Ref<VFXGLBImporter> importer;
+    importer.instantiate();
+    Dictionary result = importer->import_glb(filepath);
+
+    if (!result.get(VFXGLBImporter::KEY_SUCCESS, false)) {
+        UtilityFunctions::print("GLB import failed: ", result.get(VFXGLBImporter::KEY_ERROR, "unknown error"));
+        return false;
+    }
+
+    Ref<VFXScene> imported_scene = result[VFXGLBImporter::KEY_SCENE];
+    if (!imported_scene.is_valid() || imported_scene->get_root().is_null()) {
+        UtilityFunctions::print("GLB import returned no scene");
+        return false;
+    }
+
+    return merge_scene(imported_scene, parent, transform);
+}
+
+// ============================================================================
+// NEW: Merge another VFXScene into this one
+// ============================================================================
+bool VFXScene::merge_scene(const Ref<VFXScene>& other,
+                           const Ref<VFXSceneNode>& parent,
+                           const Transform3D& transform) {
+    if (other.is_null() || other->get_root().is_null()) return false;
+    if (root.is_null()) create_default_root();
+
+    Ref<VFXSceneNode> target = parent.is_valid() ? parent : root;
+
+    // Clone each top-level child from the other scene's root
+    Array other_children = other->get_root()->get_children();
+    for (int i = 0; i < other_children.size(); i++) {
+        Ref<VFXSceneNode> node = other_children[i];
+        if (node.is_null()) continue;
+
+        Ref<VFXSceneNode> cloned = _clone_node_recursive(node);
+        if (cloned.is_null()) continue;
+
+        // Apply offset transform to the root of the cloned tree
+        if (transform != Transform3D()) {
+            cloned->set_local_transform(transform * cloned->get_local_transform());
+        }
+
+        // Ensure unique name
+        String name = cloned->get_node_name();
+        ensure_unique_name(name);
+        cloned->set_node_name(name);
+
+        // Reassign IDs so they don't collide
+        _reassign_ids_recursive(cloned);
+
+        target->add_child(cloned);
+    }
+
+    return true;
+}
+
+// ============================================================================
+// NEW: Deep-clone a node subtree (shares mesh/skel refs, clones hierarchy)
+// ============================================================================
+Ref<VFXSceneNode> VFXScene::_clone_node_recursive(const Ref<VFXSceneNode>& source) const {
+    if (source.is_null()) return Ref<VFXSceneNode>();
+
+    Ref<VFXSceneNode> clone;
+    clone.instantiate();
+    clone->set_node_name(source->get_node_name());
+    clone->set_node_type(source->get_node_type());
+    clone->set_local_transform(source->get_local_transform());
+    clone->set_visible(source->get_visible());
+    clone->set_expanded(source->get_expanded());
+    clone->set_selected(source->get_selected());
+
+    // Share component refs (memory-efficient: same mesh data, different node)
+    if (source->has_mesh())      clone->set_mesh(source->get_mesh());
+    if (source->has_skeleton())  clone->set_skeleton(source->get_skeleton());
+    if (source->has_skin())      clone->set_skin(source->get_skin());
+    if (source->has_animator())  clone->set_animator(source->get_animator());
+
+    // Recurse children
+    Array children = source->get_children();
+    for (int i = 0; i < children.size(); i++) {
+        Ref<VFXSceneNode> child = children[i];
+        Ref<VFXSceneNode> child_clone = _clone_node_recursive(child);
+        if (child_clone.is_valid()) {
+            clone->add_child(child_clone);
+        }
+    }
+
+    return clone;
+}
+
+void VFXScene::_reassign_ids_recursive(const Ref<VFXSceneNode>& node) {
+    if (node.is_null()) return;
+    node->set_node_id(get_unique_id());
+    Array children = node->get_children();
+    for (int i = 0; i < children.size(); i++) {
+        Ref<VFXSceneNode> child = children[i];
+        _reassign_ids_recursive(child);
+    }
+}
+
+// ============================================================================
+// NEW: Name uniqueness (Blender-style .001, .002 suffixes)
+// ============================================================================
+void VFXScene::ensure_unique_name(String& name) const {
+    if (root.is_null()) return;
+    if (!_name_exists_recursive(root, name)) return;
+
+    String base = name;
+    int start_num = 1;
+
+    int dot_pos = base.rfind(".");
+    if (dot_pos > 0) {
+        String suffix = base.substr(dot_pos + 1);
+        bool all_digits = true;
+        for (int i = 0; i < suffix.length(); i++) {
+            if (!suffix[i].is_digit()) { all_digits = false; break; }
+        }
+        if (all_digits && suffix.length() > 0) {
+            base = base.substr(0, dot_pos);
+            start_num = suffix.to_int() + 1;
+        }
+    }
+
+    for (int n = start_num; n < 9999; n++) {
+        String candidate = base + "." + String::num_int64(n).pad_zeros(3);
+        if (!_name_exists_recursive(root, candidate)) {
+            name = candidate;
+            return;
+        }
+    }
+}
+
+bool VFXScene::_name_exists_recursive(const Ref<VFXSceneNode>& node, const String& name) const {
+    if (node.is_null()) return false;
+    if (node->get_node_name() == name) return true;
+    Array children = node->get_children();
+    for (int i = 0; i < children.size(); i++) {
+        Ref<VFXSceneNode> child = children[i];
+        if (_name_exists_recursive(child, name)) return true;
+    }
+    return false;
+}
+
+int VFXScene::get_node_count() const {
+    if (root.is_null()) return 0;
+    int count = 1;
+    Array all = root->get_all_descendants();
+    count += all.size();
+    return count;
+}
+
 Ref<VFXSceneNode> VFXScene::find_node_by_name(const String& name) const {
     if (root.is_valid()) {
         if (root->get_node_name() == name) return root;
@@ -195,7 +360,8 @@ int VFXScene::get_unique_id() { return node_counter++; }
 
 PackedByteArray VFXScene::serialize() const {
     PackedByteArray data;
-    data.append(0x56); data.append(0x53); data.append(0x43); // VSC
+    data.append(0x56); data.append(0x53); data.append(0x43);
     return data;
 }
+
 void VFXScene::deserialize(const PackedByteArray& data) {}
