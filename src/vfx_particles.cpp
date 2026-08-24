@@ -300,7 +300,7 @@ void VFXParticles3D::_emit(int count, const Vector3& pos, const Vector3& normal)
 		p.velocity = dir * speed;
 
 		p.acceleration = Vector3(0, 0, 0);
-		p.color = color_ramp.is_valid() ? color_ramp->get_color(0.0f) : Color(1, 1, 1, 1);
+		p.color = color_ramp.is_valid() ? color_ramp->sample(0.0f) : Color(1, 1, 1, 1);
 		p.size = vfx::lerp(scale_amount_min, scale_amount_max, UtilityFunctions::randf());
 		p.rotation = 0.0f;
 
@@ -410,7 +410,7 @@ void VFXParticles3D::_rebuild_mesh_billboard() {
 		float life_t = (p.lifetime > 0.0f) ? vfx::clampf(p.age / p.lifetime, 0.0f, 1.0f) : 0.0f;
 		Color col = p.color;
 		if (color_ramp.is_valid()) {
-			col = color_ramp->get_color(life_t);
+			col = color_ramp->sample(life_t);
 		}
 		float sz = p.size;
 		if (scale_curve.is_valid()) {
@@ -496,7 +496,7 @@ void VFXParticles3D::_rebuild_mesh_custom() {
 		float life_t = (p.lifetime > 0.0f) ? vfx::clampf(p.age / p.lifetime, 0.0f, 1.0f) : 0.0f;
 		Color col = p.color;
 		if (color_ramp.is_valid()) {
-			col = color_ramp->get_color(life_t);
+			col = color_ramp->sample(life_t);
 		}
 		float sz = p.size;
 		if (scale_curve.is_valid()) {
