@@ -65,7 +65,7 @@ private:
     void _sync_expansion_to_scene();
     void _reparent_item(TreeItem* item, TreeItem* new_parent);
 
-    Ref<VFXSceneNode> _get_node_for_item(TreeItem* item) const;
+    Ref<VFXSceneNode> _get_node_for_item(TreeItem* item);  // was: ... const;
     TreeItem* _get_item_for_node(int node_id) const;
 
 protected:
