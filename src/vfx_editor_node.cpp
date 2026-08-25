@@ -358,6 +358,10 @@ Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
 // ============================================================================
 void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
+    if (gizmo_locked) {
+        gizmo_node->set_visible(false);
+        return;
+    }
     bool show = false;
     if (edit_mode == MODE_OBJECT) {
         if (active_scene_node.is_valid()) {
@@ -370,6 +374,7 @@ void VFXEditorNode::_update_gizmo_visibility() {
     }
     gizmo_node->set_visible(show);
 }
+
 
 // ============================================================================
 // MESH / SKELETON / SKIN / ANIMATOR
@@ -976,7 +981,7 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos) {
     // === SCENE MODE (OBJECT-level selection) ===
     if (scene.is_valid() && edit_mode == MODE_OBJECT) {
-        if (active_scene_node.is_valid() && gizmo_node && gizmo_node->is_visible()) {
+        if (!gizmo_locked && active_scene_node.is_valid() && gizmo_node && gizmo_node->is_visible()) {
             int axis;
             if (camera && screen_pos.x >= 0.0f)
                 axis = screen_raycast_gizmo(screen_pos);
@@ -1001,7 +1006,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
 
     // === MESH EDIT MODE ===
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        if ((selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
+        if (!gizmo_locked && (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
             int axis;
             if (camera && screen_pos.x >= 0.0f)
                 axis = screen_raycast_gizmo(screen_pos);
@@ -1043,7 +1048,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
 
     // === SKELETON MODE ===
     if (show_skeleton) {
-        if (skeleton.is_valid() && selected_bone >= 0) {
+        if (!gizmo_locked && skeleton.is_valid() && selected_bone >= 0) {
             int axis;
             if (camera && screen_pos.x >= 0.0f)
                 axis = screen_raycast_gizmo(screen_pos);
@@ -1065,6 +1070,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
     }
     return -1;
 }
+
 
 void VFXEditorNode::on_touch_up() {
     if (is_gizmo_dragging()) {
