@@ -76,6 +76,10 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("gizmo_drag", "ray_origin", "ray_dir"), &VFXEditorNode::gizmo_drag);
     ClassDB::bind_method(D_METHOD("gizmo_end_drag"), &VFXEditorNode::gizmo_end_drag);
     ClassDB::bind_method(D_METHOD("is_gizmo_dragging"), &VFXEditorNode::is_gizmo_dragging);
+    ClassDB::bind_method(D_METHOD("set_gizmo_locked", "locked"), &VFXEditorNode::set_gizmo_locked);
+    ClassDB::bind_method(D_METHOD("get_gizmo_locked"), &VFXEditorNode::get_gizmo_locked);
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gizmo_locked"), "set_gizmo_locked", "get_gizmo_locked");
+    
 
     ClassDB::bind_method(D_METHOD("set_selected_bone", "idx"), &VFXEditorNode::set_selected_bone);
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
@@ -253,6 +257,17 @@ void VFXEditorNode::_notification(int p_what) {
             selection_visual->set_visible(false);
         }
     }
+}
+
+
+
+
+void VFXEditorNode::set_gizmo_locked(bool locked) {
+    gizmo_locked = locked;
+    _update_gizmo_visibility();
+}
+bool VFXEditorNode::get_gizmo_locked() const {
+    return gizmo_locked;
 }
 
 // ============================================================================
