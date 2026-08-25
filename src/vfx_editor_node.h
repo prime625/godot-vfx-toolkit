@@ -359,6 +359,8 @@ public:
     Ref<VFXSceneNode> get_active_scene_node() const;
     bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent);
     Ref<VFXSceneNode> raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir);
+    void refresh_scene();
+
 
     // === UNIFIED TOUCH ===
     int on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos);
