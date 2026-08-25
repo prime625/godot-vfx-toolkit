@@ -202,6 +202,18 @@ int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_
 // GIZMO PLACEMENT FOR SELECTION
 // ============================================================================
 void VFXEditorNode::_update_gizmo_for_selection() {
+    // Scene node: gizmo follows the node's global transform
+    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
+        gizmo_transform = active_scene_node->get_global_transform();
+        if (gizmo_node) {
+            gizmo_node->set_transform(_get_visual_gizmo_transform());
+            gizmo_node->set_visible(true);
+            _build_gizmo_mesh();
+        }
+        _update_proportional_cursor();
+        return;
+    }
+
     Vector3 center;
     int count = 0;
 
@@ -243,6 +255,7 @@ void VFXEditorNode::_update_gizmo_for_selection() {
     _update_gizmo_visibility();
     _update_proportional_cursor();
 }
+
 
 // ============================================================================
 // BONE PICKING
