@@ -214,6 +214,7 @@ VFXEditorNode::~VFXEditorNode() {}
 
 void VFXEditorNode::_notification(int p_what) {
     if (p_what == NOTIFICATION_ENTER_TREE) {
+        set_process(true);
         _ensure_mesh_instance();
         _ensure_brush_cursor();
         _ensure_gizmo_node();
