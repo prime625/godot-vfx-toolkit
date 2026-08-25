@@ -116,6 +116,7 @@ private:
     bool auto_update = true;
     bool show_wireframe = false;
     bool symmetry_enabled = false;
+    bool gizmo_locked = false;   // <-- NEW: prevents gizmo from intercepting paint clicks
     int visualize_bone = -1;
     int symmetry_axis = 0; // 0=x, 1=y, 2=z
     int edit_mode = MODE_OBJECT;
@@ -285,6 +286,10 @@ public:
     void gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir);
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
+
+    // === GIZMO LOCK (NEW) ===
+    void set_gizmo_locked(bool locked);
+    bool get_gizmo_locked() const;
 
     // === BONE ===
     void set_selected_bone(int idx);
