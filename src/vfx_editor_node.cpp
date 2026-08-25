@@ -17,6 +17,7 @@ using namespace godot;
 // BINDINGS
 // ============================================================================
 void VFXEditorNode::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("refresh_scene"), &VFXEditorNode::refresh_scene);
     ClassDB::bind_method(D_METHOD("set_vfx_mesh", "mesh"), &VFXEditorNode::set_vfx_mesh);
     ClassDB::bind_method(D_METHOD("get_vfx_mesh"), &VFXEditorNode::get_vfx_mesh);
     ClassDB::bind_method(D_METHOD("refresh_mesh"), &VFXEditorNode::refresh_mesh);
@@ -1086,6 +1087,10 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
     return -1;
 }
 
+
+void VFXEditorNode::refresh_scene() {
+    mark_scene_dirty();
+}
 
 void VFXEditorNode::on_touch_up() {
     if (is_gizmo_dragging()) {
