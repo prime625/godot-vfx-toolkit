@@ -18,6 +18,9 @@ void VFXSceneTreePanel::_bind_methods() {
     ADD_SIGNAL(MethodInfo("node_selected", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("node_activated", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_reparented"));
+    ADD_SIGNAL(MethodInfo("node_visibility_changed",
+    PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
+    
 }
 
 VFXSceneTreePanel::VFXSceneTreePanel() {}
@@ -301,6 +304,7 @@ void VFXSceneTreePanel::_on_tree_button_clicked(TreeItem* item, int column, int 
     // Update button
     item->erase_button(column, 0);
     item->add_button(column, new_vis ? icon_visible : icon_hidden, new_vis ? 0 : 1, false, new_vis ? "Hide" : "Show");
+    emit_signal("node_visibility_changed", node);
 }
 
 void VFXSceneTreePanel::_on_tree_item_collapsed(TreeItem* item) {
