@@ -207,7 +207,7 @@ void VFXSceneTreePanel::_build_tree_recursive(TreeItem* parent_item, const Ref<V
         TreeItem* item = tree->create_item(parent_item);
         item->set_text(0, child->get_node_name());
         item->set_icon(0, _get_icon_for_type(child->get_node_type()));
-        item->set_metadata(0, child->get_node_id());
+       	item->set_metadata(0, child);  // Store the node object directly
         item->set_editable(0, true);
         item->set_selectable(0, true);
         item->set_collapsed(!child->get_expanded());
@@ -228,15 +228,25 @@ void VFXSceneTreePanel::_build_tree_recursive(TreeItem* parent_item, const Ref<V
     }
 }
 
-Ref<VFXSceneNode> VFXSceneTreePanel::_get_node_for_item(TreeItem* item) const {
-    if (!scene.is_valid() || !item) return Ref<VFXSceneNode>();
+Ref<VFXSceneNode> VFXSceneTreePanel::_get_node_for_item(TreeItem* item) {
+    if (!item) return Ref<VFXSceneNode>();
+    
+    // Read node directly from metadata
+    Variant meta = item->get_metadata(0);
+    if (meta.get_type() == Variant::OBJECT) {
+        Ref<VFXSceneNode> node = meta;
+        if (node.is_valid()) return node;
+    }
+    
+    // Fallback to ID map
+    if (!scene.is_valid()) return Ref<VFXSceneNode>();
     auto it = item_to_node.find(item);
     if (it == item_to_node.end()) return Ref<VFXSceneNode>();
-    // find_node_by_id is on VFXSceneNode, not VFXScene — traverse from root
     Ref<VFXSceneNode> root = scene->get_root();
     if (root.is_null()) return Ref<VFXSceneNode>();
     return root->find_node_by_id(it->second);
 }
+
 
 TreeItem* VFXSceneTreePanel::_get_item_for_node(int node_id) const {
     auto it = node_to_item.find(node_id);
