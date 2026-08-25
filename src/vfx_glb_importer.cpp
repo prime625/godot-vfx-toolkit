@@ -152,10 +152,17 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
         }
     }
 
-    // If no scene nodes were attached, attach all orphan nodes
-    if (scene->get_root()->get_child_count() == 0) {
-        for (int i = 0; i < (int)nodes.size(); i++) {
-            if (nodes[i].parent < 0) {
+    // Ensure ALL orphan nodes are attached (not just scene_nodes)
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        if (nodes[i].parent < 0) {
+            bool already_child = false;
+            for (int j = 0; j < scene->get_root()->get_child_count(); j++) {
+                if (scene->get_root()->get_child(j) == vfx_nodes[i]) {
+                    already_child = true;
+                    break;
+                }
+            }
+            if (!already_child) {
                 scene->get_root()->add_child(vfx_nodes[i]);
             }
         }
