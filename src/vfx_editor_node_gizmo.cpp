@@ -440,6 +440,13 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         return;
     }
 
+    // === SCENE NODE TRANSFORM (NEW) ===
+    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
+        active_scene_node->set_local_transform(gizmo_transform);
+        mark_scene_dirty();
+        return;
+    }
+
     // Apply to bone with symmetry
     if (selected_bone >= 0 && skeleton.is_valid()) {
         int parent = skeleton->get_bone_parent(selected_bone);
@@ -479,6 +486,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         _update_godot_mesh();
     }
 }
+
 
 void VFXEditorNode::gizmo_end_drag() {
     gizmo_drag_axis = GIZMO_NONE;
