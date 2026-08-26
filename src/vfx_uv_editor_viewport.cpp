@@ -94,7 +94,6 @@ Vector2 VFXUVEditorViewport::uv_to_screen(const Vector2& p_uv) const {
 // INPUT
 // ============================================================================
 void VFXUVEditorViewport::_gui_input(const Ref<InputEvent>& p_event) {
-    // Guard: ignore emulated mouse-from-touch while real touches are active
     Ref<InputEventMouseButton> mb = p_event;
     if (mb.is_valid()) {
         if (mb->get_button_index() == MOUSE_BUTTON_LEFT && !_touches.empty())
@@ -104,7 +103,6 @@ void VFXUVEditorViewport::_gui_input(const Ref<InputEvent>& p_event) {
     if (mm.is_valid() && !_touches.empty())
         return;
 
-    // MOUSE (desktop)
     if (mb.is_valid()) {
         if (mb->get_button_index() == MOUSE_BUTTON_WHEEL_UP && mb->is_pressed()) {
             _zoom_at(mb->get_position(), 1.15f);
@@ -133,7 +131,6 @@ void VFXUVEditorViewport::_gui_input(const Ref<InputEvent>& p_event) {
         }
     }
 
-    // TOUCH (mobile)
     Ref<InputEventScreenTouch> st = p_event;
     if (st.is_valid()) {
         if (st->is_pressed()) {
@@ -389,107 +386,7 @@ void VFXUVEditorViewport::_rebuild_cache() {
 }
 
 // ============================================================================
-// DRAWING
-// ============================================================================
-void VFXUVEditorViewport::_draw() {
-    draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.08f, 1.0f));
-
-    if (uv_editor.is_null() || uv_editor->get_mesh().is_null()) {
-        Ref<Font> font = get_theme_default_font();
-        if (font.is_valid()) {
-            draw_string(font, Vector2(20, 32), "No mesh assigned",
-                HORIZONTAL_ALIGNMENT_LEFT, -1.0f, 16, Color(0.7f, 0.7f, 0.7f));
-        }
-        return;
-    }
-
-    _draw_uv_grid();
-
-    if (_cache_dirty) {
-        _rebuild_cache();
-    }
-
-    Rect2 screen_rect(Vector2(), get_size());
-    PackedInt32Array sel_faces = uv_editor->get_selected_faces();
-
-    // 1. Face fills
-    for (int i = 0; i < _cached_faces.size(); i++) {
-        const CachedFace& cf = _cached_faces[i];
-        if (!screen_rect.intersects(cf.bounds)) continue;
-
-        bool is_sel = false;
-        for (int j = 0; j < sel_faces.size(); j++) {
-            if (sel_faces[j] == i) {
-                is_sel = true;
-                break;
-            }
-        }
-        Color fill = is_sel ? Color(0.22f, 0.17f, 0.12f, 0.90f) : Color(0.16f, 0.14f, 0.12f, 0.85f);
-        draw_colored_polygon(cf.screen_poly, fill);
-    }
-
-    // 2. Wireframe (batched per color)
-    PackedVector2Array sel_lines;
-    PackedVector2Array unsel_lines;
-    for (int i = 0; i < _cached_faces.size(); i++) {
-        const CachedFace& cf = _cached_faces[i];
-        if (!screen_rect.intersects(cf.bounds)) continue;
-
-        bool is_sel = false;
-        for (int j = 0; j < sel_faces.size(); j++) {
-            if (sel_faces[j] == i) {
-                is_sel = true;
-                break;
-            }
-        }
-        const PackedVector2Array& sp = cf.screen_poly;
-        int n = sp.size();
-        for (int j = 0; j < n; j++) {
-            Vector2 a = sp[j];
-            Vector2 b = sp[(j + 1) % n];
-            if (is_sel) {
-                sel_lines.push_back(a);
-                sel_lines.push_back(b);
-            } else {
-                unsel_lines.push_back(a);
-                unsel_lines.push_back(b);
-            }
-        }
-    }
-
-    for (int i = 0; i < sel_lines.size(); i += 2) {
-        draw_line(sel_lines[i], sel_lines[i + 1], Color(1.0f, 0.45f, 0.08f), 1.2f);
-    }
-    for (int i = 0; i < unsel_lines.size(); i += 2) {
-        draw_line(unsel_lines[i], unsel_lines[i + 1], Color(0.45f, 0.45f, 0.50f), 0.8f);
-    }
-
-    // 3. Face-center dots
-    if (select_mode == VFXUVEditor::UV_SELECT_FACE) {
-        for (int i = 0; i < _cached_faces.size(); i++) {
-            const CachedFace& cf = _cached_faces[i];
-            if (!screen_rect.intersects(cf.bounds)) continue;
-
-            bool is_sel = false;
-            for (int j = 0; j < sel_faces.size(); j++) {
-                if (sel_faces[j] == i) {
-                    is_sel = true;
-                    break;
-                }
-            }
-            Color dot_col = is_sel ? Color(1.0f, 0.45f, 0.08f) : Color(0.35f, 0.35f, 0.40f);
-            draw_circle(cf.center, 2.2f, dot_col);
-        }
-    }
-
-    // 4. Vertices
-    if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
-        int vc = uv_editor->get_uv_vert_count();
-        for (int i = 0; i < vc; i++) {
-            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(i));
-            if (uv_editor->is_uv_selected(i)) {
-// ============================================================================
-// BATCHED DRAWING HELPERS
+// BATCHED DRAWING HELPER
 // ============================================================================
 static void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
                                const Vector2& center, float radius, int segments,
@@ -753,60 +650,50 @@ void VFXUVEditorViewport::_draw_uv_grid() {
         draw_multiline_colors(grid_lines, grid_colors, 1.0f);
 }
 
-
 // ============================================================================
 // GIZMO
 // ============================================================================
 void VFXUVEditorViewport::_draw_gizmo() {
-    Vector2 pivot = uv_to_screen(_transform_pivot);
-    float s = 60.0f;
-    Ref<Font> font = get_theme_default_font();
+    PackedInt32Array sel = uv_editor->get_selected_verts();
+    if (sel.size() == 0) return;
 
-    switch (current_tool) {
-        case TOOL_TRANSLATE: {
-            draw_line(pivot, pivot + Vector2(s, 0), Color(0.85f, 0.20f, 0.20f), 2.0f);
-            _draw_arrowhead(pivot + Vector2(s, 0), Vector2(1, 0), 8, Color(0.85f, 0.20f, 0.20f));
-            draw_line(pivot, pivot + Vector2(0, -s), Color(0.20f, 0.85f, 0.20f), 2.0f);
-            _draw_arrowhead(pivot + Vector2(0, -s), Vector2(0, -1), 8, Color(0.20f, 0.85f, 0.20f));
+    Vector2 center;
+    for (int i = 0; i < sel.size(); i++) {
+        center += uv_editor->get_uv_vert(sel[i]);
+    }
+    center /= (float)sel.size();
+    Vector2 sc = uv_to_screen(center);
 
-            Vector2 c = pivot + Vector2(s * 0.2f, -s * 0.2f);
-            draw_rect(Rect2(c, Vector2(s * 0.15f, -s * 0.15f)), Color(0.9f, 0.9f, 0.20f, 0.25f), true);
-            draw_rect(Rect2(c, Vector2(s * 0.15f, -s * 0.15f)), Color(0.9f, 0.9f, 0.20f), false, 1.0f);
+    float len = 40.0f;
+    Color xcol(0.9f, 0.3f, 0.2f);
+    Color ycol(0.3f, 0.8f, 0.3f);
 
-            if (font.is_valid()) {
-                draw_string(font, pivot + Vector2(s + 6, 4), "X",
-                    HORIZONTAL_ALIGNMENT_LEFT, -1.0f, 13, Color(0.85f, 0.20f, 0.20f));
-                draw_string(font, pivot + Vector2(4, -s - 4), "Y",
-                    HORIZONTAL_ALIGNMENT_LEFT, -1.0f, 13, Color(0.20f, 0.85f, 0.20f));
-            }
-            break;
+    if (current_tool == TOOL_TRANSLATE || current_tool == TOOL_SCALE) {
+        draw_line(sc, sc + Vector2(len, 0), xcol, 2.0f);
+        draw_line(sc, sc + Vector2(0, -len), ycol, 2.0f);
+        _draw_arrowhead(sc + Vector2(len, 0), Vector2(1, 0), 8.0f, xcol);
+        _draw_arrowhead(sc + Vector2(0, -len), Vector2(0, -1), 8.0f, ycol);
+    } else if (current_tool == TOOL_ROTATE) {
+        float r = 28.0f;
+        int segs = 24;
+        float step = 6.283185307179586f / segs;
+        for (int i = 0; i < segs; i++) {
+            float a0 = i * step;
+            float a1 = ((i + 1) % segs) * step;
+            Vector2 p0 = sc + Vector2(cosf(a0), sinf(a0)) * r;
+            Vector2 p1 = sc + Vector2(cosf(a1), sinf(a1)) * r;
+            draw_line(p0, p1, Color(0.5f, 0.7f, 1.0f), 2.0f);
         }
-        case TOOL_ROTATE: {
-            draw_arc(pivot, s * 0.5f, 0.0f, 6.283185307179586f, 64, Color(0.20f, 0.70f, 0.90f), 2.0f);
-            draw_line(pivot, pivot + Vector2(s * 0.5f, 0), Color(0.20f, 0.70f, 0.90f), 2.0f);
-            break;
-        }
-        case TOOL_SCALE: {
-            draw_line(pivot, pivot + Vector2(s, 0), Color(0.85f, 0.20f, 0.20f), 2.0f);
-            draw_rect(Rect2(pivot + Vector2(s - 3, -3), Vector2(6, 6)), Color(0.85f, 0.20f, 0.20f));
-            draw_line(pivot, pivot + Vector2(0, -s), Color(0.20f, 0.85f, 0.20f), 2.0f);
-            draw_rect(Rect2(pivot + Vector2(-3, -s - 3), Vector2(6, 6)), Color(0.20f, 0.85f, 0.20f));
-            draw_rect(Rect2(pivot - Vector2(3, 3), Vector2(6, 6)), Color(1, 1, 1));
-            break;
-        }
-        default:
-            break;
+        Vector2 tip = sc + Vector2(1, 0) * r;
+        draw_line(sc, tip, Color(0.5f, 0.7f, 1.0f), 2.0f);
+        _draw_arrowhead(tip, Vector2(1, 0), 8.0f, Color(0.5f, 0.7f, 1.0f));
     }
 }
 
 void VFXUVEditorViewport::_draw_arrowhead(const Vector2& p_pos, const Vector2& p_dir, float p_size, const Color& p_color) {
-    Vector2 n = p_dir.orthogonal();
-    Vector2 p0 = p_pos;
-    Vector2 p1 = p_pos - p_dir * p_size + n * p_size * 0.5f;
-    Vector2 p2 = p_pos - p_dir * p_size - n * p_size * 0.5f;
-    PackedVector2Array pts;
-    pts.push_back(p0);
-    pts.push_back(p1);
-    pts.push_back(p2);
-    draw_colored_polygon(pts, p_color);
+    Vector2 perp(-p_dir.y, p_dir.x);
+    Vector2 a = p_pos - p_dir * p_size + perp * (p_size * 0.5f);
+    Vector2 b = p_pos - p_dir * p_size - perp * (p_size * 0.5f);
+    draw_line(p_pos, a, p_color, 2.0f);
+    draw_line(p_pos, b, p_color, 2.0f);
 }
