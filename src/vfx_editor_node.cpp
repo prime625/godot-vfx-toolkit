@@ -25,6 +25,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_vfx_skeleton", "sk"), &VFXEditorNode::set_vfx_skeleton);
     ClassDB::bind_method(D_METHOD("get_vfx_skeleton"), &VFXEditorNode::get_vfx_skeleton);
     ClassDB::bind_method(D_METHOD("create_mixamo_skeleton"), &VFXEditorNode::create_mixamo_skeleton);
+	ClassDB::bind_method(D_METHOD("set_gizmo_screen_scale", "scale"), &VFXEditorNode::set_gizmo_screen_scale);
+	ClassDB::bind_method(D_METHOD("get_gizmo_screen_scale"), &VFXEditorNode::get_gizmo_screen_scale);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_screen_scale"), "set_gizmo_screen_scale", "get_gizmo_screen_scale");
 
     ClassDB::bind_method(D_METHOD("set_vfx_skin", "skin"), &VFXEditorNode::set_vfx_skin);
     ClassDB::bind_method(D_METHOD("get_vfx_skin"), &VFXEditorNode::get_vfx_skin);
@@ -1104,3 +1107,13 @@ void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_
         gizmo_drag(ray_origin, ray_dir);
     }
 }
+
+
+void VFXEditorNode::set_gizmo_screen_scale(float scale) {
+    gizmo_screen_scale = scale;
+    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+}
+float VFXEditorNode::get_gizmo_screen_scale() const {
+    return gizmo_screen_scale;
+}
+
