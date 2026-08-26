@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
 #include <algorithm>
+#include <unordered_set>
 
 using namespace godot;
 
@@ -73,6 +74,7 @@ int VFXUVEditorViewport::get_current_tool() const {
 
 void VFXUVEditorViewport::set_select_mode(int p_mode) {
     select_mode = p_mode;
+    _request_cache_rebuild();
 }
 
 int VFXUVEditorViewport::get_select_mode() const {
@@ -334,7 +336,7 @@ void VFXUVEditorViewport::_zoom_at(const Vector2& p_screen_pos, float p_factor) 
     zoom = vfx::clampf(zoom, 16.0f, 8192.0f);
     Vector2 uv_after = screen_to_uv(p_screen_pos);
     pan_offset += uv_before - uv_after;
-    queue_redraw();
+    _request_cache_rebuild();
 }
 
 void VFXUVEditorViewport::_cancel_single_touch_actions() {
@@ -386,6 +388,91 @@ void VFXUVEditorViewport::_rebuild_cache() {
 }
 
 // ============================================================================
+// DRAW DATA CACHE — rebuilt only when _cache_dirty
+// ============================================================================
+void VFXUVEditorViewport::_rebuild_draw_data() {
+    _cached_sel_lines.clear();
+    _cached_sel_colors.clear();
+    _cached_unsel_lines.clear();
+    _cached_unsel_colors.clear();
+    _cached_face_dots.clear();
+    _cached_face_dot_colors.clear();
+    _cached_vert_dots.clear();
+    _cached_vert_dot_colors.clear();
+    _cached_vert_rings.clear();
+    _cached_vert_ring_colors.clear();
+    _cached_sel_face_set.clear();
+
+    Rect2 screen_rect(Vector2(), get_size());
+    PackedInt32Array sel_faces = uv_editor->get_selected_faces();
+
+    // O(1) selected-face lookup
+    for (int i = 0; i < sel_faces.size(); i++) {
+        _cached_sel_face_set.insert(sel_faces[i]);
+    }
+
+    // Wireframe
+    for (int i = 0; i < _cached_faces.size(); i++) {
+        const CachedFace& cf = _cached_faces[i];
+        if (!screen_rect.intersects(cf.bounds)) continue;
+
+        bool is_sel = _cached_sel_face_set.count(i) > 0;
+        const PackedVector2Array& sp = cf.screen_poly;
+        int n = sp.size();
+        for (int j = 0; j < n; j++) {
+            Vector2 a = sp[j];
+            Vector2 b = sp[(j + 1) % n];
+            if (is_sel) {
+                _cached_sel_lines.push_back(a);
+                _cached_sel_lines.push_back(b);
+                _cached_sel_colors.push_back(Color(1.0f, 0.45f, 0.08f));
+            } else {
+                _cached_unsel_lines.push_back(a);
+                _cached_unsel_lines.push_back(b);
+                _cached_unsel_colors.push_back(Color(0.45f, 0.45f, 0.50f));
+            }
+        }
+    }
+
+    // Face-center dots
+    if (select_mode == VFXUVEditor::UV_SELECT_FACE) {
+        for (int i = 0; i < _cached_faces.size(); i++) {
+            const CachedFace& cf = _cached_faces[i];
+            if (!screen_rect.intersects(cf.bounds)) continue;
+            bool is_sel = _cached_sel_face_set.count(i) > 0;
+            _cached_face_dots.push_back(cf.center);
+            _cached_face_dot_colors.push_back(is_sel ? Color(1.0f, 0.45f, 0.08f) : Color(0.35f, 0.35f, 0.40f));
+        }
+    }
+
+    // Vertices
+    if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
+        int vc = uv_editor->get_uv_vert_count();
+        for (int i = 0; i < vc; i++) {
+            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(i));
+            if (uv_editor->is_uv_selected(i)) {
+                _cached_vert_dots.push_back(pos);
+                _cached_vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
+                _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
+            } else {
+                _cached_vert_dots.push_back(pos);
+                _cached_vert_dot_colors.push_back(Color(0.18f, 0.18f, 0.22f));
+                _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 4.0f, 12, Color(0.50f, 0.50f, 0.55f));
+            }
+        }
+    } else {
+        PackedInt32Array sel = uv_editor->get_selected_verts();
+        for (int i = 0; i < sel.size(); i++) {
+            int idx = sel[i];
+            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(idx));
+            _cached_vert_dots.push_back(pos);
+            _cached_vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
+            _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
+        }
+    }
+}
+
+// ============================================================================
 // BATCHED DRAWING HELPER
 // ============================================================================
 void VFXUVEditorViewport::_batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
@@ -402,7 +489,7 @@ void VFXUVEditorViewport::_batch_arc_outline(PackedVector2Array& r_lines, Packed
 }
 
 // ============================================================================
-// DRAWING (OPTIMIZED)
+// DRAWING (OPTIMIZED — cached batched arrays)
 // ============================================================================
 void VFXUVEditorViewport::_draw() {
     draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.08f, 1.0f));
@@ -420,123 +507,44 @@ void VFXUVEditorViewport::_draw() {
 
     if (_cache_dirty) {
         _rebuild_cache();
+        _rebuild_draw_data();
     }
 
     Rect2 screen_rect(Vector2(), get_size());
-    PackedInt32Array sel_faces = uv_editor->get_selected_faces();
 
-    // 1. Face fills
+    // 1. Face fills — still iterate faces (draw_colored_polygon can't be batched),
+    //    but O(1) selection lookup now
     for (int i = 0; i < _cached_faces.size(); i++) {
         const CachedFace& cf = _cached_faces[i];
         if (!screen_rect.intersects(cf.bounds)) continue;
-
-        bool is_sel = false;
-        for (int j = 0; j < sel_faces.size(); j++) {
-            if (sel_faces[j] == i) { is_sel = true; break; }
-        }
+        bool is_sel = _cached_sel_face_set.count(i) > 0;
         Color fill = is_sel ? Color(0.22f, 0.17f, 0.12f, 0.90f) : Color(0.16f, 0.14f, 0.12f, 0.85f);
         draw_colored_polygon(cf.screen_poly, fill);
     }
 
-    // 2. Wireframe — BATCHED into 2 draw calls
-    PackedVector2Array sel_lines;
-    PackedColorArray sel_line_colors;
-    PackedVector2Array unsel_lines;
-    PackedColorArray unsel_line_colors;
+    // 2. Wireframe — cached arrays, zero allocation during drag
+    if (_cached_sel_lines.size() > 0)
+        draw_multiline_colors(_cached_sel_lines, _cached_sel_colors, 1.2f);
+    if (_cached_unsel_lines.size() > 0)
+        draw_multiline_colors(_cached_unsel_lines, _cached_unsel_colors, 0.8f);
 
-    for (int i = 0; i < _cached_faces.size(); i++) {
-        const CachedFace& cf = _cached_faces[i];
-        if (!screen_rect.intersects(cf.bounds)) continue;
-
-        bool is_sel = false;
-        for (int j = 0; j < sel_faces.size(); j++) {
-            if (sel_faces[j] == i) { is_sel = true; break; }
-        }
-        const PackedVector2Array& sp = cf.screen_poly;
-        int n = sp.size();
-        for (int j = 0; j < n; j++) {
-            Vector2 a = sp[j];
-            Vector2 b = sp[(j + 1) % n];
-            if (is_sel) {
-                sel_lines.push_back(a);
-                sel_lines.push_back(b);
-                sel_line_colors.push_back(Color(1.0f, 0.45f, 0.08f));
-            } else {
-                unsel_lines.push_back(a);
-                unsel_lines.push_back(b);
-                unsel_line_colors.push_back(Color(0.45f, 0.45f, 0.50f));
-            }
-        }
-    }
-
-    if (sel_lines.size() > 0)
-        draw_multiline_colors(sel_lines, sel_line_colors, 1.2f);
-    if (unsel_lines.size() > 0)
-        draw_multiline_colors(unsel_lines, unsel_line_colors, 0.8f);
-
-    // 3. Face-center dots — BATCHED
+    // 3. Face-center dots — cached
     if (select_mode == VFXUVEditor::UV_SELECT_FACE) {
-        PackedVector2Array face_dots;
-        PackedColorArray face_dot_colors;
-        for (int i = 0; i < _cached_faces.size(); i++) {
-            const CachedFace& cf = _cached_faces[i];
-            if (!screen_rect.intersects(cf.bounds)) continue;
-
-            bool is_sel = false;
-            for (int j = 0; j < sel_faces.size(); j++) {
-                if (sel_faces[j] == i) { is_sel = true; break; }
-            }
-            face_dots.push_back(cf.center);
-            face_dot_colors.push_back(is_sel ? Color(1.0f, 0.45f, 0.08f) : Color(0.35f, 0.35f, 0.40f));
-        }
-        if (face_dots.size() > 0)
-            draw_primitive(face_dots, face_dot_colors, PackedVector2Array());
+        if (_cached_face_dots.size() > 0)
+            draw_primitive(_cached_face_dots, _cached_face_dot_colors, PackedVector2Array());
     }
 
-    // 4. Vertices — BATCHED into 2 draw calls (dots + rings)
+    // 4. Vertices — cached
     if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
-        int vc = uv_editor->get_uv_vert_count();
-        PackedVector2Array vert_dots;
-        PackedColorArray vert_dot_colors;
-        PackedVector2Array vert_rings;
-        PackedColorArray vert_ring_colors;
-
-        for (int i = 0; i < vc; i++) {
-            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(i));
-            if (uv_editor->is_uv_selected(i)) {
-                vert_dots.push_back(pos);
-                vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
-                _batch_arc_outline(vert_rings, vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
-            } else {
-                vert_dots.push_back(pos);
-                vert_dot_colors.push_back(Color(0.18f, 0.18f, 0.22f));
-                _batch_arc_outline(vert_rings, vert_ring_colors, pos, 4.0f, 12, Color(0.50f, 0.50f, 0.55f));
-            }
-        }
-        if (vert_dots.size() > 0)
-            draw_primitive(vert_dots, vert_dot_colors, PackedVector2Array());
-        if (vert_rings.size() > 0)
-            draw_multiline_colors(vert_rings, vert_ring_colors, 1.0f);
+        if (_cached_vert_dots.size() > 0)
+            draw_primitive(_cached_vert_dots, _cached_vert_dot_colors, PackedVector2Array());
+        if (_cached_vert_rings.size() > 0)
+            draw_multiline_colors(_cached_vert_rings, _cached_vert_ring_colors, 1.0f);
     } else {
-        PackedInt32Array sel = uv_editor->get_selected_verts();
-        if (sel.size() > 0) {
-            PackedVector2Array vert_dots;
-            PackedColorArray vert_dot_colors;
-            PackedVector2Array vert_rings;
-            PackedColorArray vert_ring_colors;
-
-            for (int i = 0; i < sel.size(); i++) {
-                int idx = sel[i];
-                Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(idx));
-                vert_dots.push_back(pos);
-                vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
-                _batch_arc_outline(vert_rings, vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
-            }
-            if (vert_dots.size() > 0)
-                draw_primitive(vert_dots, vert_dot_colors, PackedVector2Array());
-            if (vert_rings.size() > 0)
-                draw_multiline_colors(vert_rings, vert_ring_colors, 1.0f);
-        }
+        if (_cached_vert_dots.size() > 0)
+            draw_primitive(_cached_vert_dots, _cached_vert_dot_colors, PackedVector2Array());
+        if (_cached_vert_rings.size() > 0)
+            draw_multiline_colors(_cached_vert_rings, _cached_vert_ring_colors, 1.0f);
     }
 
     // 5. Selection box / gizmo
@@ -556,46 +564,78 @@ void VFXUVEditorViewport::_draw() {
 // GRID (OPTIMIZED — batched into 1 draw call for lines)
 // ============================================================================
 void VFXUVEditorViewport::_draw_uv_grid() {
+    // ------------------------------------------------------------------
+    // Island-aware grid: only draw inside the UV island bounding box
+    // ------------------------------------------------------------------
+    Rect2 island_bounds;
+    if (uv_editor.is_valid() && uv_editor->get_mesh().is_valid()) {
+        island_bounds = uv_editor->get_total_bounds();
+    }
+
+    // If nothing is loaded, just fill the viewport with the dark background
+    if (island_bounds.size.x < 0.0001f || island_bounds.size.y < 0.0001f) {
+        draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.08f, 1.0f));
+        return;
+    }
+
+    // Visible area in UV space
     Vector2 uv0 = screen_to_uv(Vector2());
     Vector2 uv1 = screen_to_uv(get_size());
-    Rect2 uv_rect(uv0, uv1 - uv0);
-    uv_rect = uv_rect.abs();
+    Rect2 view_rect(uv0, uv1 - uv0);
+    view_rect = view_rect.abs();
 
-    int x0 = (int)std::floor(uv_rect.position.x);
-    int y0 = (int)std::floor(uv_rect.position.y);
-    int x1 = (int)std::ceil((uv_rect.position.x + uv_rect.size.x));
-    int y1 = (int)std::ceil((uv_rect.position.y + uv_rect.size.y));
+    // Intersect view with island box so we only iterate useful grid lines
+    float gx0 = std::floor(std::max(view_rect.position.x, island_bounds.position.x));
+    float gy0 = std::floor(std::max(view_rect.position.y, island_bounds.position.y));
+    float gx1 = std::ceil(std::min(view_rect.position.x + view_rect.size.x,
+                                   island_bounds.position.x + island_bounds.size.x));
+    float gy1 = std::ceil(std::min(view_rect.position.y + view_rect.size.y,
+                                   island_bounds.position.y + island_bounds.size.y));
 
-    // Solid background instead of per-tile checkerboard
-    Vector2 bg0 = uv_to_screen(Vector2(x0, y0));
-    Vector2 bg1 = uv_to_screen(Vector2(x1, y1));
-    draw_rect(Rect2(bg0, bg1 - bg0), Color(0.10f, 0.10f, 0.10f));
+    // Background fill limited to the island box (on-screen)
+    Vector2 island_scr_min = uv_to_screen(island_bounds.position);
+    Vector2 island_scr_max = uv_to_screen(island_bounds.position + island_bounds.size);
+    Rect2 island_screen_rect(island_scr_min, island_scr_max - island_scr_min);
+    island_screen_rect = island_screen_rect.abs();
+    draw_rect(island_screen_rect, Color(0.10f, 0.10f, 0.10f));
 
-    // Batch ALL grid lines into single draw_multiline_colors call
+    // Batch ALL grid lines into a single draw_multiline_colors call
     PackedVector2Array grid_lines;
     PackedColorArray grid_colors;
 
-    auto add_line = [&](const Vector2& a, const Vector2& b, const Color& c) {
+    auto add_seg = [&](const Vector2& a, const Vector2& b, const Color& c) {
         grid_lines.push_back(a);
         grid_lines.push_back(b);
         grid_colors.push_back(c);
     };
 
+    // Helper: clip a vertical or horizontal line to the island screen rect
+    auto clip_vline = [&](float sx, const Color& c) {
+        if (sx < island_screen_rect.position.x || sx > island_screen_rect.position.x + island_screen_rect.size.x)
+            return;
+        add_seg(Vector2(sx, island_screen_rect.position.y),
+                Vector2(sx, island_screen_rect.position.y + island_screen_rect.size.y), c);
+    };
+    auto clip_hline = [&](float sy, const Color& c) {
+        if (sy < island_screen_rect.position.y || sy > island_screen_rect.position.y + island_screen_rect.size.y)
+            return;
+        add_seg(Vector2(island_screen_rect.position.x, sy),
+                Vector2(island_screen_rect.position.x + island_screen_rect.size.x, sy), c);
+    };
+
     // Medium grid (7 divisions)
     if (zoom > 80.0f) {
         Color med(0.16f, 0.16f, 0.16f);
-        for (int x = x0; x < x1; x++) {
+        for (int x = (int)gx0; x < (int)gx1; x++) {
             for (int i = 1; i < 7; i++) {
                 float t = (float)i / 7.0f;
-                float vx = uv_to_screen(Vector2(x + t, 0)).x;
-                add_line(Vector2(vx, 0), Vector2(vx, get_size().y), med);
+                clip_vline(uv_to_screen(Vector2(x + t, 0.0f)).x, med);
             }
         }
-        for (int y = y0; y < y1; y++) {
+        for (int y = (int)gy0; y < (int)gy1; y++) {
             for (int i = 1; i < 7; i++) {
                 float t = (float)i / 7.0f;
-                float vy = uv_to_screen(Vector2(0, y + t)).y;
-                add_line(Vector2(0, vy), Vector2(get_size().x, vy), med);
+                clip_hline(uv_to_screen(Vector2(0.0f, y + t)).y, med);
             }
         }
     }
@@ -605,46 +645,40 @@ void VFXUVEditorViewport::_draw_uv_grid() {
         Color fine(0.13f, 0.13f, 0.13f);
         float step = 1.0f / 49.0f;
 
-        float fx = std::floor(uv_rect.position.x / step) * step;
-        while (fx <= (uv_rect.position.x + uv_rect.size.x) + step) {
+        float fx = std::floor(gx0 / step) * step;
+        while (fx <= gx1 + step) {
             bool major = std::fabs(std::fmod(fx, 1.0)) < 0.001;
             bool medium = std::fabs(std::fmod(fx * 7.0, 1.0)) < 0.001;
-            if (!major && !medium) {
-                float vx = uv_to_screen(Vector2(fx, 0.0f)).x;
-                add_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), fine);
-            }
+            if (!major && !medium)
+                clip_vline(uv_to_screen(Vector2(fx, 0.0f)).x, fine);
             fx += step;
         }
 
-        float fy = std::floor(uv_rect.position.y / step) * step;
-        while (fy <= (uv_rect.position.y + uv_rect.size.y) + step) {
+        float fy = std::floor(gy0 / step) * step;
+        while (fy <= gy1 + step) {
             bool major = std::fabs(std::fmod(fy, 1.0)) < 0.001;
             bool medium = std::fabs(std::fmod(fy * 7.0, 1.0)) < 0.001;
-            if (!major && !medium) {
-                float vy = uv_to_screen(Vector2(0.0f, fy)).y;
-                add_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), fine);
-            }
+            if (!major && !medium)
+                clip_hline(uv_to_screen(Vector2(0.0f, fy)).y, fine);
             fy += step;
         }
     }
 
-    // Major borders
-    for (int x = x0; x <= x1; x++) {
-        float vx = uv_to_screen(Vector2(x, 0.0f)).x;
-        add_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), Color(0.22f, 0.22f, 0.24f));
+    // Major integer borders — only inside the island box
+    for (int x = (int)gx0; x <= (int)gx1; x++) {
+        clip_vline(uv_to_screen(Vector2(x, 0.0f)).x, Color(0.22f, 0.22f, 0.24f));
     }
-    for (int y = y0; y <= y1; y++) {
-        float vy = uv_to_screen(Vector2(0.0f, y)).y;
-        add_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), Color(0.22f, 0.22f, 0.24f));
+    for (int y = (int)gy0; y <= (int)gy1; y++) {
+        clip_hline(uv_to_screen(Vector2(0.0f, y)).y, Color(0.22f, 0.22f, 0.24f));
     }
 
-    // 0..1 border
-    Vector2 b0 = uv_to_screen(Vector2(0.0f, 0.0f));
-    Vector2 b1 = uv_to_screen(Vector2(1.0f, 1.0f));
-    add_line(b0, Vector2(b1.x, b0.y), Color(0.35f, 0.35f, 0.40f));
-    add_line(Vector2(b1.x, b0.y), b1, Color(0.35f, 0.35f, 0.40f));
-    add_line(b1, Vector2(b0.x, b1.y), Color(0.35f, 0.35f, 0.40f));
-    add_line(Vector2(b0.x, b1.y), b0, Color(0.35f, 0.35f, 0.40f));
+    // Island bounds border (replaces the old 0..1 border)
+    Vector2 b0 = island_screen_rect.position;
+    Vector2 b1 = island_screen_rect.position + island_screen_rect.size;
+    add_seg(b0, Vector2(b1.x, b0.y), Color(0.35f, 0.35f, 0.40f));
+    add_seg(Vector2(b1.x, b0.y), b1, Color(0.35f, 0.35f, 0.40f));
+    add_seg(b1, Vector2(b0.x, b1.y), Color(0.35f, 0.35f, 0.40f));
+    add_seg(Vector2(b0.x, b1.y), b0, Color(0.35f, 0.35f, 0.40f));
 
     if (grid_lines.size() > 0)
         draw_multiline_colors(grid_lines, grid_colors, 1.0f);
