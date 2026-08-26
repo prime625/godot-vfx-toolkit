@@ -488,20 +488,157 @@ void VFXUVEditorViewport::_draw() {
         for (int i = 0; i < vc; i++) {
             Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(i));
             if (uv_editor->is_uv_selected(i)) {
-                draw_circle(pos, 4.0f, Color(1.0f, 0.45f, 0.08f));
-                draw_arc(pos, 5.5f, 0.0f, 6.283185307179586f, 32, Color(1, 1, 1), 1.0f);
+// ============================================================================
+// BATCHED DRAWING HELPERS
+// ============================================================================
+static void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
+                               const Vector2& center, float radius, int segments,
+                               const Color& color) {
+    float step = 6.283185307179586f / segments;
+    for (int i = 0; i < segments; i++) {
+        float a0 = i * step;
+        float a1 = ((i + 1) % segments) * step;
+        r_lines.push_back(center + Vector2(cosf(a0), sinf(a0)) * radius);
+        r_lines.push_back(center + Vector2(cosf(a1), sinf(a1)) * radius);
+        r_colors.push_back(color);
+    }
+}
+
+// ============================================================================
+// DRAWING (OPTIMIZED)
+// ============================================================================
+void VFXUVEditorViewport::_draw() {
+    draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.08f, 1.0f));
+
+    if (uv_editor.is_null() || uv_editor->get_mesh().is_null()) {
+        Ref<Font> font = get_theme_default_font();
+        if (font.is_valid()) {
+            draw_string(font, Vector2(20, 32), "No mesh assigned",
+                HORIZONTAL_ALIGNMENT_LEFT, -1.0f, 16, Color(0.7f, 0.7f, 0.7f));
+        }
+        return;
+    }
+
+    _draw_uv_grid();
+
+    if (_cache_dirty) {
+        _rebuild_cache();
+    }
+
+    Rect2 screen_rect(Vector2(), get_size());
+    PackedInt32Array sel_faces = uv_editor->get_selected_faces();
+
+    // 1. Face fills
+    for (int i = 0; i < _cached_faces.size(); i++) {
+        const CachedFace& cf = _cached_faces[i];
+        if (!screen_rect.intersects(cf.bounds)) continue;
+
+        bool is_sel = false;
+        for (int j = 0; j < sel_faces.size(); j++) {
+            if (sel_faces[j] == i) { is_sel = true; break; }
+        }
+        Color fill = is_sel ? Color(0.22f, 0.17f, 0.12f, 0.90f) : Color(0.16f, 0.14f, 0.12f, 0.85f);
+        draw_colored_polygon(cf.screen_poly, fill);
+    }
+
+    // 2. Wireframe — BATCHED into 2 draw calls
+    PackedVector2Array sel_lines;
+    PackedColorArray sel_line_colors;
+    PackedVector2Array unsel_lines;
+    PackedColorArray unsel_line_colors;
+
+    for (int i = 0; i < _cached_faces.size(); i++) {
+        const CachedFace& cf = _cached_faces[i];
+        if (!screen_rect.intersects(cf.bounds)) continue;
+
+        bool is_sel = false;
+        for (int j = 0; j < sel_faces.size(); j++) {
+            if (sel_faces[j] == i) { is_sel = true; break; }
+        }
+        const PackedVector2Array& sp = cf.screen_poly;
+        int n = sp.size();
+        for (int j = 0; j < n; j++) {
+            Vector2 a = sp[j];
+            Vector2 b = sp[(j + 1) % n];
+            if (is_sel) {
+                sel_lines.push_back(a);
+                sel_lines.push_back(b);
+                sel_line_colors.push_back(Color(1.0f, 0.45f, 0.08f));
             } else {
-                draw_circle(pos, 3.0f, Color(0.18f, 0.18f, 0.22f));
-                draw_arc(pos, 4.0f, 0.0f, 6.283185307179586f, 24, Color(0.50f, 0.50f, 0.55f), 1.0f);
+                unsel_lines.push_back(a);
+                unsel_lines.push_back(b);
+                unsel_line_colors.push_back(Color(0.45f, 0.45f, 0.50f));
             }
         }
+    }
+
+    if (sel_lines.size() > 0)
+        draw_multiline_colors(sel_lines, sel_line_colors, 1.2f);
+    if (unsel_lines.size() > 0)
+        draw_multiline_colors(unsel_lines, unsel_line_colors, 0.8f);
+
+    // 3. Face-center dots — BATCHED
+    if (select_mode == VFXUVEditor::UV_SELECT_FACE) {
+        PackedVector2Array face_dots;
+        PackedColorArray face_dot_colors;
+        for (int i = 0; i < _cached_faces.size(); i++) {
+            const CachedFace& cf = _cached_faces[i];
+            if (!screen_rect.intersects(cf.bounds)) continue;
+
+            bool is_sel = false;
+            for (int j = 0; j < sel_faces.size(); j++) {
+                if (sel_faces[j] == i) { is_sel = true; break; }
+            }
+            face_dots.push_back(cf.center);
+            face_dot_colors.push_back(is_sel ? Color(1.0f, 0.45f, 0.08f) : Color(0.35f, 0.35f, 0.40f));
+        }
+        if (face_dots.size() > 0)
+            draw_primitive(face_dots, face_dot_colors, PackedVector2Array());
+    }
+
+    // 4. Vertices — BATCHED into 2 draw calls (dots + rings)
+    if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
+        int vc = uv_editor->get_uv_vert_count();
+        PackedVector2Array vert_dots;
+        PackedColorArray vert_dot_colors;
+        PackedVector2Array vert_rings;
+        PackedColorArray vert_ring_colors;
+
+        for (int i = 0; i < vc; i++) {
+            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(i));
+            if (uv_editor->is_uv_selected(i)) {
+                vert_dots.push_back(pos);
+                vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
+                _batch_arc_outline(vert_rings, vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
+            } else {
+                vert_dots.push_back(pos);
+                vert_dot_colors.push_back(Color(0.18f, 0.18f, 0.22f));
+                _batch_arc_outline(vert_rings, vert_ring_colors, pos, 4.0f, 12, Color(0.50f, 0.50f, 0.55f));
+            }
+        }
+        if (vert_dots.size() > 0)
+            draw_primitive(vert_dots, vert_dot_colors, PackedVector2Array());
+        if (vert_rings.size() > 0)
+            draw_multiline_colors(vert_rings, vert_ring_colors, 1.0f);
     } else {
         PackedInt32Array sel = uv_editor->get_selected_verts();
-        for (int i = 0; i < sel.size(); i++) {
-            int idx = sel[i];
-            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(idx));
-            draw_circle(pos, 4.0f, Color(1.0f, 0.45f, 0.08f));
-            draw_arc(pos, 5.5f, 0.0f, 6.283185307179586f, 32, Color(1, 1, 1), 1.0f);
+        if (sel.size() > 0) {
+            PackedVector2Array vert_dots;
+            PackedColorArray vert_dot_colors;
+            PackedVector2Array vert_rings;
+            PackedColorArray vert_ring_colors;
+
+            for (int i = 0; i < sel.size(); i++) {
+                int idx = sel[i];
+                Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(idx));
+                vert_dots.push_back(pos);
+                vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
+                _batch_arc_outline(vert_rings, vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
+            }
+            if (vert_dots.size() > 0)
+                draw_primitive(vert_dots, vert_dot_colors, PackedVector2Array());
+            if (vert_rings.size() > 0)
+                draw_multiline_colors(vert_rings, vert_ring_colors, 1.0f);
         }
     }
 
@@ -519,7 +656,7 @@ void VFXUVEditorViewport::_draw() {
 }
 
 // ============================================================================
-// GRID
+// GRID (OPTIMIZED — batched into 1 draw call for lines)
 // ============================================================================
 void VFXUVEditorViewport::_draw_uv_grid() {
     Vector2 uv0 = screen_to_uv(Vector2());
@@ -532,16 +669,20 @@ void VFXUVEditorViewport::_draw_uv_grid() {
     int x1 = (int)std::ceil((uv_rect.position.x + uv_rect.size.x));
     int y1 = (int)std::ceil((uv_rect.position.y + uv_rect.size.y));
 
-    // Major checkerboard tiles
-    for (int x = x0; x < x1; x++) {
-        for (int y = y0; y < y1; y++) {
-            bool even = ((x + y) % 2) == 0;
-            Color col = even ? Color(0.10f, 0.10f, 0.10f) : Color(0.115f, 0.115f, 0.115f);
-            Vector2 p = uv_to_screen(Vector2(x, y));
-            Vector2 q = uv_to_screen(Vector2(x + 1, y + 1));
-            draw_rect(Rect2(p, q - p), col);
-        }
-    }
+    // Solid background instead of per-tile checkerboard
+    Vector2 bg0 = uv_to_screen(Vector2(x0, y0));
+    Vector2 bg1 = uv_to_screen(Vector2(x1, y1));
+    draw_rect(Rect2(bg0, bg1 - bg0), Color(0.10f, 0.10f, 0.10f));
+
+    // Batch ALL grid lines into single draw_multiline_colors call
+    PackedVector2Array grid_lines;
+    PackedColorArray grid_colors;
+
+    auto add_line = [&](const Vector2& a, const Vector2& b, const Color& c) {
+        grid_lines.push_back(a);
+        grid_lines.push_back(b);
+        grid_colors.push_back(c);
+    };
 
     // Medium grid (7 divisions)
     if (zoom > 80.0f) {
@@ -550,14 +691,14 @@ void VFXUVEditorViewport::_draw_uv_grid() {
             for (int i = 1; i < 7; i++) {
                 float t = (float)i / 7.0f;
                 float vx = uv_to_screen(Vector2(x + t, 0)).x;
-                draw_line(Vector2(vx, 0), Vector2(vx, get_size().y), med, 0.6f);
+                add_line(Vector2(vx, 0), Vector2(vx, get_size().y), med);
             }
         }
         for (int y = y0; y < y1; y++) {
             for (int i = 1; i < 7; i++) {
                 float t = (float)i / 7.0f;
                 float vy = uv_to_screen(Vector2(0, y + t)).y;
-                draw_line(Vector2(0, vy), Vector2(get_size().x, vy), med, 0.6f);
+                add_line(Vector2(0, vy), Vector2(get_size().x, vy), med);
             }
         }
     }
@@ -573,7 +714,7 @@ void VFXUVEditorViewport::_draw_uv_grid() {
             bool medium = std::fabs(std::fmod(fx * 7.0, 1.0)) < 0.001;
             if (!major && !medium) {
                 float vx = uv_to_screen(Vector2(fx, 0.0f)).x;
-                draw_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), fine, 0.4f);
+                add_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), fine);
             }
             fx += step;
         }
@@ -584,7 +725,7 @@ void VFXUVEditorViewport::_draw_uv_grid() {
             bool medium = std::fabs(std::fmod(fy * 7.0, 1.0)) < 0.001;
             if (!major && !medium) {
                 float vy = uv_to_screen(Vector2(0.0f, fy)).y;
-                draw_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), fine, 0.4f);
+                add_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), fine);
             }
             fy += step;
         }
@@ -593,18 +734,25 @@ void VFXUVEditorViewport::_draw_uv_grid() {
     // Major borders
     for (int x = x0; x <= x1; x++) {
         float vx = uv_to_screen(Vector2(x, 0.0f)).x;
-        draw_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), Color(0.22f, 0.22f, 0.24f), 1.0f);
+        add_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), Color(0.22f, 0.22f, 0.24f));
     }
     for (int y = y0; y <= y1; y++) {
         float vy = uv_to_screen(Vector2(0.0f, y)).y;
-        draw_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), Color(0.22f, 0.22f, 0.24f), 1.0f);
+        add_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), Color(0.22f, 0.22f, 0.24f));
     }
 
     // 0..1 border
     Vector2 b0 = uv_to_screen(Vector2(0.0f, 0.0f));
     Vector2 b1 = uv_to_screen(Vector2(1.0f, 1.0f));
-    draw_rect(Rect2(b0, b1 - b0), Color(0.35f, 0.35f, 0.40f), false, 1.5f);
+    add_line(b0, Vector2(b1.x, b0.y), Color(0.35f, 0.35f, 0.40f));
+    add_line(Vector2(b1.x, b0.y), b1, Color(0.35f, 0.35f, 0.40f));
+    add_line(b1, Vector2(b0.x, b1.y), Color(0.35f, 0.35f, 0.40f));
+    add_line(Vector2(b0.x, b1.y), b0, Color(0.35f, 0.35f, 0.40f));
+
+    if (grid_lines.size() > 0)
+        draw_multiline_colors(grid_lines, grid_colors, 1.0f);
 }
+
 
 // ============================================================================
 // GIZMO
