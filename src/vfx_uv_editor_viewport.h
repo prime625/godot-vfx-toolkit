@@ -54,6 +54,10 @@ private:
     // Cache
     bool _cache_dirty = true;
 
+	static void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
+                                   const Vector2& center, float radius, int segments,
+                                   const Color& color);
+
     struct CachedFace {
         PackedVector2Array uv_poly;
         PackedVector2Array screen_poly;
