@@ -62,6 +62,9 @@ private:
         Rect2 bounds;
     };
     Vector<CachedFace> _cached_faces;
+    void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
+                            const Vector2& center, float radius, int segments,
+                            const Color& color);
 
     // Cached draw data — rebuilt only when _cache_dirty
     PackedVector2Array _cached_sel_lines;
@@ -90,6 +93,12 @@ private:
     void _draw_uv_grid();
     void _draw_gizmo();
     void _draw_arrowhead(const Vector2& p_pos, const Vector2& p_dir, float p_size, const Color& p_color);
+
+    void _draw_gizmo();
+    void _draw_arrowhead(const Vector2& p_pos, const Vector2& p_dir, float p_size, const Color& p_color);
+    void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
+                            const Vector2& center, float radius, int segments,
+                            const Color& color);
 
     void _cancel_single_touch_actions();
 
