@@ -388,7 +388,7 @@ void VFXUVEditorViewport::_rebuild_cache() {
 // ============================================================================
 // BATCHED DRAWING HELPER
 // ============================================================================
-static void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
+void VFXUVEditorViewport::_batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
                                const Vector2& center, float radius, int segments,
                                const Color& color) {
     float step = 6.283185307179586f / segments;
