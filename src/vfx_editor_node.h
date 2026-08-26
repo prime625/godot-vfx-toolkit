@@ -286,6 +286,9 @@ public:
     void gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir);
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
+	void set_gizmo_screen_scale(float scale);
+	float get_gizmo_screen_scale() const;
+
 
     // === GIZMO LOCK (NEW) ===
     void set_gizmo_locked(bool locked);
