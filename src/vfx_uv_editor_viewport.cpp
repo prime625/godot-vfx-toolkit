@@ -556,78 +556,46 @@ void VFXUVEditorViewport::_draw() {
 // GRID (OPTIMIZED — batched into 1 draw call for lines)
 // ============================================================================
 void VFXUVEditorViewport::_draw_uv_grid() {
-    // ------------------------------------------------------------------
-    // Island-aware grid: only draw inside the UV island bounding box
-    // ------------------------------------------------------------------
-    Rect2 island_bounds;
-    if (uv_editor.is_valid() && uv_editor->get_mesh().is_valid()) {
-        island_bounds = uv_editor->get_total_bounds();
-    }
-
-    // If nothing is loaded, just fill the viewport with the dark background
-    if (island_bounds.size.x < 0.0001f || island_bounds.size.y < 0.0001f) {
-        draw_rect(Rect2(Vector2(), get_size()), Color(0.08f, 0.08f, 0.08f, 1.0f));
-        return;
-    }
-
-    // Visible area in UV space
     Vector2 uv0 = screen_to_uv(Vector2());
     Vector2 uv1 = screen_to_uv(get_size());
-    Rect2 view_rect(uv0, uv1 - uv0);
-    view_rect = view_rect.abs();
+    Rect2 uv_rect(uv0, uv1 - uv0);
+    uv_rect = uv_rect.abs();
 
-    // Intersect view with island box so we only iterate useful grid lines
-    float gx0 = std::floor(std::max(view_rect.position.x, island_bounds.position.x));
-    float gy0 = std::floor(std::max(view_rect.position.y, island_bounds.position.y));
-    float gx1 = std::ceil(std::min(view_rect.position.x + view_rect.size.x,
-                                   island_bounds.position.x + island_bounds.size.x));
-    float gy1 = std::ceil(std::min(view_rect.position.y + view_rect.size.y,
-                                   island_bounds.position.y + island_bounds.size.y));
+    int x0 = (int)std::floor(uv_rect.position.x);
+    int y0 = (int)std::floor(uv_rect.position.y);
+    int x1 = (int)std::ceil((uv_rect.position.x + uv_rect.size.x));
+    int y1 = (int)std::ceil((uv_rect.position.y + uv_rect.size.y));
 
-    // Background fill limited to the island box (on-screen)
-    Vector2 island_scr_min = uv_to_screen(island_bounds.position);
-    Vector2 island_scr_max = uv_to_screen(island_bounds.position + island_bounds.size);
-    Rect2 island_screen_rect(island_scr_min, island_scr_max - island_scr_min);
-    island_screen_rect = island_screen_rect.abs();
-    draw_rect(island_screen_rect, Color(0.10f, 0.10f, 0.10f));
+    // Solid background instead of per-tile checkerboard
+    Vector2 bg0 = uv_to_screen(Vector2(x0, y0));
+    Vector2 bg1 = uv_to_screen(Vector2(x1, y1));
+    draw_rect(Rect2(bg0, bg1 - bg0), Color(0.10f, 0.10f, 0.10f));
 
-    // Batch ALL grid lines into a single draw_multiline_colors call
+    // Batch ALL grid lines into single draw_multiline_colors call
     PackedVector2Array grid_lines;
     PackedColorArray grid_colors;
 
-    auto add_seg = [&](const Vector2& a, const Vector2& b, const Color& c) {
+    auto add_line = [&](const Vector2& a, const Vector2& b, const Color& c) {
         grid_lines.push_back(a);
         grid_lines.push_back(b);
         grid_colors.push_back(c);
     };
 
-    // Helper: clip a vertical or horizontal line to the island screen rect
-    auto clip_vline = [&](float sx, const Color& c) {
-        if (sx < island_screen_rect.position.x || sx > island_screen_rect.position.x + island_screen_rect.size.x)
-            return;
-        add_seg(Vector2(sx, island_screen_rect.position.y),
-                Vector2(sx, island_screen_rect.position.y + island_screen_rect.size.y), c);
-    };
-    auto clip_hline = [&](float sy, const Color& c) {
-        if (sy < island_screen_rect.position.y || sy > island_screen_rect.position.y + island_screen_rect.size.y)
-            return;
-        add_seg(Vector2(island_screen_rect.position.x, sy),
-                Vector2(island_screen_rect.position.x + island_screen_rect.size.x, sy), c);
-    };
-
     // Medium grid (7 divisions)
     if (zoom > 80.0f) {
         Color med(0.16f, 0.16f, 0.16f);
-        for (int x = (int)gx0; x < (int)gx1; x++) {
+        for (int x = x0; x < x1; x++) {
             for (int i = 1; i < 7; i++) {
                 float t = (float)i / 7.0f;
-                clip_vline(uv_to_screen(Vector2(x + t, 0.0f)).x, med);
+                float vx = uv_to_screen(Vector2(x + t, 0)).x;
+                add_line(Vector2(vx, 0), Vector2(vx, get_size().y), med);
             }
         }
-        for (int y = (int)gy0; y < (int)gy1; y++) {
+        for (int y = y0; y < y1; y++) {
             for (int i = 1; i < 7; i++) {
                 float t = (float)i / 7.0f;
-                clip_hline(uv_to_screen(Vector2(0.0f, y + t)).y, med);
+                float vy = uv_to_screen(Vector2(0, y + t)).y;
+                add_line(Vector2(0, vy), Vector2(get_size().x, vy), med);
             }
         }
     }
@@ -637,40 +605,46 @@ void VFXUVEditorViewport::_draw_uv_grid() {
         Color fine(0.13f, 0.13f, 0.13f);
         float step = 1.0f / 49.0f;
 
-        float fx = std::floor(gx0 / step) * step;
-        while (fx <= gx1 + step) {
+        float fx = std::floor(uv_rect.position.x / step) * step;
+        while (fx <= (uv_rect.position.x + uv_rect.size.x) + step) {
             bool major = std::fabs(std::fmod(fx, 1.0)) < 0.001;
             bool medium = std::fabs(std::fmod(fx * 7.0, 1.0)) < 0.001;
-            if (!major && !medium)
-                clip_vline(uv_to_screen(Vector2(fx, 0.0f)).x, fine);
+            if (!major && !medium) {
+                float vx = uv_to_screen(Vector2(fx, 0.0f)).x;
+                add_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), fine);
+            }
             fx += step;
         }
 
-        float fy = std::floor(gy0 / step) * step;
-        while (fy <= gy1 + step) {
+        float fy = std::floor(uv_rect.position.y / step) * step;
+        while (fy <= (uv_rect.position.y + uv_rect.size.y) + step) {
             bool major = std::fabs(std::fmod(fy, 1.0)) < 0.001;
             bool medium = std::fabs(std::fmod(fy * 7.0, 1.0)) < 0.001;
-            if (!major && !medium)
-                clip_hline(uv_to_screen(Vector2(0.0f, fy)).y, fine);
+            if (!major && !medium) {
+                float vy = uv_to_screen(Vector2(0.0f, fy)).y;
+                add_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), fine);
+            }
             fy += step;
         }
     }
 
-    // Major integer borders — only inside the island box
-    for (int x = (int)gx0; x <= (int)gx1; x++) {
-        clip_vline(uv_to_screen(Vector2(x, 0.0f)).x, Color(0.22f, 0.22f, 0.24f));
+    // Major borders
+    for (int x = x0; x <= x1; x++) {
+        float vx = uv_to_screen(Vector2(x, 0.0f)).x;
+        add_line(Vector2(vx, 0.0f), Vector2(vx, get_size().y), Color(0.22f, 0.22f, 0.24f));
     }
-    for (int y = (int)gy0; y <= (int)gy1; y++) {
-        clip_hline(uv_to_screen(Vector2(0.0f, y)).y, Color(0.22f, 0.22f, 0.24f));
+    for (int y = y0; y <= y1; y++) {
+        float vy = uv_to_screen(Vector2(0.0f, y)).y;
+        add_line(Vector2(0.0f, vy), Vector2(get_size().x, vy), Color(0.22f, 0.22f, 0.24f));
     }
 
-    // Island bounds border (replaces the old 0..1 border)
-    Vector2 b0 = island_screen_rect.position;
-    Vector2 b1 = island_screen_rect.position + island_screen_rect.size;
-    add_seg(b0, Vector2(b1.x, b0.y), Color(0.35f, 0.35f, 0.40f));
-    add_seg(Vector2(b1.x, b0.y), b1, Color(0.35f, 0.35f, 0.40f));
-    add_seg(b1, Vector2(b0.x, b1.y), Color(0.35f, 0.35f, 0.40f));
-    add_seg(Vector2(b0.x, b1.y), b0, Color(0.35f, 0.35f, 0.40f));
+    // 0..1 border
+    Vector2 b0 = uv_to_screen(Vector2(0.0f, 0.0f));
+    Vector2 b1 = uv_to_screen(Vector2(1.0f, 1.0f));
+    add_line(b0, Vector2(b1.x, b0.y), Color(0.35f, 0.35f, 0.40f));
+    add_line(Vector2(b1.x, b0.y), b1, Color(0.35f, 0.35f, 0.40f));
+    add_line(b1, Vector2(b0.x, b1.y), Color(0.35f, 0.35f, 0.40f));
+    add_line(Vector2(b0.x, b1.y), b0, Color(0.35f, 0.35f, 0.40f));
 
     if (grid_lines.size() > 0)
         draw_multiline_colors(grid_lines, grid_colors, 1.0f);
