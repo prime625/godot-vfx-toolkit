@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <unordered_map>
+#include <unordered_set>
 #include "vfx_uv_editor.h"
 #include "vfx_mesh.h"
 
@@ -54,10 +55,6 @@ private:
     // Cache
     bool _cache_dirty = true;
 
-	static void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
-                                   const Vector2& center, float radius, int segments,
-                                   const Color& color);
-
     struct CachedFace {
         PackedVector2Array uv_poly;
         PackedVector2Array screen_poly;
@@ -66,8 +63,22 @@ private:
     };
     Vector<CachedFace> _cached_faces;
 
+    // Cached draw data — rebuilt only when _cache_dirty
+    PackedVector2Array _cached_sel_lines;
+    PackedColorArray   _cached_sel_colors;
+    PackedVector2Array _cached_unsel_lines;
+    PackedColorArray   _cached_unsel_colors;
+    PackedVector2Array _cached_face_dots;
+    PackedColorArray   _cached_face_dot_colors;
+    PackedVector2Array _cached_vert_dots;
+    PackedColorArray   _cached_vert_dot_colors;
+    PackedVector2Array _cached_vert_rings;
+    PackedColorArray   _cached_vert_ring_colors;
+    std::unordered_set<int> _cached_sel_face_set;
+
     void _request_cache_rebuild();
     void _rebuild_cache();
+    void _rebuild_draw_data();
 
     void _on_left_down(const Vector2& p_pos, bool p_shift);
     void _on_left_up(const Vector2& p_pos);
