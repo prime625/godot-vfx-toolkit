@@ -46,13 +46,11 @@ private:
     Vector2 _transform_pivot;
     std::unordered_map<int, Vector2> _transform_starts;
 
-    // Mobile touch
     std::unordered_map<int, Vector2> _touches;
     float _last_pinch_dist = -1.0f;
     Vector2 _last_pinch_center;
     bool _ignore_remaining_drag = false;
 
-    // Cache
     bool _cache_dirty = true;
 
     struct CachedFace {
@@ -62,11 +60,7 @@ private:
         Rect2 bounds;
     };
     Vector<CachedFace> _cached_faces;
-    void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
-                            const Vector2& center, float radius, int segments,
-                            const Color& color);
 
-    // Cached draw data — rebuilt only when _cache_dirty
     PackedVector2Array _cached_sel_lines;
     PackedColorArray   _cached_sel_colors;
     PackedVector2Array _cached_unsel_lines;
@@ -91,9 +85,6 @@ private:
     void _zoom_at(const Vector2& p_screen_pos, float p_factor);
 
     void _draw_uv_grid();
-    void _draw_gizmo();
-    void _draw_arrowhead(const Vector2& p_pos, const Vector2& p_dir, float p_size, const Color& p_color);
-
     void _draw_gizmo();
     void _draw_arrowhead(const Vector2& p_pos, const Vector2& p_dir, float p_size, const Color& p_color);
     void _batch_arc_outline(PackedVector2Array& r_lines, PackedColorArray& r_colors,
