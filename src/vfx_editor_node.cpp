@@ -257,7 +257,14 @@ void VFXEditorNode::_notification(int p_what) {
 
         if (mesh.is_valid() && show_wireframe) {
             _build_selection_mesh();
-            if (selection_visual) selection_visual->set_visible(true);
+            if (selection_visual) {
+                selection_visual->set_visible(true);
+                if (active_scene_node.is_valid()) {
+                    selection_visual->set_transform(active_scene_node->get_global_transform());
+                } else {
+                    selection_visual->set_transform(get_global_transform());
+                }
+            }
         } else if (selection_visual) {
             selection_visual->set_visible(false);
         }
