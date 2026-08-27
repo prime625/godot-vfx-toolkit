@@ -487,10 +487,14 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
 // ============================================================================
 void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (gizmo_drag_axis == GIZMO_NONE) return;
-    Vector3 hit;
-    if (!vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) return;
 
+    Vector3 hit;
     Vector3 origin = gizmo_transform.get_origin();
+
+    // Only use drag plane for translate/scale. Rotation computes its own hits.
+    if (gizmo_mode != GIZMO_ROTATE) {
+        if (!vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) return;
+    }
 
     if (gizmo_mode == GIZMO_TRANSLATE) {
         Vector3 delta = hit - gizmo_drag_start_point;
