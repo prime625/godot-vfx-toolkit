@@ -40,6 +40,13 @@ bool VFXEditorNode::export_glb_animated(const String& filepath, int clip_idx) {
     return exporter->export_glb_animated(mesh, skeleton, animator, clip_idx, filepath);
 }
 
+
+bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fps) {
+    Ref<VFXGLTFExporter> exporter;
+    exporter.instantiate();
+    return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
+}
+
 // ============================================================================
 // DEMO
 // ============================================================================
