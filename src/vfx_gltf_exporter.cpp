@@ -1,4 +1,6 @@
 #include "vfx_gltf_exporter.h"
+#include "vfx_scene.h"
+#include "vfx_scene_node.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/json.hpp>
@@ -22,7 +24,9 @@ void VFXGLTFExporter::_bind_methods() {
     ClassDB::bind_method(D_METHOD("export_glb_animated", "mesh", "skeleton", "animator", "clip_idx", "filepath"), &VFXGLTFExporter::export_glb_animated);
     ClassDB::bind_method(D_METHOD("export_vat_glb", "mesh", "skin", "frame_count", "fps", "filepath"), &VFXGLTFExporter::export_vat_glb);
     ClassDB::bind_method(D_METHOD("build_gltf_document", "mesh", "skeleton"), &VFXGLTFExporter::build_gltf_document);
+    ClassDB::bind_method(D_METHOD("export_scene_glb", "scene", "filepath"), &VFXGLTFExporter::export_scene_glb);
 }
+
 
 VFXGLTFExporter::VFXGLTFExporter() {}
 VFXGLTFExporter::~VFXGLTFExporter() {}
@@ -199,6 +203,512 @@ Dictionary VFXGLTFExporter::_build_animation(const String& name, const Array& sa
     anim["channels"] = channels;
     return anim;
 }
+
+// === NEW: Coordinate conversion helpers (Godot -> glTF) ===
+Vector3 VFXGLTFExporter::_godot_to_gltf_position(const Vector3& p) {
+    return Vector3(-p.x, p.y, -p.z);
+}
+
+Quaternion VFXGLTFExporter::_godot_to_gltf_rotation(const Quaternion& q) {
+    return Quaternion(-q.x, q.y, -q.z, q.w);
+}
+
+Transform3D VFXGLTFExporter::_godot_to_gltf_transform(const Transform3D& t) {
+    Basis b = t.get_basis();
+    Vector3 o = t.get_origin();
+    Basis gltf_b;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            float m_i = (i == 0 || i == 2) ? -1.0f : 1.0f;
+            float m_j = (j == 0 || j == 2) ? -1.0f : 1.0f;
+            gltf_b[i][j] = m_i * b[i][j] * m_j;
+        }
+    }
+    Vector3 gltf_o = Vector3(-o.x, o.y, -o.z);
+    return Transform3D(gltf_b, gltf_o);
+}
+
+void VFXGLTFExporter::_decompose_godot_transform(const Transform3D& t, Vector3& out_pos, Quaternion& out_rot, Vector3& out_scale) {
+    out_pos = _godot_to_gltf_position(t.get_origin());
+    Basis b = t.get_basis();
+    out_rot = _godot_to_gltf_rotation(b.get_rotation_quaternion());
+    out_scale = b.get_scale();
+}
+
+// === NEW: Node builder with full transform ===
+Dictionary VFXGLTFExporter::_build_node_full(const String& name, const Transform3D& transform, const std::vector<int>& children, int mesh_idx, int skin_idx) const {
+    Dictionary node;
+    if (!name.is_empty()) node["name"] = name;
+
+    Vector3 pos, scale;
+    Quaternion rot;
+    _decompose_godot_transform(transform, pos, rot, scale);
+
+    if (!pos.is_zero_approx()) {
+        Array t_arr;
+        t_arr.append(pos.x); t_arr.append(pos.y); t_arr.append(pos.z);
+        node["translation"] = t_arr;
+    }
+
+    if (!Math::is_zero_approx(rot.x) || !Math::is_zero_approx(rot.y) ||
+        !Math::is_zero_approx(rot.z) || !Math::is_equal_approx(rot.w, 1.0f)) {
+        Array r_arr;
+        r_arr.append(rot.x); r_arr.append(rot.y); r_arr.append(rot.z); r_arr.append(rot.w);
+        node["rotation"] = r_arr;
+    }
+
+    if (!Math::is_equal_approx(scale.x, 1.0f) || !Math::is_equal_approx(scale.y, 1.0f) || !Math::is_equal_approx(scale.z, 1.0f)) {
+        Array s_arr;
+        s_arr.append(scale.x); s_arr.append(scale.y); s_arr.append(scale.z);
+        node["scale"] = s_arr;
+    }
+
+    if (!children.empty()) {
+        Array ch;
+        for (int c : children) ch.append(c);
+        node["children"] = ch;
+    }
+
+    if (mesh_idx >= 0) node["mesh"] = mesh_idx;
+    if (skin_idx >= 0) node["skin"] = skin_idx;
+
+    return node;
+}
+
+// === NEW: Scene export helpers ===
+int VFXGLTFExporter::_export_mesh_to_gltf(const Ref<VFXMesh>& mesh, _SceneExportState& state) {
+    if (mesh.is_null()) return -1;
+
+    // Get mesh data and convert to glTF space
+    PackedVector3Array positions = mesh->get_positions();
+    for (int i = 0; i < positions.size(); i++) {
+        positions[i] = _godot_to_gltf_position(positions[i]);
+    }
+
+    PackedVector3Array normals = mesh->get_normals();
+    for (int i = 0; i < normals.size(); i++) {
+        normals[i] = _godot_to_gltf_position(normals[i]);
+    }
+
+    PackedVector2Array uvs = mesh->get_uvs();
+    PackedInt32Array indices = mesh->get_indices();
+
+    if (positions.size() == 0) return -1;
+
+    int pos_offset = _write_vec3_array(positions);
+    int norm_offset = _write_vec3_array(normals);
+    int uv_offset = _write_vec2_array(uvs);
+    int idx_offset = _write_uint16_array(indices);
+
+    int pos_bv = state.bufferViews.size();
+    state.bufferViews.append(_build_buffer_view(0, pos_offset, positions.size() * 12, GL_ARRAY_BUFFER));
+
+    int norm_bv = -1;
+    if (normals.size() > 0) {
+        norm_bv = state.bufferViews.size();
+        state.bufferViews.append(_build_buffer_view(0, norm_offset, normals.size() * 12, GL_ARRAY_BUFFER));
+    }
+
+    int uv_bv = -1;
+    if (uvs.size() > 0) {
+        uv_bv = state.bufferViews.size();
+        state.bufferViews.append(_build_buffer_view(0, uv_offset, uvs.size() * 8, GL_ARRAY_BUFFER));
+    }
+
+    int idx_bv = state.bufferViews.size();
+    state.bufferViews.append(_build_buffer_view(0, idx_offset, indices.size() * 2, GL_ELEMENT_ARRAY_BUFFER));
+
+    int pos_acc = state.accessors.size();
+    Dictionary pos_accessor = _build_accessor(pos_bv, positions.size(), GL_FLOAT, "VEC3");
+    Vector3 pmin(1e30f, 1e30f, 1e30f), pmax(-1e30f, -1e30f, -1e30f);
+    for (int i = 0; i < positions.size(); i++) {
+        pmin.x = fmin(pmin.x, positions[i].x); pmin.y = fmin(pmin.y, positions[i].y); pmin.z = fmin(pmin.z, positions[i].z);
+        pmax.x = fmax(pmax.x, positions[i].x); pmax.y = fmax(pmax.y, positions[i].y); pmax.z = fmax(pmax.z, positions[i].z);
+    }
+    Array amin, amax;
+    amin.append(pmin.x); amin.append(pmin.y); amin.append(pmin.z);
+    amax.append(pmax.x); amax.append(pmax.y); amax.append(pmax.z);
+    pos_accessor["min"] = amin;
+    pos_accessor["max"] = amax;
+    state.accessors.append(pos_accessor);
+
+    int norm_acc = -1;
+    if (norm_bv >= 0) {
+        norm_acc = state.accessors.size();
+        state.accessors.append(_build_accessor(norm_bv, normals.size(), GL_FLOAT, "VEC3"));
+    }
+
+    int uv_acc = -1;
+    if (uv_bv >= 0) {
+        uv_acc = state.accessors.size();
+        state.accessors.append(_build_accessor(uv_bv, uvs.size(), GL_FLOAT, "VEC2"));
+    }
+
+    int idx_acc = state.accessors.size();
+    state.accessors.append(_build_accessor(idx_bv, indices.size(), GL_UNSIGNED_SHORT, "SCALAR"));
+
+    // Skinning data
+    int joints_acc = -1, weights_acc = -1;
+    PackedFloat32Array skin_data = mesh->get_skinning_data();
+    if (skin_data.size() > 0) {
+        PackedInt32Array joints;
+        joints.resize(positions.size() * 4);
+        PackedFloat32Array weights;
+        weights.resize(positions.size() * 4);
+        for (int i = 0; i < positions.size(); i++) {
+            int base = i * 8;
+            for (int j = 0; j < 4; j++) {
+                joints[i * 4 + j] = (int)skin_data[base + j];
+                weights[i * 4 + j] = skin_data[base + 4 + j];
+            }
+        }
+        int joints_offset = _write_uint16_array(joints);
+        int weights_offset = _write_float_array(weights);
+
+        int joints_bv = state.bufferViews.size();
+        state.bufferViews.append(_build_buffer_view(0, joints_offset, joints.size() * 2, GL_ARRAY_BUFFER));
+        int weights_bv = state.bufferViews.size();
+        state.bufferViews.append(_build_buffer_view(0, weights_offset, weights.size() * 4, GL_ARRAY_BUFFER));
+
+        joints_acc = state.accessors.size();
+        state.accessors.append(_build_accessor(joints_bv, positions.size(), GL_UNSIGNED_SHORT, "VEC4"));
+        weights_acc = state.accessors.size();
+        state.accessors.append(_build_accessor(weights_bv, positions.size(), GL_FLOAT, "VEC4"));
+    }
+
+    // Build mesh
+    Dictionary prim = _build_primitive(pos_acc, norm_acc, uv_acc, idx_acc, joints_acc, weights_acc);
+    Dictionary mesh_dict;
+    Array prims;
+    prims.append(prim);
+    mesh_dict["primitives"] = prims;
+    int mesh_idx = state.meshes.size();
+    state.meshes.append(mesh_dict);
+
+    return mesh_idx;
+}
+
+int VFXGLTFExporter::_export_skeleton_to_gltf(const Ref<VFXSkeleton>& skeleton, _SceneExportState& state, std::vector<int>& out_bone_node_indices) {
+    int bone_count = skeleton->get_bone_count();
+    if (bone_count == 0) return -1;
+
+    out_bone_node_indices.resize(bone_count);
+
+    // First pass: create all bone nodes
+    for (int i = 0; i < bone_count; i++) {
+        int node_idx = state.nodes.size();
+        out_bone_node_indices[i] = node_idx;
+
+        Dictionary bone_node;
+        bone_node["name"] = skeleton->get_bone_name(i);
+
+        // Bone local transform (converted to glTF space)
+        Vector3 pos = skeleton->get_bone_local_position(i);
+        Quaternion rot = skeleton->get_bone_local_rotation(i);
+        Vector3 scale = skeleton->get_bone_local_scale(i);
+
+        Vector3 gltf_pos = _godot_to_gltf_position(pos);
+        Quaternion gltf_rot = _godot_to_gltf_rotation(rot);
+
+        if (!gltf_pos.is_zero_approx()) {
+            Array t_arr;
+            t_arr.append(gltf_pos.x); t_arr.append(gltf_pos.y); t_arr.append(gltf_pos.z);
+            bone_node["translation"] = t_arr;
+        }
+
+        if (!Math::is_zero_approx(gltf_rot.x) || !Math::is_zero_approx(gltf_rot.y) ||
+            !Math::is_zero_approx(gltf_rot.z) || !Math::is_equal_approx(gltf_rot.w, 1.0f)) {
+            Array r_arr;
+            r_arr.append(gltf_rot.x); r_arr.append(gltf_rot.y); r_arr.append(gltf_rot.z); r_arr.append(gltf_rot.w);
+            bone_node["rotation"] = r_arr;
+        }
+
+        if (!Math::is_equal_approx(scale.x, 1.0f) || !Math::is_equal_approx(scale.y, 1.0f) || !Math::is_equal_approx(scale.z, 1.0f)) {
+            Array s_arr;
+            s_arr.append(scale.x); s_arr.append(scale.y); s_arr.append(scale.z);
+            bone_node["scale"] = s_arr;
+        }
+
+        state.nodes.append(bone_node);
+    }
+
+    // Second pass: set up bone children arrays
+    for (int i = 0; i < bone_count; i++) {
+        PackedInt32Array packed_children = skeleton->get_bone_children(i);
+        if (packed_children.size() > 0) {
+            Array ch;
+            for (int j = 0; j < packed_children.size(); j++) {
+                int child_bone = packed_children[j];
+                ch.append(out_bone_node_indices[child_bone]);
+            }
+            Dictionary bone_node = state.nodes[out_bone_node_indices[i]];
+            bone_node["children"] = ch;
+            state.nodes[out_bone_node_indices[i]] = bone_node;
+        }
+    }
+
+    // Third pass: write inverse bind matrices (in glTF space)
+    PackedFloat32Array ibm;
+    ibm.resize(bone_count * 16);
+    for (int i = 0; i < bone_count; i++) {
+        Transform3D gltf_bind = _godot_to_gltf_transform(skeleton->get_bone_bind_pose(i));
+        Transform3D ibm_t = gltf_bind.affine_inverse();
+        Basis b = ibm_t.get_basis();
+        Vector3 t = ibm_t.get_origin();
+        int base = i * 16;
+        ibm[base + 0] = b[0][0]; ibm[base + 1] = b[0][1]; ibm[base + 2] = b[0][2]; ibm[base + 3] = 0;
+        ibm[base + 4] = b[1][0]; ibm[base + 5] = b[1][1]; ibm[base + 6] = b[1][2]; ibm[base + 7] = 0;
+        ibm[base + 8] = b[2][0]; ibm[base + 9] = b[2][1]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
+        ibm[base + 12] = t.x;    ibm[base + 13] = t.y;    ibm[base + 14] = t.z;    ibm[base + 15] = 1;
+    }
+    int ibm_offset = _write_mat4_array(ibm);
+    int ibm_bv = state.bufferViews.size();
+    state.bufferViews.append(_build_buffer_view(0, ibm_offset, bone_count * 64, GL_ARRAY_BUFFER));
+    int ibm_acc = state.accessors.size();
+    state.accessors.append(_build_accessor(ibm_bv, bone_count, GL_FLOAT, "MAT4"));
+
+    // Create skin
+    int skin_idx = state.skins.size();
+    state.skins.append(_build_skin(ibm_acc, out_bone_node_indices));
+
+    return skin_idx;
+}
+
+void VFXGLTFExporter::_export_animations_to_gltf(const Ref<VFXAnimator>& animator, const Ref<VFXSkeleton>& skeleton, _SceneExportState& state, const std::vector<int>& bone_node_indices, const String& node_name_prefix) {
+    if (animator.is_null() || skeleton.is_null()) return;
+
+    int bone_count = skeleton->get_bone_count();
+    if (bone_count == 0) return;
+
+    int clip_count = animator->get_clip_count();
+    for (int clip_idx = 0; clip_idx < clip_count; clip_idx++) {
+        float duration = animator->get_clip_duration(clip_idx);
+        float fps = 30.0f;
+        int frame_count = (int)ceilf(duration * fps) + 1;
+
+        // Build time samples
+        PackedFloat32Array time_samples;
+        time_samples.resize(frame_count);
+        for (int i = 0; i < frame_count; i++) {
+            time_samples[i] = (float)i / fps;
+            if (time_samples[i] > duration) time_samples[i] = duration;
+        }
+
+        int time_offset = _write_float_array(time_samples);
+        int time_bv = state.bufferViews.size();
+        state.bufferViews.append(_build_buffer_view(0, time_offset, time_samples.size() * 4, GL_ARRAY_BUFFER));
+        int time_acc = state.accessors.size();
+        Dictionary time_accessor = _build_accessor(time_bv, time_samples.size(), GL_FLOAT, "SCALAR");
+        Array tmin, tmax;
+        tmin.append(0.0f); tmax.append(duration);
+        time_accessor["min"] = tmin;
+        time_accessor["max"] = tmax;
+        state.accessors.append(time_accessor);
+
+        int curve_count = animator->get_curve_count(clip_idx);
+        Array anim_samplers;
+        Array anim_channels;
+
+        for (int c = 0; c < curve_count; c++) {
+            int bone_id = animator->get_curve_bone_id(clip_idx, c);
+            if (bone_id < 0 || bone_id >= bone_count) continue;
+
+            bool is_rotation = animator->get_curve_is_rotation(clip_idx, c);
+
+            PackedFloat32Array output_data;
+            output_data.resize(frame_count * (is_rotation ? 4 : 3));
+
+            for (int f = 0; f < frame_count; f++) {
+                float t = time_samples[f];
+                if (is_rotation) {
+                    Quaternion q = animator->sample_quaternion(clip_idx, c, t);
+                    Quaternion gltf_q = _godot_to_gltf_rotation(q);
+                    output_data[f * 4 + 0] = gltf_q.x;
+                    output_data[f * 4 + 1] = gltf_q.y;
+                    output_data[f * 4 + 2] = gltf_q.z;
+                    output_data[f * 4 + 3] = gltf_q.w;
+                } else {
+                    Vector3 v = animator->sample_vector(clip_idx, c, t);
+                    Vector3 gltf_v;
+                    String curve_name = animator->get_curve_name(clip_idx, c);
+                    if (curve_name.contains("scale") || curve_name.contains("Scale")) {
+                        gltf_v = v;
+                    } else {
+                        gltf_v = _godot_to_gltf_position(v);
+                    }
+                    output_data[f * 3 + 0] = gltf_v.x;
+                    output_data[f * 3 + 1] = gltf_v.y;
+                    output_data[f * 3 + 2] = gltf_v.z;
+                }
+            }
+
+            int out_offset = _write_float_array(output_data);
+            int out_bv = state.bufferViews.size();
+            state.bufferViews.append(_build_buffer_view(0, out_offset, output_data.size() * 4, GL_ARRAY_BUFFER));
+            int out_acc = state.accessors.size();
+            state.accessors.append(_build_accessor(out_bv, frame_count, GL_FLOAT, is_rotation ? "VEC4" : "VEC3"));
+
+            int sampler_idx = anim_samplers.size();
+            anim_samplers.append(_build_animation_sampler(time_acc, out_acc, "LINEAR"));
+
+            String curve_name = animator->get_curve_name(clip_idx, c);
+            String path;
+            if (curve_name.contains("scale") || curve_name.contains("Scale")) {
+                path = "scale";
+            } else if (is_rotation) {
+                path = "rotation";
+            } else {
+                path = "translation";
+            }
+
+            anim_channels.append(_build_animation_channel(sampler_idx, path, bone_node_indices[bone_id]));
+        }
+
+        if (anim_samplers.size() > 0) {
+            String anim_name = animator->get_clip_name(clip_idx);
+            if (anim_name.is_empty()) anim_name = "animation";
+            if (!node_name_prefix.is_empty()) anim_name = node_name_prefix + "_" + anim_name;
+            state.animations.append(_build_animation(anim_name, anim_samplers, anim_channels));
+        }
+    }
+}
+
+int VFXGLTFExporter::_export_scene_node_recursive(const Ref<VFXSceneNode>& node, _SceneExportState& state) {
+    if (node.is_null()) return -1;
+
+    // Recursively export children first
+    std::vector<int> child_indices;
+    Array vfx_children = node->get_children();
+    for (int i = 0; i < vfx_children.size(); i++) {
+        Ref<VFXSceneNode> child = vfx_children[i];
+        int child_idx = _export_scene_node_recursive(child, state);
+        if (child_idx >= 0) child_indices.push_back(child_idx);
+    }
+
+    // Handle skeleton
+    int skin_idx = -1;
+    std::vector<int> bone_node_indices;
+    bool is_first_skeleton_export = false;
+    if (node->has_skeleton()) {
+        Ref<VFXSkeleton> skel = node->get_skeleton();
+        VFXSkeleton* skel_ptr = skel.ptr();
+
+        auto it = state.skeleton_to_skin.find(skel_ptr);
+        if (it != state.skeleton_to_skin.end()) {
+            skin_idx = it->second;
+            bone_node_indices = state.skeleton_to_bone_nodes[skel_ptr];
+        } else {
+            skin_idx = _export_skeleton_to_gltf(skel, state, bone_node_indices);
+            state.skeleton_to_skin[skel_ptr] = skin_idx;
+            state.skeleton_to_bone_nodes[skel_ptr] = bone_node_indices;
+            is_first_skeleton_export = true;
+        }
+    }
+
+    // Handle mesh
+    int mesh_idx = -1;
+    if (node->has_mesh()) {
+        Ref<VFXMesh> m = node->get_mesh();
+        VFXMesh* m_ptr = m.ptr();
+
+        auto it = state.mesh_to_index.find(m_ptr);
+        if (it != state.mesh_to_index.end()) {
+            mesh_idx = it->second;
+        } else {
+            mesh_idx = _export_mesh_to_gltf(m, state);
+            if (mesh_idx >= 0) {
+                state.mesh_to_index[m_ptr] = mesh_idx;
+            }
+        }
+    }
+
+    // Handle animations
+    if (node->has_animator() && node->has_skeleton()) {
+        Ref<VFXAnimator> anim = node->get_animator();
+        VFXAnimator* anim_ptr = anim.ptr();
+
+        auto it = state.exported_animators.find(anim_ptr);
+        if (it == state.exported_animators.end()) {
+            _export_animations_to_gltf(anim, node->get_skeleton(), state, bone_node_indices, node->get_node_name());
+            state.exported_animators[anim_ptr] = true;
+        }
+    }
+
+    // Build glTF node children list
+    std::vector<int> all_children = child_indices;
+
+    // Add root bones as children of this node ONLY on first export
+    // (prevents double-parenting when skeleton is shared)
+    if (is_first_skeleton_export && !bone_node_indices.empty()) {
+        Ref<VFXSkeleton> skel = node->get_skeleton();
+        for (int bone_id = 0; bone_id < skel->get_bone_count(); bone_id++) {
+            if (skel->get_bone_parent(bone_id) < 0) {
+                all_children.push_back(bone_node_indices[bone_id]);
+            }
+        }
+    }
+
+    Dictionary gltf_node = _build_node_full(node->get_node_name(), node->get_local_transform(), all_children, mesh_idx, skin_idx);
+    int node_idx = state.nodes.size();
+    state.nodes.append(gltf_node);
+    return node_idx;
+}
+
+// === NEW: Main scene export ===
+bool VFXGLTFExporter::export_scene_glb(const Ref<VFXScene>& scene, const String& filepath) {
+    if (scene.is_null() || scene->get_root().is_null()) {
+        UtilityFunctions::print("Scene export failed: no scene or root node");
+        return false;
+    }
+
+    buffer_data.clear();
+
+    _SceneExportState state;
+
+    // Export the scene tree recursively
+    int root_node_idx = _export_scene_node_recursive(scene->get_root(), state);
+    if (root_node_idx < 0) {
+        UtilityFunctions::print("Scene export failed: could not export root node");
+        return false;
+    }
+
+    // Build scene
+    Array scenes;
+    scenes.append(_build_scene(root_node_idx));
+
+    // Buffer
+    state.buffers.append(_build_buffer(buffer_data.size()));
+
+    // Assemble document
+    Dictionary doc;
+    doc["asset"] = _build_asset();
+    doc["scene"] = 0;
+    doc["scenes"] = scenes;
+    doc["nodes"] = state.nodes;
+    doc["meshes"] = state.meshes;
+    doc["buffers"] = state.buffers;
+    doc["bufferViews"] = state.bufferViews;
+    doc["accessors"] = state.accessors;
+    if (state.skins.size() > 0) doc["skins"] = state.skins;
+    if (state.animations.size() > 0) doc["animations"] = state.animations;
+
+    // Write GLB
+    PackedByteArray glb = combine_glb(doc, buffer_data);
+
+    Ref<FileAccess> f = FileAccess::open(filepath, FileAccess::WRITE);
+    if (f.is_null()) return false;
+    f->store_buffer(glb);
+    f->close();
+
+    int node_count = state.nodes.size();
+    int mesh_count = state.meshes.size();
+    int skin_count = state.skins.size();
+    int anim_count = state.animations.size();
+    UtilityFunctions::print("Exported scene GLB to: ", filepath,
+        " (", node_count, " nodes, ", mesh_count, " meshes, ", skin_count, " skins, ", anim_count, " animations, ", buffer_data.size(), " bytes)");
+    return true;
+}
+
 
 // === Main export ===
 bool VFXGLTFExporter::export_glb(const Ref<VFXMesh>& mesh, const Ref<VFXSkeleton>& skeleton, const String& filepath) {
