@@ -573,7 +573,6 @@ void VFXGLTFExporter::_export_animations_to_gltf(const Ref<VFXAnimator>& animato
     }
 }
 
-
 int VFXGLTFExporter::_export_scene_node_recursive(const Ref<VFXSceneNode>& node, _SceneExportState& state) {
     if (node.is_null()) return -1;
 
