@@ -1116,3 +1116,11 @@ void VFXEditorNode::set_gizmo_screen_scale(float scale) {
 float VFXEditorNode::get_gizmo_screen_scale() const {
     return gizmo_screen_scale;
 }
+
+
+Transform3D VFXEditorNode::_get_active_mesh_transform() const {
+    if (active_scene_node.is_valid()) {
+        return active_scene_node->get_global_transform();
+    }
+    return get_global_transform();
+}
