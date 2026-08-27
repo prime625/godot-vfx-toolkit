@@ -178,6 +178,8 @@ private:
     void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
+	Transform3D _get_active_mesh_transform() const;
+
 
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
