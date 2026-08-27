@@ -11,19 +11,33 @@ using namespace godot;
 bool VFXEditorNode::export_glb(const String& filepath) {
     Ref<VFXGLTFExporter> exporter;
     exporter.instantiate();
+
+    // If we have a scene with multiple nodes, export the full scene tree
+    if (scene.is_valid() && scene->get_root().is_valid()) {
+        Array all_nodes = scene->flatten_tree();
+        if (all_nodes.size() > 1) {
+            return exporter->export_scene_glb(scene, filepath);
+        }
+    }
+
+    // Fallback to single mesh export
     return exporter->export_glb(mesh, skeleton, filepath);
 }
 
 bool VFXEditorNode::export_glb_animated(const String& filepath, int clip_idx) {
     Ref<VFXGLTFExporter> exporter;
     exporter.instantiate();
-    return exporter->export_glb_animated(mesh, skeleton, animator, clip_idx, filepath);
-}
 
-bool VFXEditorNode::export_vat(const String& filepath, int frame_count, float fps) {
-    Ref<VFXGLTFExporter> exporter;
-    exporter.instantiate();
-    return exporter->export_vat_glb(mesh, skin, frame_count, fps, filepath);
+    // If we have a scene with multiple nodes, export the full scene tree with all animations
+    if (scene.is_valid() && scene->get_root().is_valid()) {
+        Array all_nodes = scene->flatten_tree();
+        if (all_nodes.size() > 1) {
+            return exporter->export_scene_glb(scene, filepath);
+        }
+    }
+
+    // Fallback to single mesh animated export
+    return exporter->export_glb_animated(mesh, skeleton, animator, clip_idx, filepath);
 }
 
 // ============================================================================
