@@ -236,6 +236,7 @@ void VFXEditorNode::_notification(int p_what) {
         }
     }
     if (p_what == NOTIFICATION_PROCESS) {
+        _update_gizmo_scale();
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
         }
@@ -374,6 +375,34 @@ Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     b.set_column(2, b.get_column(2).normalized());
     visual.set_basis(b);
     return visual;
+}
+
+void VFXEditorNode::_update_gizmo_scale() {
+    if (!camera) return;
+
+    Vector3 gizmo_pos = gizmo_transform.get_origin();
+    if (edit_mode != MODE_OBJECT && active_scene_node.is_valid()) {
+        gizmo_pos = _get_active_mesh_transform().xform(gizmo_pos);
+    }
+
+    Vector3 cam_pos = camera->get_global_transform().get_origin();
+    float dist = (gizmo_pos - cam_pos).length();
+    if (dist < 0.001f) dist = 0.001f;
+
+    float vp_h = 1080.0f;
+    if (get_viewport()) {
+        vp_h = get_viewport()->get_visible_rect().size.y;
+    }
+    if (vp_h < 1.0f) vp_h = 1.0f;
+
+    float fov = camera->get_fov(); // degrees
+    float fov_rad = Math::deg_to_rad(fov);
+    float target_px = 80.0f; // Godot uses ~80px gizmo size
+    float world_size = dist * tanf(fov_rad * 0.5f) * 2.0f * (target_px / vp_h);
+
+    // Clamp: never smaller than 3cm, never bigger than 3 meters
+    world_size = CLAMP(world_size, 0.03f, 3.0f);
+    gizmo_screen_scale = world_size;
 }
 
 
