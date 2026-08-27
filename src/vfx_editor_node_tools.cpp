@@ -227,7 +227,7 @@ void VFXEditorNode::bevel_selection(float amount) {
 void VFXEditorNode::knife_selection(const Vector3& p0, const Vector3& p1) {
     if (mesh.is_null()) return;
     if (edit_mode == MODE_FACE && selected_face >= 0) {
-        Transform3D inv = get_global_transform().affine_inverse();
+        Transform3D inv = _get_active_mesh_transform().affine_inverse();
         mesh->knife_cut_face(selected_face, inv.xform(p0), inv.xform(p1));
         selected_face = -1;
     }
