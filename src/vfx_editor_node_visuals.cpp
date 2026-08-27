@@ -93,6 +93,8 @@ void VFXEditorNode::_build_selection_mesh() {
     mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
     selection_visual->set_material_override(mat);
     selection_visual->set_mesh(am);
+    selection_visual->set_transform(_get_active_mesh_transform());
+    
 }
 
 // ============================================================================
