@@ -174,4 +174,20 @@ bool ray_vs_plane(const Vector3& ro, const Vector3& rd,
     return true;
 }
 
+bool ray_vs_sphere(const Vector3& ro, const Vector3& rd,
+    const Vector3& sc, float sr, Vector3& out_hit, Vector3& out_normal) {
+    Vector3 oc = ro - sc;
+    float a = rd.dot(rd);
+    float b = 2.0f * oc.dot(rd);
+    float c = oc.dot(oc) - sr * sr;
+    float discriminant = b * b - 4.0f * a * c;
+    if (discriminant < 0.0f) return false;
+    float t = (-b - sqrtf(discriminant)) / (2.0f * a);
+    if (t < 0.0f) t = (-b + sqrtf(discriminant)) / (2.0f * a);
+    if (t < 0.0f) return false;
+    out_hit = ro + rd * t;
+    out_normal = (out_hit - sc).normalized();
+    return true;
+}
+
 } // namespace vfx_editor
