@@ -365,6 +365,9 @@ void VFXEditorNode::mark_scene_dirty() {
 // ============================================================================
 Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     Transform3D visual = gizmo_transform;
+    if (edit_mode != MODE_OBJECT && active_scene_node.is_valid()) {
+        visual = _get_active_mesh_transform() * visual;
+    }
     Basis b = visual.get_basis();
     b.set_column(0, b.get_column(0).normalized());
     b.set_column(1, b.get_column(1).normalized());
@@ -372,6 +375,7 @@ Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     visual.set_basis(b);
     return visual;
 }
+
 
 // ============================================================================
 // GIZMO VISIBILITY
