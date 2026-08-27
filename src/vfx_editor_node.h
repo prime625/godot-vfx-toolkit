@@ -50,7 +50,10 @@ public:
         GIZMO_XZ = 4,
         GIZMO_YZ = 5,
         GIZMO_XYZ = 6,
+        GIZMO_VIEW_ROTATE = 7,
+        GIZMO_TRACKBALL = 8,
     };
+
 
     enum EditMode {
         MODE_OBJECT = 0,
@@ -149,6 +152,10 @@ private:
     Vector3 gizmo_drag_start_scale;
     Plane gizmo_drag_plane;
     Vector3 gizmo_drag_start_point;
+    Vector3 gizmo_drag_initial_vector;   // <-- NEW: for rotation drag
+    bool gizmo_is_trackball = false;     // <-- NEW
+    float gizmo_rotation_angle = 0.0f;   // <-- NEW: accumulated angle for display
+
 
     // === MESH EDIT STATE ===
     std::vector<int> mesh_edit_verts;
@@ -179,7 +186,7 @@ private:
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
 	Transform3D _get_active_mesh_transform() const;
-
+    void _update_gizmo_scale();
 
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
