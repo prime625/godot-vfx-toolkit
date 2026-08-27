@@ -567,11 +567,12 @@ void VFXGLTFExporter::_export_animations_to_gltf(const Ref<VFXAnimator>& animato
         if (anim_samplers.size() > 0) {
             String anim_name = animator->get_clip_name(clip_idx);
             if (anim_name.is_empty()) anim_name = "animation";
-            if (!node_name_prefix.is_empty()) anim_name = node_name_prefix + "_" + anim_name;
+            if (!node_name_prefix.is_empty()) anim_name = node_name_prefix + String("_") + anim_name;
             state.animations.append(_build_animation(anim_name, anim_samplers, anim_channels));
         }
     }
 }
+
 
 int VFXGLTFExporter::_export_scene_node_recursive(const Ref<VFXSceneNode>& node, _SceneExportState& state) {
     if (node.is_null()) return -1;
