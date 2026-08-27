@@ -36,7 +36,7 @@ int VFXEditorNode::screen_select_vertex(const Vector2& screen_pos) {
 
     float best_depth = 1e20f;
     int best_idx = -1;
-    Transform3D gt = get_global_transform();
+    Transform3D gt = _get_active_mesh_transform();
     float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
 
     for (auto* v : mesh->get_vertices()) {
@@ -65,7 +65,7 @@ int VFXEditorNode::screen_select_edge(const Vector2& screen_pos) {
 
     float best_depth = 1e20f;
     int best_idx = -1;
-    Transform3D gt = get_global_transform();
+    Transform3D gt = _get_active_mesh_transform();
     float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
     float near_z = camera->get_near();  // positive value
     Transform3D cam_inv = camera->get_global_transform().affine_inverse();
@@ -121,7 +121,7 @@ int VFXEditorNode::screen_select_face(const Vector2& screen_pos) {
 
     float best_depth = 1e20f;
     int best_idx = -1;
-    Transform3D gt = get_global_transform();
+    Transform3D gt = _get_active_mesh_transform();
     float tol_sq = select_pixel_tolerance * select_pixel_tolerance;
 
     // Pass 1: strict point-in-polygon
@@ -180,7 +180,7 @@ int VFXEditorNode::screen_select_face(const Vector2& screen_pos) {
 // ============================================================================
 int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_dir) {
     if (mesh.is_null()) return -1;
-    Transform3D inv = get_global_transform().affine_inverse();
+    Transform3D inv = _get_active_mesh_transform().affine_inverse();
     Vector3 ro = inv.xform(ray_origin);
     Vector3 rd = inv.basis.xform(ray_dir).normalized();
 
@@ -332,7 +332,7 @@ PackedInt32Array VFXEditorNode::screen_select_box(const Rect2& screen_rect) cons
     if (!mesh.is_valid() || !camera || screen_rect.size.x < 2.0f || screen_rect.size.y < 2.0f)
         return result;
 
-    Transform3D gt = get_global_transform();
+    Transform3D gt = _get_active_mesh_transform();
     Transform3D cam_inv = camera->get_global_transform().affine_inverse();
     float near_z = camera->get_near();
 
