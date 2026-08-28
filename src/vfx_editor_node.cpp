@@ -505,6 +505,7 @@ void VFXEditorNode::set_edit_mode(int mode) {
     clear_selection();
     _build_selection_mesh();
     _update_proportional_cursor();
+	_update_gizmo_visibility()
 }
 
 int VFXEditorNode::get_edit_mode() const { return edit_mode; }
