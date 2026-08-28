@@ -33,6 +33,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_vfx_skin", "skin"), &VFXEditorNode::set_vfx_skin);
     ClassDB::bind_method(D_METHOD("get_vfx_skin"), &VFXEditorNode::get_vfx_skin);
     ClassDB::bind_method(D_METHOD("auto_weight"), &VFXEditorNode::auto_weight);
+    ClassDB::bind_method(D_METHOD("set_gizmo_local", "local"), &VFXEditorNode::set_gizmo_local);
+    ClassDB::bind_method(D_METHOD("get_gizmo_local"), &VFXEditorNode::get_gizmo_local);
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gizmo_local"), "set_gizmo_local", "get_gizmo_local");
 
     ClassDB::bind_method(D_METHOD("set_vfx_animator", "anim"), &VFXEditorNode::set_vfx_animator);
     ClassDB::bind_method(D_METHOD("get_vfx_animator"), &VFXEditorNode::get_vfx_animator);
@@ -1142,6 +1145,16 @@ void VFXEditorNode::on_touch_drag(const Vector3& ray_origin, const Vector3& ray_
     }
 }
 
+
+void VFXEditorNode::set_gizmo_local(bool p_local) {
+    gizmo_local = p_local;
+    _update_gizmo_for_selection();
+    _build_gizmo_mesh();
+}
+
+bool VFXEditorNode::get_gizmo_local() const {
+    return gizmo_local;
+}
 
 void VFXEditorNode::set_gizmo_screen_scale(float scale) {
     gizmo_screen_scale = scale;
