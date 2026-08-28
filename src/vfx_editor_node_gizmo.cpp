@@ -531,7 +531,9 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             if (rot_axis.length_squared() < 0.0001f) return;
 
             Quaternion rot(rot_axis, angle);
-            Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
+            // AXIS ROTATION — local space
+	 	 	Basis new_basis = gizmo_drag_start_transform.basis * Basis(rot);
+
             gizmo_transform.set_basis(new_basis);
             gizmo_rotation_angle = angle;
         }
@@ -566,7 +568,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             else axis_local = Vector3(0,0,1); // view rotation uses Z in view space
 
             Quaternion rot(axis_local, angle);
-            Basis new_basis = Basis(rot) * gizmo_drag_start_transform.basis;
+            Basis new_basis = gizmo_drag_start_transform.basis * Basis(rot);
             gizmo_transform.set_basis(new_basis);
             gizmo_rotation_angle = angle;
         }
