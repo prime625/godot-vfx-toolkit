@@ -206,7 +206,6 @@ void VFXEditorNode::_update_gizmo_for_selection() {
         if (gizmo_local) {
             gizmo_transform = active_scene_node->get_local_transform();
         } else {
-            // GLOBAL mode: axes stay world-aligned, only position follows object
             gizmo_transform.set_origin(active_scene_node->get_local_transform().get_origin());
             gizmo_transform.set_basis(Transform3D().get_basis());
         }
@@ -214,14 +213,15 @@ void VFXEditorNode::_update_gizmo_for_selection() {
         Vector3 center;
         int count = 0;
 
+        // Single selection
         if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
-            center = mesh->get_vertex_position(selected_vertex);
+            center = mesh->get_vertices()[selected_vertex]->position;
             count = 1;
         } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
             int v0, v1;
             mesh->get_edge_endpoints(selected_edge, v0, v1);
             if (v0 >= 0 && v1 >= 0) {
-                center = (mesh->get_vertex_position(v0) + mesh->get_vertex_position(v1)) * 0.5f;
+                center = (mesh->get_vertices()[v0]->position + mesh->get_vertices()[v1]->position) * 0.5f;
                 count = 2;
             }
         } else if (edit_mode == MODE_FACE && selected_face >= 0) {
@@ -236,9 +236,48 @@ void VFXEditorNode::_update_gizmo_for_selection() {
             if (count > 0) center /= (float)count;
         }
 
-        gizmo_transform.set_origin(center);
-        if (!gizmo_local) {
-            gizmo_transform.set_basis(Transform3D().get_basis());
+        // Multi-select fallback
+        if (count == 0) {
+            if (edit_mode == MODE_VERTEX && !selected_vertices.empty()) {
+                for (int v : selected_vertices) {
+                    if (v >= 0 && v < mesh->get_vertex_count() && !mesh->get_vertices()[v]->deleted) {
+                        center += mesh->get_vertices()[v]->position;
+                        count++;
+                    }
+                }
+            } else if (edit_mode == MODE_EDGE && !selected_edges.empty()) {
+                for (int e : selected_edges) {
+                    int v0, v1;
+                    mesh->get_edge_endpoints(e, v0, v1);
+                    if (v0 >= 0 && !mesh->get_vertices()[v0]->deleted) {
+                        center += mesh->get_vertices()[v0]->position;
+                        count++;
+                    }
+                    if (v1 >= 0 && !mesh->get_vertices()[v1]->deleted) {
+                        center += mesh->get_vertices()[v1]->position;
+                        count++;
+                    }
+                }
+            } else if (edit_mode == MODE_FACE && !selected_faces.empty()) {
+                for (int f : selected_faces) {
+                    std::vector<vfx::HEVertex*> fverts;
+                    mesh->get_face_vertices(f, fverts);
+                    for (auto* v : fverts) {
+                        if (!v->deleted) {
+                            center += v->position;
+                            count++;
+                        }
+                    }
+                }
+            }
+            if (count > 0) center /= (float)count;
+        }
+
+        if (count > 0) {
+            gizmo_transform.set_origin(center);
+            if (!gizmo_local) {
+                gizmo_transform.set_basis(Transform3D().get_basis());
+            }
         }
     }
 
@@ -247,6 +286,7 @@ void VFXEditorNode::_update_gizmo_for_selection() {
         _build_gizmo_mesh();
     }
 }
+
 
 
 
