@@ -1082,6 +1082,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             _handle_element_selection(hit);
             _build_selection_mesh();
             _update_gizmo_for_selection();
+			_update_gizmo_visibility();
             return MESH_ELEMENT_HIT;
         }
 
