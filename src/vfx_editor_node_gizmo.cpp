@@ -474,7 +474,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
             gizmo_drag_start_scale = gizmo_transform.basis.get_scale();
             if (axis <= GIZMO_Z) {
                 Vector3 world_axis = gizmo_transform.basis.get_column(axis).normalized();
-                gizmo_drag_start_point = Vector3((hit - origin).dot(world_axis), 0, 0);
+                gizmo_drag_start_point = Vector3(fabs((hit - origin).dot(world_axis)), 0, 0);
             } else {
                 gizmo_drag_start_point = Vector3((hit - origin).length(), 0, 0);
             }
@@ -578,8 +578,9 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         Vector3 scale = gizmo_drag_start_scale;
         if (gizmo_drag_axis <= GIZMO_Z) {
             Vector3 world_axis = gizmo_drag_start_transform.basis.get_column(gizmo_drag_axis).normalized();
-            float current_proj = (hit - origin).dot(world_axis);
-            float start_proj = gizmo_drag_start_point.x;
+            float current_proj = fabs((hit - origin).dot(world_axis));
+	 	 	float start_proj = gizmo_drag_start_point.x;  // already absolute
+
             if (fabs(start_proj) > 0.0001f) {
                 float ratio = current_proj / start_proj;
                 ratio = vfx::clampf(ratio, 0.001f, 1000.0f);
