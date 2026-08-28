@@ -528,6 +528,7 @@ void VFXEditorNode::clear_selection() {
     _update_gizmo_for_selection();
     if (selection_visual) _build_selection_mesh();
     _build_skeleton_mesh();
+	_update_gizmo_visibility();
 }
 
 int VFXEditorNode::get_selected_face() const { return selected_face; }
