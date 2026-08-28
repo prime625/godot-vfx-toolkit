@@ -417,7 +417,7 @@ void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
     bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
                               !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
-    bool show = !gizmo_locked && ((edit_mode == MODE_OBJECT && active_scene_node.is_valid()) || has_mesh_selection || selected_bone >= 0);
+    bool show = !gizmo_locked && (edit_mode == MODE_OBJECT || has_mesh_selection || selected_bone >= 0);
     gizmo_node->set_visible(show);
 }
 
@@ -1092,9 +1092,10 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             clear_selection();
         } else {
             // Multi/Loop: hide gizmo on empty click so next click isn't stolen by gizmo raycast
-            if (gizmo_node) gizmo_node->set_visible(false);
+            _update_gizmo_visibility();
         }
-
+        return -1;
+    }
 
     // === SKELETON MODE ===
     if (show_skeleton) {
