@@ -129,6 +129,7 @@ private:
     int selected_face = -1;
     int selected_edge = -1;
     int selected_vertex = -1;
+    bool gizmo_local = false;
 
     // === SELECTION SETS ===
     std::unordered_set<int> selected_faces;
@@ -297,6 +298,8 @@ public:
     bool is_gizmo_dragging() const;
 	void set_gizmo_screen_scale(float scale);
 	float get_gizmo_screen_scale() const;
+    void set_gizmo_local(bool p_local);
+    bool get_gizmo_local() const;
 
 
     // === GIZMO LOCK (NEW) ===
