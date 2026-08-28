@@ -442,7 +442,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
             Vector3 hit;
             if (vfx_editor::ray_vs_plane(ray_origin, ray_dir, ring_plane, hit)) {
                 gizmo_drag_start_point = hit;
-                gizmo_drag_initial_vector = (hit - origin).normalized();
+                gizmo_drag_initial_vector = _get_visual_gizmo_transform().basis.xform_inv(hit - origin).normalized();
                 if (gizmo_drag_initial_vector.length_squared() < 0.0001f) {
                     // Fallback: pick a perpendicular vector
                     Vector3 perp = (fabs(normal.dot(Vector3(0,1,0))) < 0.9f) ? Vector3(0,1,0) : Vector3(1,0,0);
@@ -457,7 +457,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
             Vector3 hit;
             if (vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
                 gizmo_drag_start_point = hit;
-                gizmo_drag_initial_vector = (hit - origin).normalized();
+                gizmo_drag_initial_vector = _get_visual_gizmo_transform().basis.xform_inv(hit - origin).normalized();
             }
             gizmo_is_trackball = true;
         }
