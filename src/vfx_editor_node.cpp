@@ -1092,7 +1092,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             clear_selection();
         } else {
             // Multi/Loop: hide gizmo on empty click so next click isn't stolen by gizmo raycast
-            if (gizmo_node) gizmo_node->set_visible(false);
+            _update_gizmo_visibility()
         }
         return -1;
     }
