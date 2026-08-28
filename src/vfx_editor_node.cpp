@@ -26,9 +26,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_vfx_skeleton", "sk"), &VFXEditorNode::set_vfx_skeleton);
     ClassDB::bind_method(D_METHOD("get_vfx_skeleton"), &VFXEditorNode::get_vfx_skeleton);
     ClassDB::bind_method(D_METHOD("create_mixamo_skeleton"), &VFXEditorNode::create_mixamo_skeleton);
-	ClassDB::bind_method(D_METHOD("set_gizmo_screen_scale", "scale"), &VFXEditorNode::set_gizmo_screen_scale);
-	ClassDB::bind_method(D_METHOD("get_gizmo_screen_scale"), &VFXEditorNode::get_gizmo_screen_scale);
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_screen_scale"), "set_gizmo_screen_scale", "get_gizmo_screen_scale");
+        ClassDB::bind_method(D_METHOD("set_gizmo_screen_scale", "scale"), &VFXEditorNode::set_gizmo_screen_scale);
+        ClassDB::bind_method(D_METHOD("get_gizmo_screen_scale"), &VFXEditorNode::get_gizmo_screen_scale);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_screen_scale"), "set_gizmo_screen_scale", "get_gizmo_screen_scale");
 
     ClassDB::bind_method(D_METHOD("set_vfx_skin", "skin"), &VFXEditorNode::set_vfx_skin);
     ClassDB::bind_method(D_METHOD("get_vfx_skin"), &VFXEditorNode::get_vfx_skin);
@@ -87,7 +87,7 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_gizmo_locked", "locked"), &VFXEditorNode::set_gizmo_locked);
     ClassDB::bind_method(D_METHOD("get_gizmo_locked"), &VFXEditorNode::get_gizmo_locked);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gizmo_locked"), "set_gizmo_locked", "get_gizmo_locked");
-    
+
 
     ClassDB::bind_method(D_METHOD("set_selected_bone", "idx"), &VFXEditorNode::set_selected_bone);
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
@@ -417,7 +417,7 @@ void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
     bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
                               !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
-    bool show = !gizmo_locked && ((edit_mode == MODE_OBJECT && active_scene_node.is_valid()) || has_mesh_selection || selected_bone >= 0);
+    bool show = !gizmo_locked && (edit_mode == MODE_OBJECT || has_mesh_selection || selected_bone >= 0);
     gizmo_node->set_visible(show);
 }
 
@@ -505,7 +505,7 @@ void VFXEditorNode::set_edit_mode(int mode) {
     clear_selection();
     _build_selection_mesh();
     _update_proportional_cursor();
-	_update_gizmo_visibility();
+        _update_gizmo_visibility();
 }
 
 int VFXEditorNode::get_edit_mode() const { return edit_mode; }
@@ -529,7 +529,7 @@ void VFXEditorNode::clear_selection() {
     _update_gizmo_for_selection();
     if (selection_visual) _build_selection_mesh();
     _build_skeleton_mesh();
-	_update_gizmo_visibility();
+        _update_gizmo_visibility();
 }
 
 int VFXEditorNode::get_selected_face() const { return selected_face; }
@@ -756,7 +756,7 @@ void VFXEditorNode::set_gizmo_mode(int mode) {
     gizmo_hover_axis = GIZMO_NONE;
     if (gizmo_node && gizmo_node->is_visible()) {
         _build_gizmo_mesh();
-		_update_gizmo_visibility();
+                _update_gizmo_visibility();
     }
 }
 
@@ -1084,7 +1084,7 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             _handle_element_selection(hit);
             _build_selection_mesh();
             _update_gizmo_for_selection();
-			_update_gizmo_visibility();
+                        _update_gizmo_visibility();
             return MESH_ELEMENT_HIT;
         }
 
