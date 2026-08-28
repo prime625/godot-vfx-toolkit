@@ -570,6 +570,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             gizmo_transform.set_basis(new_basis);
             gizmo_rotation_angle = angle;
         }
+    	_build_gizmo_mesh();
     }
     else if (gizmo_mode == GIZMO_SCALE) {
         Vector3 scale = gizmo_drag_start_scale;
