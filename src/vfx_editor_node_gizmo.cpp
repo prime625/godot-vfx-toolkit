@@ -670,6 +670,11 @@ void VFXEditorNode::gizmo_end_drag() {
     gizmo_drag_axis = GIZMO_NONE;
     gizmo_is_trackball = false;
     gizmo_rotation_angle = 0.0f;
+    
+    // Resync gizmo transform with actual object/bone/mesh selection
+    _update_gizmo_for_selection();
+    _build_gizmo_mesh();
+    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
 }
 
 bool VFXEditorNode::is_gizmo_dragging() const {
