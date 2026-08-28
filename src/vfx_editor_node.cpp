@@ -415,22 +415,12 @@ void VFXEditorNode::_update_gizmo_scale() {
 // ============================================================================
 void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
-    if (gizmo_locked) {
-        gizmo_node->set_visible(false);
-        return;
-    }
-    bool show = false;
-    if (edit_mode == MODE_OBJECT) {
-        if (active_scene_node.is_valid()) {
-            show = true;
-        } else if (selected_bone >= 0 && show_skeleton) {
-            show = true;
-        }
-    } else {
-        show = (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0);
-    }
+    bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
+                              !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
+    bool show = !gizmo_locked && (edit_mode == MODE_OBJECT || has_mesh_selection || selected_bone >= 0);
     gizmo_node->set_visible(show);
 }
+
 
 
 // ============================================================================
