@@ -404,8 +404,8 @@ void VFXEditorNode::_update_gizmo_scale() {
     float target_px = 80.0f; // Godot uses ~80px gizmo size
     float world_size = dist * tanf(fov_rad * 0.5f) * 2.0f * (target_px / vp_h);
 
-    // Clamp: never smaller than 3cm, never bigger than 3 meters
-    world_size = vfx::clampf(world_size, 0.20f, 3.0f);
+    // Clamp: never smaller than 3cm, never bigger than 35 meters
+    world_size = vfx::clampf(world_size, 0.35f, 3.0f);
     gizmo_screen_scale = world_size;
 }
 
