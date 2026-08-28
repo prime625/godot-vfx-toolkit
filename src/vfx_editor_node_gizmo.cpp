@@ -786,7 +786,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
             }
 
             // Convert world-space initial vector to gizmo-local
-            Vector3 local_init = _get_visual_gizmo_transform().basis.xform_inv(gizmo_drag_initial_vector).normalized();
+            Vector3 local_init = gizmo_drag_initial_vector;
             if (local_init.length_squared() < 0.0001f) local_init = Vector3(1,0,0);
 
             // Build ring-plane basis
