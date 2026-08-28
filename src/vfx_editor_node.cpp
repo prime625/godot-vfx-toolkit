@@ -756,6 +756,7 @@ void VFXEditorNode::set_gizmo_mode(int mode) {
     gizmo_hover_axis = GIZMO_NONE;
     if (gizmo_node && gizmo_node->is_visible()) {
         _build_gizmo_mesh();
+		_update_gizmo_visibility();
     }
 }
 
