@@ -770,6 +770,62 @@ void VFXEditorNode::_build_gizmo_mesh() {
         add_track_ring(Vector3(1, 0, 0));
         add_track_ring(Vector3(0, 1, 0));
         add_track_ring(Vector3(0, 0, 1));
+
+        // === ROTATION DRAG ARC FEEDBACK ===
+        if (gizmo_drag_axis != GIZMO_NONE && fabs(gizmo_rotation_angle) > 0.001f) {
+            Vector3 normal;
+            if (gizmo_drag_axis == GIZMO_X) normal = Vector3(1,0,0);
+            else if (gizmo_drag_axis == GIZMO_Y) normal = Vector3(0,1,0);
+            else if (gizmo_drag_axis == GIZMO_Z) normal = Vector3(0,0,1);
+            else if (gizmo_drag_axis == GIZMO_VIEW_ROTATE) {
+                normal = _get_visual_gizmo_transform().basis.xform_inv(
+                    camera->get_global_transform().basis.get_column(2)).normalized();
+            } else {
+                normal = Vector3(0,1,0);
+            }
+
+            // Convert world-space initial vector to gizmo-local
+            Vector3 local_init = _get_visual_gizmo_transform().basis.xform_inv(gizmo_drag_initial_vector).normalized();
+            if (local_init.length_squared() < 0.0001f) local_init = Vector3(1,0,0);
+
+            // Build ring-plane basis
+            Vector3 up = fabs(normal.dot(Vector3(0,1,0))) < 0.99f ? Vector3(0,1,0) : Vector3(1,0,0);
+            Vector3 right = normal.cross(up).normalized();
+            up = right.cross(normal).normalized();
+
+            float start_ang = atan2f(local_init.dot(up), local_init.dot(right));
+            float end_ang = start_ang + gizmo_rotation_angle;
+
+            // Filled pie slice (arc)
+            int arc_segs = 32;
+            Color arc_col = Color(1.0f, 0.95f, 0.3f, 0.25f);
+            float arc_r = s * 0.72f;
+
+            int center_idx = verts.size();
+            verts.push_back(Vector3()); cols.push_back(arc_col);
+
+            int arc_start = verts.size();
+            float step = (end_ang - start_ang) / arc_segs;
+            for (int i = 0; i <= arc_segs; i++) {
+                float a = start_ang + step * i;
+                Vector3 p = (right * cosf(a) + up * sinf(a)) * arc_r;
+                verts.push_back(p); cols.push_back(arc_col);
+            }
+            for (int i = 0; i < arc_segs; i++) {
+                idx.push_back(center_idx);
+                idx.push_back(arc_start + i);
+                idx.push_back(arc_start + i + 1);
+            }
+
+            // White radial lines (start + end)
+            Color line_col = Color(1.0f, 1.0f, 1.0f, 0.9f);
+            Vector3 p_start = (right * cosf(start_ang) + up * sinf(start_ang)) * s * 0.85f;
+            Vector3 p_end = (right * cosf(end_ang) + up * sinf(end_ang)) * s * 0.85f;
+            float line_r = s * 0.01f;
+
+            vfx_editor::append_cylinder(verts, cols, idx, Vector3(), p_start, line_r, 4, line_col);
+            vfx_editor::append_cylinder(verts, cols, idx, Vector3(), p_end, line_r, 4, line_col);
+        }
     }
     else if (gizmo_mode == GIZMO_SCALE) {
         float shaft_r = s * 0.015f;
@@ -811,6 +867,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
     gizmo_node->set_mesh(am);
     gizmo_node->set_transform(_get_visual_gizmo_transform());
 }
+
 
 
 // ============================================================================
