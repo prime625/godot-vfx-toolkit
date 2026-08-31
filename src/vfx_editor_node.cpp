@@ -1056,7 +1056,9 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
 
     // === MESH EDIT MODE ===
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        if (!gizmo_locked && (selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0) && gizmo_node && gizmo_node->is_visible()) {
+        bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
+                                  !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
+        if (!gizmo_locked && has_mesh_selection && gizmo_node && gizmo_node->is_visible()) {
             int axis;
             if (camera && screen_pos.x >= 0.0f)
                 axis = screen_raycast_gizmo(screen_pos);
