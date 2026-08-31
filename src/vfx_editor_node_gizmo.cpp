@@ -296,9 +296,11 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
 
         // === TRACKBALL (inner sphere area) ===
         if (best == GIZMO_NONE) {
+            // Use actual screen-space radius of trackball visual (s * 0.08f) instead of full pixel tolerance
+            float track_r_screen = (camera->unproject_position(o + visual.basis.get_column(0) * s * 0.08f) - o_screen).length();
+            float trackball_tol_sq = MAX(track_r_screen * track_r_screen, 36.0f); // min 6px radius
             float d2 = screen_pos.distance_squared_to(o_screen);
-            if (d2 < best_score) {
-                best_score = d2;
+            if (d2 < trackball_tol_sq) {
                 best = GIZMO_TRACKBALL;
             }
         }
@@ -315,7 +317,10 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
         }
 
         float d2 = screen_pos.distance_squared_to(o_screen);
-        if (d2 < best_score) {
+        // Use actual screen-space size of center box (box_s * 0.8f = s * 0.056f) instead of full pixel tolerance
+        float box_r_screen = (camera->unproject_position(o + visual.basis.get_column(0) * s * 0.056f) - o_screen).length();
+        float box_tol_sq = MAX(box_r_screen * box_r_screen, 36.0f); // min 6px radius
+        if (d2 < box_tol_sq && d2 < best_score) {
             best_score = d2;
             best = GIZMO_XYZ;
         }
