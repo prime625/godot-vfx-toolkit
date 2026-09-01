@@ -26,9 +26,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_vfx_skeleton", "sk"), &VFXEditorNode::set_vfx_skeleton);
     ClassDB::bind_method(D_METHOD("get_vfx_skeleton"), &VFXEditorNode::get_vfx_skeleton);
     ClassDB::bind_method(D_METHOD("create_mixamo_skeleton"), &VFXEditorNode::create_mixamo_skeleton);
-        ClassDB::bind_method(D_METHOD("set_gizmo_screen_scale", "scale"), &VFXEditorNode::set_gizmo_screen_scale);
-        ClassDB::bind_method(D_METHOD("get_gizmo_screen_scale"), &VFXEditorNode::get_gizmo_screen_scale);
-        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_screen_scale"), "set_gizmo_screen_scale", "get_gizmo_screen_scale");
+    ClassDB::bind_method(D_METHOD("set_gizmo_screen_scale", "scale"), &VFXEditorNode::set_gizmo_screen_scale);
+    ClassDB::bind_method(D_METHOD("get_gizmo_screen_scale"), &VFXEditorNode::get_gizmo_screen_scale);
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_screen_scale"), "set_gizmo_screen_scale", "get_gizmo_screen_scale");
 
     ClassDB::bind_method(D_METHOD("set_vfx_skin", "skin"), &VFXEditorNode::set_vfx_skin);
     ClassDB::bind_method(D_METHOD("get_vfx_skin"), &VFXEditorNode::get_vfx_skin);
@@ -370,14 +370,31 @@ void VFXEditorNode::mark_scene_dirty() {
 // ============================================================================
 Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     Transform3D visual = gizmo_transform;
-    if (edit_mode != MODE_OBJECT && active_scene_node.is_valid()) {
-        visual = _get_active_mesh_transform() * visual;
-    }
-    // Global object mode: show world-aligned gizmo (origin only, identity basis)
-    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid() && !gizmo_local) {
-        visual.set_basis(Transform3D().get_basis());
+
+    if (active_scene_node.is_valid()) {
+        if (edit_mode == MODE_OBJECT) {
+            // Object mode: gizmo_transform is LOCAL, but visual must be at WORLD position
+            visual.set_origin(active_scene_node->get_global_transform().get_origin());
+            if (!gizmo_local) {
+                visual.set_basis(Transform3D().get_basis());
+            } else {
+                Basis b = visual.get_basis();
+                b.set_column(0, b.get_column(0).normalized());
+                b.set_column(1, b.get_column(1).normalized());
+                b.set_column(2, b.get_column(2).normalized());
+                visual.set_basis(b);
+            }
+        } else {
+            // Mesh edit mode: gizmo is in mesh-local space, multiply by mesh global
+            visual = _get_active_mesh_transform() * visual;
+            Basis b = visual.get_basis();
+            b.set_column(0, b.get_column(0).normalized());
+            b.set_column(1, b.get_column(1).normalized());
+            b.set_column(2, b.get_column(2).normalized());
+            visual.set_basis(b);
+        }
     } else {
-        // Local mode / mesh edit: normalize columns so gizmo stays unit-sized
+        // No active node: just normalize basis
         Basis b = visual.get_basis();
         b.set_column(0, b.get_column(0).normalized());
         b.set_column(1, b.get_column(1).normalized());
@@ -849,7 +866,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     set_vfx_animator(active_scene_node->get_animator());
 
     // Update transform gizmo to match node's world transform
-    set_gizmo_transform(active_scene_node->get_global_transform());
+    set_gizmo_transform(active_scene_node->get_local_transform());
 
     // Rebuild gizmo and clear mesh selection
     if (gizmo_node) {
