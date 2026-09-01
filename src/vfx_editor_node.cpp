@@ -847,7 +847,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     set_vfx_animator(active_scene_node->get_animator());
 
     // Update transform gizmo to match node's world transform
-    set_gizmo_transform(active_scene_node->get_local_transform());
+    set_gizmo_transform(active_scene_node->get_global_transform());
 
     // Rebuild gizmo and clear mesh selection
     if (gizmo_node) {
