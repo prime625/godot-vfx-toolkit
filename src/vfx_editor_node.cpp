@@ -370,31 +370,12 @@ void VFXEditorNode::mark_scene_dirty() {
 // ============================================================================
 Transform3D VFXEditorNode::_get_visual_gizmo_transform() const {
     Transform3D visual = gizmo_transform;
-
-    if (active_scene_node.is_valid()) {
-        if (edit_mode == MODE_OBJECT) {
-            // Object mode: gizmo_transform is LOCAL, but visual must be at WORLD position
-            visual.set_origin(active_scene_node->get_global_transform().get_origin());
-            if (!gizmo_local) {
-                visual.set_basis(Transform3D().get_basis());
-            } else {
-                Basis b = visual.get_basis();
-                b.set_column(0, b.get_column(0).normalized());
-                b.set_column(1, b.get_column(1).normalized());
-                b.set_column(2, b.get_column(2).normalized());
-                visual.set_basis(b);
-            }
-        } else {
-            // Mesh edit mode: gizmo is in mesh-local space, multiply by mesh global
-            visual = _get_active_mesh_transform() * visual;
-            Basis b = visual.get_basis();
-            b.set_column(0, b.get_column(0).normalized());
-            b.set_column(1, b.get_column(1).normalized());
-            b.set_column(2, b.get_column(2).normalized());
-            visual.set_basis(b);
-        }
+    if (edit_mode != MODE_OBJECT && active_scene_node.is_valid()) {
+        visual = _get_active_mesh_transform() * visual;
+    }
+    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid() && !gizmo_local) {
+        visual.set_basis(Transform3D().get_basis());
     } else {
-        // No active node: just normalize basis
         Basis b = visual.get_basis();
         b.set_column(0, b.get_column(0).normalized());
         b.set_column(1, b.get_column(1).normalized());
