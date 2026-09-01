@@ -421,7 +421,7 @@ void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
     bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
                               !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
-    bool show = !gizmo_locked && (edit_mode == MODE_OBJECT || has_mesh_selection || selected_bone >= 0);
+    bool show = !gizmo_locked && ((edit_mode == MODE_OBJECT && active_scene_node.is_valid()) || has_mesh_selection || selected_bone >= 0);
     gizmo_node->set_visible(show);
 }
 
