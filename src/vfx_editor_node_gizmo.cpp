@@ -643,7 +643,14 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
     }
 
     if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
-        active_scene_node->set_local_transform(gizmo_transform);
+        // gizmo_transform is in world space; convert back to local
+        Transform3D global = gizmo_transform;
+        Transform3D local = global;
+        VFXSceneNode* parent = active_scene_node->get_parent_node();
+        if (parent != nullptr) {
+            local = parent->get_global_transform().affine_inverse() * global;
+        }
+        active_scene_node->set_local_transform(local);
         mark_scene_dirty();
         return;
     }
