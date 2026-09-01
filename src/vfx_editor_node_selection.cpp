@@ -203,10 +203,11 @@ int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_
 // ============================================================================
 void VFXEditorNode::_update_gizmo_for_selection() {
     if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
-        if (gizmo_local) {
-            gizmo_transform = active_scene_node->get_local_transform();
-        }
-    } else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
+        gizmo_transform = active_scene_node->get_global_transform();
+    } else if (edit_mode == MODE_OBJECT) {
+        gizmo_transform = Transform3D();
+    }
+    else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
         Vector3 center;
         int count = 0;
 
