@@ -169,7 +169,8 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("subdivide_selection"), &VFXEditorNode::subdivide_selection);
     ClassDB::bind_method(D_METHOD("bevel_selection", "amount"), &VFXEditorNode::bevel_selection);
     ClassDB::bind_method(D_METHOD("knife_selection", "p0", "p1"), &VFXEditorNode::knife_selection);
-
+    ADD_SIGNAL(MethodInfo("mesh_changed", PropertyInfo(Variant::OBJECT, "mesh")));
+    
     // === ENUMS ===
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_OBJECT", MODE_OBJECT);
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_VERTEX", MODE_VERTEX);
