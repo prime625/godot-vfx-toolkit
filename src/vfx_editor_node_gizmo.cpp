@@ -622,7 +622,10 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         // Robust reconstruction: extract rotation from drag-start, re-apply new scale
         // This avoids depending on column lengths of a potentially sheared/drifted basis
         Quaternion rot = gizmo_drag_start_transform.basis.get_rotation_quaternion();
-        Basis new_basis = Basis(rot).scaled(scale);
+        Basis new_basis(rot);
+        new_basis.set_column(0, new_basis.get_column(0) * scale.x);
+        new_basis.set_column(1, new_basis.get_column(1) * scale.y);
+        new_basis.set_column(2, new_basis.get_column(2) * scale.z);
         gizmo_transform.set_basis(new_basis);
     }
 
