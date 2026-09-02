@@ -48,16 +48,24 @@ void VFXUVEditorViewport::_notification(int p_what) {
 // PROPERTIES
 // ============================================================================
 void VFXUVEditorViewport::set_mesh(const Ref<VFXMesh>& p_mesh) {
+    // CRITICAL: wipe selection FIRST so stale indices never touch the new mesh
+    if (uv_editor.is_valid()) {
+        uv_editor->deselect_all();
+    }
+
     Ref<VFXMesh> m = p_mesh;
     if (m.is_valid() && m->get_uv_layer_count() == 0) {
         m->add_uv_layer();
         m->sync_uv_layers();
     }
-    uv_editor->set_mesh(m);
-    uv_editor->set_active_layer(0);
-    if (m.is_valid()) {
-        uv_editor->deselect_all();
+
+    if (uv_editor.is_valid()) {
+        uv_editor->set_mesh(m);
+        if (m.is_valid() && m->get_uv_layer_count() > 0) {
+            uv_editor->set_active_layer(0);
+        }
     }
+
     _cache_dirty = true;
     queue_redraw();
 }
@@ -458,7 +466,11 @@ void VFXUVEditorViewport::_rebuild_draw_data() {
     if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
         int vc = uv_editor->get_uv_vert_count();
         for (int i = 0; i < vc; i++) {
-            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(i));
+            Vector2 uv = uv_editor->get_uv_vert(i);
+            if (Math::is_nan(uv.x) || Math::is_nan(uv.y)) continue;
+            Vector2 pos = uv_to_screen(uv);
+            if (Math::is_nan(pos.x) || Math::is_nan(pos.y)) continue;
+
             if (uv_editor->is_uv_selected(i)) {
                 _cached_vert_dots.push_back(pos);
                 _cached_vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
@@ -466,15 +478,19 @@ void VFXUVEditorViewport::_rebuild_draw_data() {
             } else {
                 _cached_vert_dots.push_back(pos);
                 _cached_vert_dot_colors.push_back(Color(0.18f, 0.18f, 0.22f));
-                // NO ring for unselected — this was the FPS killer
             }
         }
     } else {
         PackedInt32Array sel = uv_editor->get_selected_verts();
+        int uv_count = uv_editor->get_uv_vert_count();
         for (int i = 0; i < sel.size(); i++) {
             int idx = sel[i];
-            if (idx < 0 || idx >= uv_editor->get_uv_vert_count()) continue;
-            Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(idx));
+            if (idx < 0 || idx >= uv_count) continue;
+            Vector2 uv = uv_editor->get_uv_vert(idx);
+            if (Math::is_nan(uv.x) || Math::is_nan(uv.y)) continue;
+            Vector2 pos = uv_to_screen(uv);
+            if (Math::is_nan(pos.x) || Math::is_nan(pos.y)) continue;
+
             _cached_vert_dots.push_back(pos);
             _cached_vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
             _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 8, Color(1, 1, 1));
@@ -517,6 +533,7 @@ void VFXUVEditorViewport::_draw() {
 
     if (_cache_dirty) {
         _rebuild_cache();
+        if (uv_editor.is_null() || uv_editor->get_mesh().is_null()) return;
         _rebuild_draw_data();
     }
 
