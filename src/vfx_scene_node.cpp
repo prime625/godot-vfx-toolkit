@@ -266,8 +266,13 @@ Quaternion VFXSceneNode::get_local_rotation() const {
 
 void VFXSceneNode::set_local_scale(const Vector3& p_scale) {
     Quaternion r = local_transform.get_basis().get_rotation_quaternion();
-    local_transform.set_basis(Basis(r).scaled(p_scale));
+    Basis b(r);
+    b.set_column(0, b.get_column(0) * p_scale.x);
+    b.set_column(1, b.get_column(1) * p_scale.y);
+    b.set_column(2, b.get_column(2) * p_scale.z);
+    local_transform.set_basis(b);
 }
+
 Vector3 VFXSceneNode::get_local_scale() const {
     return local_transform.get_basis().get_scale();
 }
