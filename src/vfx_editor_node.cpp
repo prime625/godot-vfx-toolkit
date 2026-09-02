@@ -847,6 +847,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
         clear_selection();
         _update_gizmo_visibility();
         mark_scene_dirty();
+        emit_signal("mesh_changed", active_scene_node->get_mesh());
         return;
     }
 
@@ -855,7 +856,7 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     set_vfx_skeleton(active_scene_node->get_skeleton());
     set_vfx_skin(active_scene_node->get_skin());
     set_vfx_animator(active_scene_node->get_animator());
-
+    emit_signal("mesh_changed", active_scene_node->get_mesh());
     // Update transform gizmo to match node's world transform
     set_gizmo_transform(active_scene_node->get_global_transform());
 
