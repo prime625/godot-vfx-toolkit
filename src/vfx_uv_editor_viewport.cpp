@@ -512,8 +512,7 @@ void VFXUVEditorViewport::_draw() {
 
     Rect2 screen_rect(Vector2(), get_size());
 
-    // 1. Face fills — still iterate faces (draw_colored_polygon can't be batched),
-    //    but O(1) selection lookup now
+    // 1. Face fills
     for (int i = 0; i < _cached_faces.size(); i++) {
         const CachedFace& cf = _cached_faces[i];
         if (!screen_rect.intersects(cf.bounds)) continue;
@@ -522,27 +521,35 @@ void VFXUVEditorViewport::_draw() {
         draw_colored_polygon(cf.screen_poly, fill);
     }
 
-    // 2. Wireframe — cached arrays, zero allocation during drag
+    // 2. Wireframe
     if (_cached_sel_lines.size() > 0)
         draw_multiline_colors(_cached_sel_lines, _cached_sel_colors, 1.2f);
     if (_cached_unsel_lines.size() > 0)
         draw_multiline_colors(_cached_unsel_lines, _cached_unsel_colors, 0.8f);
 
-    // 3. Face-center dots — cached
+    // 3. Face-center dots
     if (select_mode == VFXUVEditor::UV_SELECT_FACE) {
-        if (_cached_face_dots.size() > 0)
-            draw_primitive(_cached_face_dots, _cached_face_dot_colors, PackedVector2Array());
+        for (int i = 0; i < _cached_face_dots.size(); i++) {
+            draw_rect(Rect2(_cached_face_dots[i] - Vector2(2.5f, 2.5f), Vector2(5, 5)), _cached_face_dot_colors[i]);
+        }
     }
 
-    // 4. Vertices — cached
+    // 4. Vertices — selected = filled orange circles, unselected = small dark squares
     if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
-        if (_cached_vert_dots.size() > 0)
-            draw_primitive(_cached_vert_dots, _cached_vert_dot_colors, PackedVector2Array());
+        for (int i = 0; i < _cached_vert_dots.size(); i++) {
+            bool is_selected = _cached_vert_dot_colors[i].r > 0.5f;
+            if (is_selected) {
+                draw_circle(_cached_vert_dots[i], 4.0f, Color(1.0f, 0.45f, 0.08f));
+            } else {
+                draw_rect(Rect2(_cached_vert_dots[i] - Vector2(2.5f, 2.5f), Vector2(5, 5)), _cached_vert_dot_colors[i]);
+            }
+        }
         if (_cached_vert_rings.size() > 0)
             draw_multiline_colors(_cached_vert_rings, _cached_vert_ring_colors, 1.0f);
     } else {
-        if (_cached_vert_dots.size() > 0)
-            draw_primitive(_cached_vert_dots, _cached_vert_dot_colors, PackedVector2Array());
+        for (int i = 0; i < _cached_vert_dots.size(); i++) {
+            draw_circle(_cached_vert_dots[i], 4.0f, _cached_vert_dot_colors[i]);
+        }
         if (_cached_vert_rings.size() > 0)
             draw_multiline_colors(_cached_vert_rings, _cached_vert_ring_colors, 1.0f);
     }
@@ -559,6 +566,7 @@ void VFXUVEditorViewport::_draw() {
         _draw_gizmo();
     }
 }
+
 
 // ============================================================================
 // GRID (OPTIMIZED — batched into 1 draw call for lines)
