@@ -403,15 +403,24 @@ void VFXEditorNode::_update_gizmo_scale() {
     }
     if (vp_h < 1.0f) vp_h = 1.0f;
 
-    float fov = camera->get_fov(); // degrees
+    float fov = camera->get_fov();
     float fov_rad = Math::deg_to_rad(fov);
-    float target_px = 80.0f; // Godot uses ~80px gizmo size
+    float target_px = 80.0f;
     float world_size = dist * tanf(fov_rad * 0.5f) * 2.0f * (target_px / vp_h);
 
-    // Clamp: never smaller than 3cm, never bigger than 35 meters
     world_size = vfx::clampf(world_size, 0.35f, 3.0f);
-    gizmo_screen_scale = world_size;
+
+    if (fabs(world_size - gizmo_screen_scale) > 0.001f) {
+        gizmo_screen_scale = world_size;
+        if (gizmo_node && gizmo_node->is_visible()) {
+            _build_gizmo_mesh();
+            gizmo_node->set_transform(_get_visual_gizmo_transform());
+        }
+    } else {
+        gizmo_screen_scale = world_size;
+    }
 }
+
 
 
 // ============================================================================
