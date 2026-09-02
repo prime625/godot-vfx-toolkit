@@ -87,7 +87,7 @@ public:
 protected:
     static void _bind_methods();
     void _notification(int p_what);
-
+    void _emit_mesh_changed();
 private:
     // === COMPONENTS ===
     Ref<VFXMesh> mesh;
@@ -225,6 +225,10 @@ public:
     void set_vfx_mesh(const Ref<VFXMesh>& p_mesh);
     Ref<VFXMesh> get_vfx_mesh() const;
     void refresh_mesh();
+
+    // === SIGNALS ===
+    void emit_mesh_changed(const Ref<VFXMesh>& p_mesh);
+
 
     // === SKELETON ===
     void set_vfx_skeleton(const Ref<VFXSkeleton>& p_sk);
