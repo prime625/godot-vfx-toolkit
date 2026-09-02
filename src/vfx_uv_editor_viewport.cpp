@@ -55,9 +55,13 @@ void VFXUVEditorViewport::set_mesh(const Ref<VFXMesh>& p_mesh) {
     }
     uv_editor->set_mesh(m);
     uv_editor->set_active_layer(0);
+    if (m.is_valid()) {
+        uv_editor->deselect_all();
+    }
     _cache_dirty = true;
     queue_redraw();
 }
+
 
 Ref<VFXMesh> VFXUVEditorViewport::get_mesh() const {
     return uv_editor->get_mesh();
@@ -356,7 +360,10 @@ void VFXUVEditorViewport::_request_cache_rebuild() {
 // ============================================================================
 void VFXUVEditorViewport::_rebuild_cache() {
     _cached_faces.clear();
-    if (uv_editor->get_mesh().is_null()) return;
+    if (uv_editor.is_null() || uv_editor->get_mesh().is_null()) {
+        _cache_dirty = false;
+        return;
+    }
 
     int fc = uv_editor->get_mesh()->get_face_count();
     for (int i = 0; i < fc; i++) {
@@ -387,6 +394,7 @@ void VFXUVEditorViewport::_rebuild_cache() {
     _cache_dirty = false;
 }
 
+
 // ============================================================================
 // DRAW DATA CACHE — rebuilt only when _cache_dirty
 // ============================================================================
@@ -403,10 +411,11 @@ void VFXUVEditorViewport::_rebuild_draw_data() {
     _cached_vert_ring_colors.clear();
     _cached_sel_face_set.clear();
 
+    if (uv_editor.is_null() || uv_editor->get_mesh().is_null()) return;
+
     Rect2 screen_rect(Vector2(), get_size());
     PackedInt32Array sel_faces = uv_editor->get_selected_faces();
 
-    // O(1) selected-face lookup
     for (int i = 0; i < sel_faces.size(); i++) {
         _cached_sel_face_set.insert(sel_faces[i]);
     }
@@ -445,7 +454,7 @@ void VFXUVEditorViewport::_rebuild_draw_data() {
         }
     }
 
-    // Vertices
+    // Vertices — NO rings for unselected, 8-seg rings only for selected
     if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
         int vc = uv_editor->get_uv_vert_count();
         for (int i = 0; i < vc; i++) {
@@ -453,21 +462,22 @@ void VFXUVEditorViewport::_rebuild_draw_data() {
             if (uv_editor->is_uv_selected(i)) {
                 _cached_vert_dots.push_back(pos);
                 _cached_vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
-                _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
+                _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 8, Color(1, 1, 1));
             } else {
                 _cached_vert_dots.push_back(pos);
                 _cached_vert_dot_colors.push_back(Color(0.18f, 0.18f, 0.22f));
-                _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 4.0f, 12, Color(0.50f, 0.50f, 0.55f));
+                // NO ring for unselected — this was the FPS killer
             }
         }
     } else {
         PackedInt32Array sel = uv_editor->get_selected_verts();
         for (int i = 0; i < sel.size(); i++) {
             int idx = sel[i];
+            if (idx < 0 || idx >= uv_editor->get_uv_vert_count()) continue;
             Vector2 pos = uv_to_screen(uv_editor->get_uv_vert(idx));
             _cached_vert_dots.push_back(pos);
             _cached_vert_dot_colors.push_back(Color(1.0f, 0.45f, 0.08f));
-            _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 16, Color(1, 1, 1));
+            _batch_arc_outline(_cached_vert_rings, _cached_vert_ring_colors, pos, 5.5f, 8, Color(1, 1, 1));
         }
     }
 }
@@ -534,14 +544,14 @@ void VFXUVEditorViewport::_draw() {
         }
     }
 
-    // 4. Vertices — selected = filled orange circles, unselected = small dark squares
+    // 4. Vertices — selected = filled orange circles, unselected = tiny 3x3 rects
     if (select_mode == VFXUVEditor::UV_SELECT_VERTEX) {
         for (int i = 0; i < _cached_vert_dots.size(); i++) {
             bool is_selected = _cached_vert_dot_colors[i].r > 0.5f;
             if (is_selected) {
                 draw_circle(_cached_vert_dots[i], 4.0f, Color(1.0f, 0.45f, 0.08f));
             } else {
-                draw_rect(Rect2(_cached_vert_dots[i] - Vector2(2.5f, 2.5f), Vector2(5, 5)), _cached_vert_dot_colors[i]);
+                draw_rect(Rect2(_cached_vert_dots[i] - Vector2(1.5f, 1.5f), Vector2(3, 3)), _cached_vert_dot_colors[i]);
             }
         }
         if (_cached_vert_rings.size() > 0)
