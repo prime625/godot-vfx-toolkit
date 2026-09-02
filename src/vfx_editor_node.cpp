@@ -1025,13 +1025,15 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 
         Ref<VFXMesh> vmesh = p_node->get_mesh();
         Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, p_node->get_skeleton(), p_node->get_skin(), show_weights, visualize_bone);
-        if (am.is_valid()) {
+        if (am.is_valid() && am->get_surface_count() > 0) {
             visual->set_mesh(am);
             if (show_weights && p_node->get_skin().is_valid()) {
                 visual->set_surface_override_material(0, weight_material);
             } else {
                 visual->set_surface_override_material(0, base_material);
             }
+        } else if (am.is_valid()) {
+            visual->set_mesh(am);  // empty mesh, don't touch materials
         }
     }
 
