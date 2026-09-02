@@ -847,7 +847,8 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
         clear_selection();
         _update_gizmo_visibility();
         mark_scene_dirty();
-        emit_signal("mesh_changed", active_scene_node->get_mesh());
+        emit_signal("mesh_changed", Ref<VFXMesh>());
+
         return;
     }
 
