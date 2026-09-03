@@ -185,20 +185,18 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
             if (mesh.is_null()) continue;
 
             // Bake the mesh node's LOCAL transform into vertices, reset node to identity
-            // This fixes Blender's -90° X rotation without affecting parent armature
             Transform3D local = _get_node_local_transform(nodes[i]);
             if (!local.is_equal_approx(Transform3D())) {
                 Basis b = local.get_basis();
-                PackedVector3Array verts = mesh->get_positions();
+                int vc = mesh->get_vertex_count();
+                for (int v = 0; v < vc; v++) {
+                    Vector3 pos = mesh->get_vertex_position(v);
+                    mesh->set_vertex_position(v, local.xform(pos));
+                }
                 PackedVector3Array norms = mesh->get_normals();
-                for (int v = 0; v < verts.size(); v++) {
-                    verts[v] = local.xform(verts[v]);
-                }
                 for (int n = 0; n < norms.size(); n++) {
-                    norms[n] = b.xform(norms[n]).normalized();
+                    mesh->set_vertex_normal(n, b.xform(norms[n]).normalized());
                 }
-                mesh->set_positions(verts);
-                mesh->set_normals(norms);
                 mesh->recalculate_bounds();
                 vfx_nodes[i]->set_local_transform(Transform3D());
             }
