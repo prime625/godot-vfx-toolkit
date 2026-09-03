@@ -97,6 +97,7 @@ private:
     std::vector<GLBSkin> skins;
     std::vector<GLBAnimation> animations;
     std::vector<int> scene_nodes;
+    Transform3D _get_node_world_transform(int node_idx, const std::vector<Ref<VFXSceneNode>>& vfx_nodes) const;
 
     bool _parse_glb(const PackedByteArray& data, String& out_error);
     bool _parse_json(const String& json_text, const PackedByteArray& bin_chunk, String& out_error);
