@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <map>
+#include <set>
 
 // zlib for FBX compressed arrays
 #include <zlib.h>
@@ -155,7 +157,6 @@ const FBXProperty* FBXRecord::find_property(int index) const {
     return nullptr;
 }
 
-
 // ============================================================================
 // FBX DOCUMENT PARSER
 // ============================================================================
@@ -170,7 +171,6 @@ bool FBXDocument::_parse_header(const uint8_t* data, int size, String& out_error
         out_error = "Not a valid FBX binary file (bad header)";
         return false;
     }
-    // Version at offset 23 (after "Kaydara FBX Binary  \\x00")
     version = *reinterpret_cast<const uint32_t*>(data + 23);
     if (version < 7000 || version > 8000) {
         out_error = "Unsupported FBX version: " + String::num_int64(version);
@@ -199,26 +199,17 @@ bool FBXDocument::_parse_property(const uint8_t* data, int size, int& offset, FB
     char type_code = static_cast<char>(data[offset]);
     offset++;
     
-    auto read_le16 = [&](int16_t& v) {
-        v = data[offset] | (data[offset+1] << 8);
-        offset += 2;
-    };
     auto read_le32 = [&](uint32_t& v) {
         v = data[offset] | (data[offset+1] << 8) | (data[offset+2] << 16) | (data[offset+3] << 24);
         offset += 4;
-    };
-    auto read_le64 = [&](uint64_t& v) {
-        v = 0;
-        for (int i = 0; i < 8; i++) {
-            v |= (uint64_t)data[offset + i] << (i * 8);
-        }
-        offset += 8;
     };
     
     switch (type_code) {
         case 'Y': { // int16
             if (offset + 2 > size) { out_error = "Truncated int16"; return false; }
-            int16_t v; read_le16(v); prop.type = FBXPropType::INT16; prop.int_val = v;
+            int16_t v = data[offset] | (data[offset+1] << 8);
+            offset += 2;
+            prop.type = FBXPropType::INT16; prop.int_val = v;
             break;
         }
         case 'C': { // bool
@@ -281,14 +272,12 @@ bool FBXDocument::_parse_property(const uint8_t* data, int size, int& offset, FB
             int raw_size = arr_count * elem_size;
             
             if (encoding == 0) {
-                // Uncompressed
                 if (offset + raw_size > size) { out_error = "Truncated array data"; return false; }
                 prop.data.resize(raw_size);
                 memcpy(prop.data.data(), data + offset, raw_size);
                 offset += raw_size;
             } else if (encoding == 1) {
-                // Deflate compressed
-                if (offset + compressed_len > size) { out_error = "Truncated compressed data"; return false; }
+                if (offset + (int)compressed_len > size) { out_error = "Truncated compressed data"; return false; }
                 prop.data.resize(raw_size);
                 if (!_decompress_deflate(data + offset, compressed_len, prop.data.data(), raw_size, out_error)) {
                     return false;
@@ -335,7 +324,6 @@ bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXR
     int header_size = is_64bit ? 25 : 13;
     
     if (offset + header_size > size) {
-        // Not enough data for a record header - might be at end of file padding
         return true;
     }
     
@@ -360,9 +348,8 @@ bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXR
         offset += 13;
     }
     
-    // Check for null record (end of children list)
     if (end_offset == 0 && num_props == 0 && prop_list_len == 0 && name_len == 0) {
-        return true; // End of children marker
+        return true;
     }
     
     if (end_offset > (uint64_t)size) {
@@ -372,14 +359,12 @@ bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXR
     
     auto record = std::make_unique<FBXRecord>();
     
-    // Read name
     if (offset + name_len > size) { out_error = "Truncated record name"; return false; }
     if (name_len > 0) {
         record->name.parse_utf8(reinterpret_cast<const char*>(data + offset), name_len);
     }
     offset += name_len;
     
-    // Read properties
     int props_end = offset + (int)prop_list_len;
     for (uint64_t i = 0; i < num_props; i++) {
         if (offset > props_end) {
@@ -393,18 +378,13 @@ bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXR
         record->properties.push_back(std::move(prop));
     }
     
-    // Skip to end of property list if we didn't consume exactly prop_list_len
     if (offset < props_end) offset = props_end;
     
-    // Read nested records until we reach end_offset
     while ((uint64_t)offset < end_offset) {
         int prev_offset = offset;
         bool ok = _parse_record(data, size, offset, record.get(), record_version, out_error);
         if (!ok) return false;
-        
-        // Check if we hit a null record (end marker)
         if (offset == prev_offset) {
-            // Try to read null record
             if (offset + header_size <= size) {
                 uint64_t eo, np, pl;
                 uint8_t nl;
@@ -426,12 +406,10 @@ bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXR
                     break;
                 }
             }
-            // No progress and no null marker - force break
             break;
         }
     }
     
-    // Ensure we don't go past end_offset
     if ((uint64_t)offset > end_offset) {
         offset = (int)end_offset;
     }
@@ -446,21 +424,19 @@ bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXR
 }
 
 bool FBXDocument::parse(const PackedByteArray& data, String& out_error) {
-    _parse_header(data.ptr(), data.size(), out_error);
-    if (!out_error.is_empty()) return false;
+    if (!_parse_header(data.ptr(), data.size(), out_error)) {
+        return false;
+    }
     
     root = std::make_unique<FBXRecord>();
     root->name = "Root";
     
-    int offset = 27; // After header
-    
-    // FBX has a top-level "FBXHeaderExtension" record, then "FileId", "CreationTime", "Creator",
-    // then "GlobalSettings", then "Documents", "References", "Definitions", "Objects", "Connections", "Takes"
+    int offset = 27;
     while (offset < data.size()) {
         int prev_offset = offset;
         bool ok = _parse_record(data.ptr(), data.size(), offset, root.get(), version, out_error);
         if (!ok) return false;
-        if (offset == prev_offset) break; // No progress
+        if (offset == prev_offset) break;
     }
     
     build_connection_graph();
@@ -480,11 +456,9 @@ void FBXDocument::build_connection_graph() {
     
     if (!root) return;
     
-    // Find Objects record
     const FBXRecord* objects = root->find_child("Objects");
     if (!objects) return;
     
-    // Index all objects by their first property (the ID)
     for (const auto& obj : objects->children) {
         if (obj->properties.empty()) continue;
         int64_t id = obj->properties[0].as_int();
@@ -493,7 +467,6 @@ void FBXDocument::build_connection_graph() {
         }
     }
     
-    // Parse Connections
     const FBXRecord* conns = root->find_child("Connections");
     if (!conns) return;
     
@@ -501,7 +474,6 @@ void FBXDocument::build_connection_graph() {
         if (c->name != "C" && c->name != "Connect") continue;
         if (c->properties.size() < 3) continue;
         
-        // Connection format: [type, child_id, parent_id]
         int64_t child_id = c->properties[1].as_int();
         int64_t parent_id = c->properties[2].as_int();
         
@@ -524,7 +496,7 @@ void FBXDocument::classify_objects() {
     anim_curve_node_ids.clear();
     anim_curve_ids.clear();
     pose_ids.clear();
-    unit_scale = 0.01f; // Default FBX unit is cm
+    unit_scale = 0.01f;
     
     for (const auto& kv : objects_by_id) {
         int64_t id = kv.first;
@@ -534,7 +506,6 @@ void FBXDocument::classify_objects() {
             geometry_ids.push_back(id);
         } else if (rec->name == "Model") {
             model_ids.push_back(id);
-            // Check type from second property (usually a string like "Mesh" or "LimbNode")
             if (rec->properties.size() >= 3) {
                 String type = rec->properties[2].as_string();
                 if (type == "Mesh") {
@@ -565,7 +536,6 @@ void FBXDocument::classify_objects() {
         }
     }
     
-    // Read unit scale from GlobalSettings
     const FBXRecord* gs = root->find_child("GlobalSettings");
     if (gs) {
         const FBXRecord* props = gs->find_child("Properties70");
@@ -574,7 +544,7 @@ void FBXDocument::classify_objects() {
                 if (p->name == "P" && p->properties.size() >= 5) {
                     String prop_name = p->properties[0].as_string();
                     if (prop_name == "UnitScaleFactor") {
-                        unit_scale = p->properties[4].as_float() * 0.01f; // Convert cm-based factor to meters
+                        unit_scale = p->properties[4].as_float() * 0.01f;
                     }
                 }
             }
@@ -612,10 +582,6 @@ void VFXFBXImporter::_clear_state() {
 // ============================================================================
 // COORDINATE CONVERSION
 // ============================================================================
-
-// FBX: Y-up, right-handed, +Z forward
-// Godot: Y-up, but +Z is toward camera (backward from FBX perspective)
-// Same conversion as glTF since both are right-handed Y-up with +Z forward
 
 Vector3 VFXFBXImporter::convert_position(const Vector3& fbx_pos) {
     return Vector3(-fbx_pos.x, fbx_pos.y, -fbx_pos.z);
@@ -714,30 +680,29 @@ Transform3D VFXFBXImporter::_get_model_transform(int64_t model_id) const {
     
     Transform3D result;
     
-    // Look for Properties70 -> Lcl Translation/Rotation/Scaling
     const vfx_fbx::FBXRecord* props70 = rec->find_child("Properties70");
     if (props70) {
         Vector3 lcl_translation;
-        Vector3 lcl_rotation_deg; // Euler angles in degrees
+        Vector3 lcl_rotation_deg;
         Vector3 lcl_scale(1, 1, 1);
         
         for (const auto& p : props70->children) {
             if (p->name != "P" || p->properties.empty()) continue;
             String prop_name = p->properties[0].as_string();
             
-            if (prop_name == "Lcl Translation" && p->properties.size() >= 5) {
+            if (prop_name == "Lcl Translation" && p->properties.size() >= 7) {
                 lcl_translation = Vector3(
                     p->properties[4].as_float(),
                     p->properties[5].as_float(),
                     p->properties[6].as_float()
                 );
-            } else if (prop_name == "Lcl Rotation" && p->properties.size() >= 5) {
+            } else if (prop_name == "Lcl Rotation" && p->properties.size() >= 7) {
                 lcl_rotation_deg = Vector3(
                     p->properties[4].as_float(),
                     p->properties[5].as_float(),
                     p->properties[6].as_float()
                 );
-            } else if (prop_name == "Lcl Scaling" && p->properties.size() >= 5) {
+            } else if (prop_name == "Lcl Scaling" && p->properties.size() >= 7) {
                 lcl_scale = Vector3(
                     p->properties[4].as_float(),
                     p->properties[5].as_float(),
@@ -746,12 +711,11 @@ Transform3D VFXFBXImporter::_get_model_transform(int64_t model_id) const {
             }
         }
         
-        // Convert rotation from degrees to radians, then to quaternion
         Vector3 rot_rad = lcl_rotation_deg * (3.14159265f / 180.0f);
         Basis rot_basis = Basis::from_euler(rot_rad);
         
         Basis scale_basis;
-        scale_basis.set_scale(lcl_scale);
+        scale_basis.scale(lcl_scale);
         
         result.set_basis(rot_basis * scale_basis);
         result.set_origin(lcl_translation);
@@ -778,34 +742,30 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
     Ref<VFXMesh> mesh;
     mesh.instantiate();
 
-    // FBX Geometry children: Vertices, PolygonVertexIndex, LayerElementNormal, LayerElementUV, etc.
     const vfx_fbx::FBXRecord* verts_rec = geom->find_child("Vertices");
     const vfx_fbx::FBXRecord* indices_rec = geom->find_child("PolygonVertexIndex");
     
-    if (!verts_rec || verts_rec->properties.size() < 1) {
+    if (!verts_rec || verts_rec->properties.empty()) {
         out_error = "Geometry missing Vertices";
         return Ref<VFXMesh>();
     }
-    if (!indices_rec || indices_rec->properties.size() < 1) {
+    if (!indices_rec || indices_rec->properties.empty()) {
         out_error = "Geometry missing PolygonVertexIndex";
         return Ref<VFXMesh>();
     }
 
-    // Read vertex positions
     PackedVector3Array positions = verts_rec->properties[0].as_vec3_array();
     for (int i = 0; i < positions.size(); i++) {
         positions[i] = _fbx_to_godot_pos(positions[i] * doc->unit_scale);
     }
 
-    // Read polygon indices (negative value marks end of polygon, encoded as -(idx+1))
     PackedInt32Array poly_indices = indices_rec->properties[0].as_int_array();
 
-    // Normals
     PackedVector3Array normals;
     const vfx_fbx::FBXRecord* normals_layer = geom->find_child("LayerElementNormal");
     if (normals_layer) {
         const vfx_fbx::FBXRecord* norms_rec = normals_layer->find_child("Normals");
-        if (norms_rec && norms_rec->properties.size() >= 1) {
+        if (norms_rec && !norms_rec->properties.empty()) {
             normals = norms_rec->properties[0].as_vec3_array();
             for (int i = 0; i < normals.size(); i++) {
                 normals[i] = _fbx_to_godot_n(normals[i]);
@@ -813,25 +773,22 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
         }
     }
 
-    // UVs
     PackedVector2Array uvs;
     const vfx_fbx::FBXRecord* uv_layer = geom->find_child("LayerElementUV");
     if (uv_layer) {
         const vfx_fbx::FBXRecord* uvs_rec = uv_layer->find_child("UV");
-        if (uvs_rec && uvs_rec->properties.size() >= 1) {
+        if (uvs_rec && !uvs_rec->properties.empty()) {
             uvs = uvs_rec->properties[0].as_vec2_array();
         }
     }
 
-    // Build vertices
-    std::vector<int> vert_remap; // FBX control point index -> VFXMesh vertex id
+    std::vector<int> vert_remap;
     vert_remap.resize(positions.size());
     for (int i = 0; i < positions.size(); i++) {
         Vector2 uv = (i < uvs.size()) ? uvs[i] : Vector2();
         vert_remap[i] = mesh->add_vertex(positions[i], uv, Color(1,1,1,1));
     }
 
-    // Build polygons from indices (triangulate on the fly)
     std::vector<int> poly;
     for (int i = 0; i < poly_indices.size(); i++) {
         int idx = poly_indices[i];
@@ -841,7 +798,6 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
         poly.push_back(idx);
         
         if (is_last) {
-            // Triangulate n-gon using fan triangulation
             if (poly.size() >= 3) {
                 for (size_t j = 1; j + 1 < poly.size(); j++) {
                     mesh->add_triangle(
@@ -855,7 +811,6 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
         }
     }
 
-    // Skin weights: find clusters connected to this geometry via skin deformer
     for (int64_t skin_id : doc->skin_ids) {
         auto it_conn = doc->connections.find(skin_id);
         if (it_conn == doc->connections.end()) continue;
@@ -867,7 +822,6 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
             const vfx_fbx::FBXRecord* cluster = _get_object_record(child_id);
             if (!cluster) continue;
             
-            // Cluster -> Indexes, Weights, Transform, TransformLink
             const vfx_fbx::FBXRecord* idx_rec = cluster->find_child("Indexes");
             const vfx_fbx::FBXRecord* w_rec = cluster->find_child("Weights");
             
@@ -877,7 +831,6 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
             PackedInt32Array c_indices = idx_rec->properties[0].as_int_array();
             PackedFloat32Array c_weights = w_rec->properties[0].as_float_array();
             
-            // Find bone index for this cluster
             auto bone_it = cluster_to_bone.find(child_id);
             if (bone_it == cluster_to_bone.end()) continue;
             int bone_idx = bone_it->second;
@@ -889,11 +842,9 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
                 int vfx_vidx = vert_remap[cp_idx];
                 float weight = c_weights[i];
                 
-                // Add to existing bones/weights (up to 4)
                 int bones[4]; float weights[4];
                 mesh->get_vertex_skinning(vfx_vidx, bones, weights);
                 
-                // Find slot
                 for (int s = 0; s < 4; s++) {
                     if (weights[s] < 0.001f) {
                         bones[s] = bone_idx;
@@ -906,7 +857,6 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
         }
     }
 
-    // Normalize weights
     int vcount = mesh->get_vertex_count();
     for (int i = 0; i < vcount; i++) {
         mesh->normalize_weights(i);
@@ -919,6 +869,7 @@ Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
     return mesh;
 }
 
+
 // ============================================================================
 // SKELETON EXTRACTION
 // ============================================================================
@@ -927,7 +878,6 @@ Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_er
     auto it = built_skeletons.find(skin_id);
     if (it != built_skeletons.end()) return it->second;
 
-    // Find all clusters under this skin
     auto it_conn = doc->connections.find(skin_id);
     if (it_conn == doc->connections.end()) {
         out_error = "Skin has no clusters";
@@ -937,7 +887,6 @@ Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_er
     Ref<VFXSkeleton> skeleton;
     skeleton.instantiate();
 
-    // First pass: create bones in order
     std::vector<int64_t> cluster_ids_ordered;
     for (int64_t child_id : it_conn->second) {
         if (std::find(doc->cluster_ids.begin(), doc->cluster_ids.end(), child_id) != doc->cluster_ids.end()) {
@@ -950,18 +899,15 @@ Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_er
         return Ref<VFXSkeleton>();
     }
 
-    // Map: cluster ID -> bone index
     for (size_t i = 0; i < cluster_ids_ordered.size(); i++) {
         cluster_to_bone[cluster_ids_ordered[i]] = (int)i;
     }
 
-    // Build bones
     for (size_t i = 0; i < cluster_ids_ordered.size(); i++) {
         int64_t cluster_id = cluster_ids_ordered[i];
         const vfx_fbx::FBXRecord* cluster = _get_object_record(cluster_id);
         if (!cluster) continue;
 
-        // Find linked model (LimbNode) via connections
         int64_t linked_model = 0;
         auto cit = doc->connections.find(cluster_id);
         if (cit != doc->connections.end()) {
@@ -979,7 +925,6 @@ Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_er
         if (linked_model) {
             model_to_bone[linked_model] = (int)i;
             
-            // Find parent LimbNode
             auto pit = doc->parent_of.find(linked_model);
             if (pit != doc->parent_of.end()) {
                 int64_t parent_model = pit->second;
@@ -993,14 +938,13 @@ Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_er
         skeleton->add_bone(bone_name, parent_bone);
     }
 
-    // Second pass: set bind poses from cluster TransformLink
     for (size_t i = 0; i < cluster_ids_ordered.size(); i++) {
         int64_t cluster_id = cluster_ids_ordered[i];
         const vfx_fbx::FBXRecord* cluster = _get_object_record(cluster_id);
         if (!cluster) continue;
 
         const vfx_fbx::FBXRecord* tl_rec = cluster->find_child("TransformLink");
-        if (tl_rec && tl_rec->properties.size() >= 1) {
+        if (tl_rec && !tl_rec->properties.empty()) {
             PackedFloat32Array mat = tl_rec->properties[0].as_float_array();
             if (mat.size() >= 16) {
                 Basis b;
@@ -1019,6 +963,7 @@ Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_er
     return skeleton;
 }
 
+
 // ============================================================================
 // ANIMATION EXTRACTION
 // ============================================================================
@@ -1031,13 +976,11 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
         String stack_name = _get_object_name(stack_id);
         if (stack_name.is_empty()) stack_name = "Animation";
 
-        // Find animation layers under this stack
         auto it = doc->connections.find(stack_id);
         if (it == doc->connections.end()) continue;
 
         float duration = 0.0f;
 
-        // Collect all curve nodes under this stack
         std::vector<int64_t> curve_nodes;
         for (int64_t layer_id : it->second) {
             if (std::find(doc->anim_layer_ids.begin(), doc->anim_layer_ids.end(), layer_id) == doc->anim_layer_ids.end())
@@ -1055,7 +998,6 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
 
         if (curve_nodes.empty()) continue;
 
-        // Determine duration from curves
         for (int64_t cn_id : curve_nodes) {
             auto cnit = doc->connections.find(cn_id);
             if (cnit == doc->connections.end()) continue;
@@ -1068,28 +1010,23 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
                 if (!curve) continue;
                 
                 const vfx_fbx::FBXRecord* keytime_rec = curve->find_child("KeyTime");
-                if (keytime_rec && keytime_rec->properties.size() >= 1) {
+                if (keytime_rec && !keytime_rec->properties.empty()) {
                     PackedFloat32Array times = keytime_rec->properties[0].as_float_array();
                     for (int i = 0; i < times.size(); i++) {
-                        // FBX time is in KTime units (1/46186158000 of a second)
                         float t_sec = times[i] / 46186158000.0f;
-                        duration = MAX(duration, t_sec);
+                        duration = (t_sec > duration) ? t_sec : duration;
                     }
                 }
             }
         }
 
         if (duration <= 0.0f) duration = 1.0f;
-
         int clip_idx = animator->create_clip(stack_name, duration, 30.0f);
 
-        // Extract curves per bone
         for (int64_t cn_id : curve_nodes) {
             const vfx_fbx::FBXRecord* cn = _get_object_record(cn_id);
             if (!cn) continue;
 
-            // Find which bone this curve node drives
-            // CurveNode -> Model connection (child is model, parent is curve node in FBX)
             int bone_idx = -1;
             auto cnit = doc->connections.find(cn_id);
             if (cnit != doc->connections.end()) {
@@ -1103,21 +1040,18 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
             }
             if (bone_idx < 0) continue;
 
-            // Determine channel (T/R/S) from curve node name or properties
             String cn_name = _get_object_name(cn_id);
             bool is_translation = cn_name.contains("T") || cn_name.contains("Translation");
             bool is_rotation = cn_name.contains("R") || cn_name.contains("Rotation");
             bool is_scale = cn_name.contains("S") || cn_name.contains("Scaling");
 
             if (!is_translation && !is_rotation && !is_scale) {
-                // Check properties
                 const vfx_fbx::FBXRecord* props = cn->find_child("Properties70");
                 if (props) {
                     for (const auto& p : props->children) {
                         if (p->properties.empty()) continue;
                         String pname = p->properties[0].as_string();
                         if (pname.contains("d|X") || pname.contains("d|Y") || pname.contains("d|Z")) {
-                            // Default to translation if ambiguous
                             is_translation = true;
                         }
                     }
@@ -1127,7 +1061,6 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
                 }
             }
 
-            // Find curves for X, Y, Z
             auto curve_conn_it = doc->connections.find(cn_id);
             if (curve_conn_it == doc->connections.end()) continue;
 
@@ -1138,62 +1071,15 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
                 }
             }
 
-            // Each curve drives one component. We need to group them.
-            // For simplicity, sample all curves at their key times and build vector keyframes
-            std::map<float, Vector3> vector_keys;
-            std::map<float, Quaternion> quat_keys;
+            if (curves.empty()) continue;
 
-            for (int64_t curve_id : curves) {
-                const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
-                if (!curve) continue;
+            String curve_name = skeleton->get_bone_name(bone_idx) + "_" + 
+                (is_translation ? "translation" : (is_rotation ? "rotation" : "scale"));
 
-                const vfx_fbx::FBXRecord* keytime_rec = curve->find_child("KeyTime");
-                const vfx_fbx::FBXRecord* keyval_rec = curve->find_child("KeyValueFloat");
-                
-                if (!keytime_rec || !keyval_rec || keytime_rec->properties.empty() || keyval_rec->properties.empty())
-                    continue;
+            int curve_idx = animator->add_curve(clip_idx, curve_name, bone_idx, is_rotation, is_scale);
 
-                PackedFloat32Array times = keytime_rec->properties[0].as_float_array();
-                PackedFloat32Array values = keyval_rec->properties[0].as_float_array();
-
-                // Determine which component this curve drives
-                // Look at curve node's property connection
-                int component = -1; // 0=X, 1=Y, 2=Z
-                const vfx_fbx::FBXRecord* cprops = cn->find_child("Properties70");
-                if (cprops) {
-                    for (const auto& p : cprops->children) {
-                        if (p->properties.size() < 2) continue;
-                        String pname = p->properties[0].as_string();
-                        if (pname == "d|X") component = 0;
-                        else if (pname == "d|Y") component = 1;
-                        else if (pname == "d|Z") component = 2;
-                    }
-                }
-                
-                // If still unknown, infer from curve count
-                if (component < 0) {
-                    if (curves.size() == 3) {
-                        // Try to match by order, but this is heuristic
-                        component = 0;
-                    }
-                }
-
-                for (int i = 0; i < times.size() && i < values.size(); i++) {
-                    float t_sec = times[i] / 46186158000.0f;
-                    if (is_rotation) {
-                        // Euler degrees -> we'll accumulate and convert later
-                        // For now, store raw values and convert to quaternion
-                    } else {
-                        vector_keys[t_sec]; // ensure entry exists
-                    }
-                }
-            }
-
-            // Actually, let's do a simpler approach: sample at union of all key times
-            // This is more robust for mismatched key counts per component
-
-            // Collect all unique times across all curves for this node
-            std::set<float> all_times;
+            // Collect all unique key times from all curves for this node
+            std::vector<float> all_times_vec;
             for (int64_t curve_id : curves) {
                 const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
                 if (!curve) continue;
@@ -1201,87 +1087,59 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
                 if (!kt || kt->properties.empty()) continue;
                 PackedFloat32Array t = kt->properties[0].as_float_array();
                 for (int i = 0; i < t.size(); i++) {
-                    all_times.insert(t[i] / 46186158000.0f);
+                    all_times_vec.push_back(t[i] / 46186158000.0f);
                 }
             }
+            
+            std::sort(all_times_vec.begin(), all_times_vec.end());
+            all_times_vec.erase(std::unique(all_times_vec.begin(), all_times_vec.end(), 
+                [](float a, float b){ return fabs(a - b) < 0.0001f; }), all_times_vec.end());
 
-            if (all_times.empty()) continue;
-
-            String curve_name = skeleton->get_bone_name(bone_idx) + "_" + 
-                (is_translation ? "translation" : (is_rotation ? "rotation" : "scale"));
-
-            int curve_idx = animator->add_curve(clip_idx, curve_name, bone_idx, is_rotation, is_scale);
-
-            for (float t : all_times) {
-                // Sample each component at time t
+            for (float t : all_times_vec) {
                 Vector3 value;
                 
-                for (int comp = 0; comp < 3; comp++) {
-                    // Find curve for this component
-                    int64_t target_curve = 0;
-                    for (int64_t curve_id : curves) {
-                        const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
-                        if (!curve) continue;
-                        
-                        // Match component by checking curve node property name
-                        const vfx_fbx::FBXRecord* cprops = cn->find_child("Properties70");
-                        if (!cprops) continue;
-                        
-                        for (const auto& p : cprops->children) {
-                            if (p->properties.size() < 2) continue;
-                            String pname = p->properties[0].as_string();
-                            int pcomp = -1;
-                            if (pname == "d|X") pcomp = 0;
-                            else if (pname == "d|Y") pcomp = 1;
-                            else if (pname == "d|Z") pcomp = 2;
-                            
-                            if (pcomp == comp) {
-                                // Check if this property links to our curve
-                                // In FBX, the property value might reference the curve
-                                // This is heuristic - we assume curves are ordered X,Y,Z
-                                target_curve = curve_id;
-                                break;
-                            }
-                        }
-                    }
-                    
+                for (size_t ci = 0; ci < curves.size() && ci < 3; ci++) {
+                    int64_t curve_id = curves[ci];
+                    const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
                     float comp_val = 0.0f;
-                    if (target_curve != 0) {
-                        const vfx_fbx::FBXRecord* curve = _get_object_record(target_curve);
-                        if (curve) {
-                            const vfx_fbx::FBXRecord* kt = curve->find_child("KeyTime");
-                            const vfx_fbx::FBXRecord* kv = curve->find_child("KeyValueFloat");
-                            if (kt && kv && !kt->properties.empty() && !kv->properties.empty()) {
-                                PackedFloat32Array ctimes = kt->properties[0].as_float_array();
-                                PackedFloat32Array cvals = kv->properties[0].as_float_array();
-                                
-                                // Linear interpolation
-                                for (int i = 0; i < (int)ctimes.size() - 1; i++) {
-                                    float t0 = ctimes[i] / 46186158000.0f;
-                                    float t1 = ctimes[i+1] / 46186158000.0f;
-                                    if (t >= t0 && t <= t1) {
-                                        if (t1 - t0 < 0.0001f) {
-                                            comp_val = cvals[i];
-                                        } else {
-                                            float lerp_t = (t - t0) / (t1 - t0);
-                                            comp_val = cvals[i] + (cvals[i+1] - cvals[i]) * lerp_t;
+                    
+                    if (curve) {
+                        const vfx_fbx::FBXRecord* kt = curve->find_child("KeyTime");
+                        const vfx_fbx::FBXRecord* kv = curve->find_child("KeyValueFloat");
+                        if (kt && kv && !kt->properties.empty() && !kv->properties.empty()) {
+                            PackedFloat32Array ctimes = kt->properties[0].as_float_array();
+                            PackedFloat32Array cvals = kv->properties[0].as_float_array();
+                            
+                            if (ctimes.size() > 0 && cvals.size() > 0) {
+                                if (t <= ctimes[0] / 46186158000.0f) {
+                                    comp_val = cvals[0];
+                                } else if (t >= ctimes[ctimes.size()-1] / 46186158000.0f) {
+                                    comp_val = cvals[cvals.size()-1];
+                                } else {
+                                    for (int i = 0; i < (int)ctimes.size() - 1; i++) {
+                                        float t0 = ctimes[i] / 46186158000.0f;
+                                        float t1 = ctimes[i+1] / 46186158000.0f;
+                                        if (t >= t0 && t <= t1) {
+                                            if (t1 - t0 < 0.0001f) {
+                                                comp_val = cvals[i];
+                                            } else {
+                                                float lerp_t = (t - t0) / (t1 - t0);
+                                                comp_val = cvals[i] + (cvals[i+1] - cvals[i]) * lerp_t;
+                                            }
+                                            break;
                                         }
-                                        break;
                                     }
                                 }
-                                if (t < ctimes[0] / 46186158000.0f) comp_val = cvals[0];
-                                if (t > ctimes[ctimes.size()-1] / 46186158000.0f) comp_val = cvals[cvals.size()-1];
                             }
                         }
                     }
                     
-                    if (comp == 0) value.x = comp_val;
-                    else if (comp == 1) value.y = comp_val;
+                    if (ci == 0) value.x = comp_val;
+                    else if (ci == 1) value.y = comp_val;
                     else value.z = comp_val;
                 }
 
                 if (is_rotation) {
-                    // FBX rotation is Euler in degrees
                     Vector3 rot_rad = value * (3.14159265f / 180.0f);
                     Basis b = Basis::from_euler(rot_rad);
                     Quaternion q = b.get_rotation_quaternion();
@@ -1297,7 +1155,6 @@ void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXS
         }
     }
 }
-
 
 // ============================================================================
 // MAIN IMPORT ENTRY POINT
@@ -1340,12 +1197,10 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
     result[KEY_MESH_COUNT] = (int)doc->mesh_model_ids.size();
     result[KEY_ANIMATION_COUNT] = (int)doc->anim_stack_ids.size();
 
-    // Create scene
     Ref<VFXScene> scene;
     scene.instantiate();
     scene->create_default_root();
 
-    // Create VFXSceneNode for every FBX Model
     std::vector<Ref<VFXSceneNode>> vfx_nodes;
     for (int64_t model_id : doc->model_ids) {
         Ref<VFXSceneNode> node;
@@ -1357,7 +1212,6 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
         vfx_nodes.push_back(node);
     }
 
-    // Build hierarchy from connections
     for (int64_t model_id : doc->model_ids) {
         auto pit = doc->parent_of.find(model_id);
         if (pit != doc->parent_of.end()) {
@@ -1372,7 +1226,6 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
         }
     }
 
-    // Attach root-level models to scene root
     for (int64_t model_id : doc->model_ids) {
         auto pit = doc->parent_of.find(model_id);
         if (pit == doc->parent_of.end() || pit->second == 0) {
@@ -1383,7 +1236,6 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
         }
     }
 
-    // Build meshes and attach to mesh models
     Ref<VFXMesh> first_mesh;
     Ref<VFXSkeleton> first_skeleton;
     Ref<VFXSkin> first_skin;
@@ -1391,7 +1243,6 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
     Array mesh_nodes_array;
 
     for (int64_t model_id : doc->mesh_model_ids) {
-        // Find geometry connected to this model
         auto it = doc->connections.find(model_id);
         if (it == doc->connections.end()) continue;
 
@@ -1417,7 +1268,6 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
 
         if (!first_mesh.is_valid()) first_mesh = mesh;
 
-        // Find skin connected to this mesh model
         int64_t skin_id = 0;
         for (int64_t child_id : it->second) {
             if (std::find(doc->skin_ids.begin(), doc->skin_ids.end(), child_id) != doc->skin_ids.end()) {
@@ -1441,7 +1291,6 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
                 if (!first_skeleton.is_valid()) first_skeleton = skeleton;
                 if (!first_skin.is_valid()) first_skin = skin;
 
-                // Build animations
                 Ref<VFXAnimator> animator;
                 animator.instantiate();
                 _build_animations(animator, skeleton, err);
