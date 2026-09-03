@@ -16,6 +16,7 @@
 #include "vfx_uv_editor_viewport.h"
 #include "vfx_particles.h"
 #include "vfx_glb_importer.h"
+#include "vfx_fbx_importer.h"
 	
 
 void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
@@ -36,6 +37,7 @@ void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
 		ClassDB::register_class<VFXUVEditorViewport>();
 		ClassDB::register_class<VFXParticles3D>();
 		ClassDB::register_class<VFXGLBImporter>();
+		ClassDB::register_class<VFXFBXImporter>();
 		
 	}
 }
