@@ -15,15 +15,18 @@ void VFXEditorNode::_update_godot_mesh() {
     if (mesh.is_null()) return;
 
     Ref<ArrayMesh> am = _build_array_mesh_for_node(mesh, skeleton, skin, show_weights, visualize_bone);
-    if (am.is_null()) return;
+    if (am.is_null() || am->get_surface_count() == 0) {
+        mesh_instance->set_mesh(Ref<ArrayMesh>());
+        return;
+    }
+
+    mesh_instance->set_mesh(am);  // SET MESH FIRST
 
     if (show_weights && skin.is_valid()) {
         mesh_instance->set_surface_override_material(0, weight_material);
     } else {
         mesh_instance->set_surface_override_material(0, base_material);
     }
-
-    mesh_instance->set_mesh(am);
 }
 
 // ============================================================================
