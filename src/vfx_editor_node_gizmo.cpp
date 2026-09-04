@@ -834,7 +834,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
             up = right.cross(normal).normalized();
 
             float start_ang = atan2f(local_init.dot(up), local_init.dot(right));
-            float end_ang = start_ang + gizmo_rotation_angle;
+            float end_ang = start_ang - gizmo_rotation_angle;
 
             // Filled pie slice (arc)
             int arc_segs = 32;
