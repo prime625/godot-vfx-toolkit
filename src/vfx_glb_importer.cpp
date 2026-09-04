@@ -184,23 +184,6 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
             Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error);
             if (mesh.is_null()) continue;
 
-            // Bake the mesh node's LOCAL transform into vertices, reset node to identity
-            Transform3D local = _get_node_local_transform(nodes[i]);
-            if (!local.is_equal_approx(Transform3D())) {
-                Basis b = local.get_basis();
-                int vc = mesh->get_vertex_count();
-                for (int v = 0; v < vc; v++) {
-                    Vector3 pos = mesh->get_vertex_position(v);
-                    mesh->set_vertex_position(v, local.xform(pos));
-                }
-                PackedVector3Array norms = mesh->get_normals();
-                for (int n = 0; n < norms.size(); n++) {
-                    mesh->set_vertex_normal(n, b.xform(norms[n]).normalized());
-                }
-                mesh->recalculate_bounds();
-                vfx_nodes[i]->set_local_transform(Transform3D());
-            }
-
             vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_MESH);
             vfx_nodes[i]->set_mesh(mesh);
             mesh_nodes_array.append(vfx_nodes[i]);
@@ -724,16 +707,6 @@ bool VFXGLBImporter::_read_accessor_vec2(int accessor_idx, PackedVector2Array& o
         out[i] = Vector2(floats[i*2], floats[i*2+1]);
     }
     return true;
-}
-
-Transform3D VFXGLBImporter::_get_node_world_transform(int node_idx, const std::vector<Ref<VFXSceneNode>>& vfx_nodes) const {
-    Transform3D world;
-    int current = node_idx;
-    while (current >= 0 && current < (int)nodes.size()) {
-        world = _get_node_local_transform(nodes[current]) * world;
-        current = nodes[current].parent;
-    }
-    return world;
 }
 
 bool VFXGLBImporter::_read_accessor_indices(int accessor_idx, PackedInt32Array& out, String& out_error) {
