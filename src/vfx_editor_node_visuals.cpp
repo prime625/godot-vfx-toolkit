@@ -30,7 +30,7 @@ void VFXEditorNode::_update_godot_mesh() {
 }
 
 // ============================================================================
-// SELECTION VISUAL — WIREFRAME + VERTEX/FACE/EDGE HIGHLIGHTS
+// SELECTION VISUAL — PRISMA3D-STYLE WIREFRAME + VERTEX/FACE/EDGE HIGHLIGHTS
 // ============================================================================
 void VFXEditorNode::_build_selection_mesh() {
     if (!selection_visual) _ensure_selection_visual();
@@ -46,36 +46,69 @@ void VFXEditorNode::_build_selection_mesh() {
     PackedColorArray cols;
     PackedInt32Array idx;
 
-    // Wireframe edges
+    // Wireframe edges — Prisma3D style: thin, light, semi-transparent
     for (auto* e : mesh->get_edges()) {
         if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
         Vector3 a = e->next->vertex->position;
         Vector3 b = e->vertex->position;
         bool in_set = selected_edges.find((int)e->id) != selected_edges.end();
         bool is_active = (edit_mode == MODE_EDGE && selected_edge == (int)e->id);
-        Color col = is_active ? Color(1.0f, 0.8f, 0.2f, 1.0f) : (in_set ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.0f, 0.0f, 0.0f, 0.9f));
-        float r = (in_set || is_active) ? 0.012f : 0.004f;
+
+        Color col;
+        float r;
+        if (is_active) {
+            col = Color(1.0f, 0.8f, 0.2f, 1.0f);   // bright yellow active
+            r = 0.010f;
+        } else if (in_set) {
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);   // orange selected
+            r = 0.008f;
+        } else {
+            col = Color(0.85f, 0.85f, 0.85f, 0.25f); // light gray, very transparent
+            r = 0.002f;                              // much thinner
+        }
         vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
     }
 
-    // Vertices
+    // Vertices — smaller, lighter
     for (auto* v : mesh->get_vertices()) {
         if (v->deleted) continue;
         bool in_set = selected_vertices.find((int)v->id) != selected_vertices.end();
         bool is_active = (edit_mode == MODE_VERTEX && selected_vertex == (int)v->id);
-        Color col = is_active ? Color(1.0f, 0.8f, 0.2f, 1.0f) : (in_set ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.0f, 0.0f, 0.0f, 1.0f));
-        float s = (in_set || is_active) ? 0.035f : 0.018f;
+
+        Color col;
+        float s;
+        if (is_active) {
+            col = Color(1.0f, 0.8f, 0.2f, 1.0f);
+            s = 0.030f;
+        } else if (in_set) {
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);
+            s = 0.025f;
+        } else {
+            col = Color(0.9f, 0.9f, 0.9f, 0.35f); // light, semi-transparent
+            s = 0.012f;                            // smaller
+        }
         vfx_editor::append_box(verts, cols, idx, v->position, s, col);
     }
 
-    // Face centers
+    // Face centers — smaller, lighter
     for (auto* f : mesh->get_faces()) {
         if (f->deleted || !f->halfedge) continue;
         Vector3 c = mesh->get_face_center(f->id);
         bool in_set = selected_faces.find((int)f->id) != selected_faces.end();
         bool is_active = (edit_mode == MODE_FACE && selected_face == (int)f->id);
-        Color col = is_active ? Color(1.0f, 0.8f, 0.2f, 1.0f) : (in_set ? Color(1.0f, 0.5f, 0.0f, 1.0f) : Color(0.0f, 0.0f, 0.0f, 1.0f));
-        float s = (in_set || is_active) ? 0.045f : 0.028f;
+
+        Color col;
+        float s;
+        if (is_active) {
+            col = Color(1.0f, 0.8f, 0.2f, 1.0f);
+            s = 0.040f;
+        } else if (in_set) {
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);
+            s = 0.035f;
+        } else {
+            col = Color(0.9f, 0.9f, 0.9f, 0.30f); // light, semi-transparent
+            s = 0.018f;                            // smaller
+        }
         vfx_editor::append_box(verts, cols, idx, c, s, col);
     }
 
@@ -94,10 +127,11 @@ void VFXEditorNode::_build_selection_mesh() {
     mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
     mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
     mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
+    // Disable depth writing so transparent wireframe doesn't fight with itself
+    mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, false);
     selection_visual->set_material_override(mat);
     selection_visual->set_mesh(am);
     selection_visual->set_transform(_get_active_mesh_transform());
-    
 }
 
 // ============================================================================
