@@ -63,8 +63,8 @@ void VFXEditorNode::_build_selection_mesh() {
             col = Color(1.0f, 0.5f, 0.0f, 1.0f);   // orange selected
             r = 0.008f;
         } else {
-            col = Color(0.85f, 0.85f, 0.85f, 0.25f); // light gray, very transparent
-            r = 0.002f;                              // much thinner
+            col = Color(0.22f, 0.22f, 0.22f, 0.35f); // dark gray, very transparent
+            r = 0.001f;                              // much thinner
         }
         vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
     }
@@ -84,8 +84,8 @@ void VFXEditorNode::_build_selection_mesh() {
             col = Color(1.0f, 0.5f, 0.0f, 1.0f);
             s = 0.025f;
         } else {
-            col = Color(0.9f, 0.9f, 0.9f, 0.35f); // light, semi-transparent
-            s = 0.012f;                            // smaller
+            col = Color(0.25f, 0.25f, 0.25f, 0.40f); // grey, semi-transparent
+            s = 0.008f;                            // smaller
         }
         vfx_editor::append_box(verts, cols, idx, v->position, s, col);
     }
@@ -106,8 +106,8 @@ void VFXEditorNode::_build_selection_mesh() {
             col = Color(1.0f, 0.5f, 0.0f, 1.0f);
             s = 0.035f;
         } else {
-            col = Color(0.9f, 0.9f, 0.9f, 0.30f); // light, semi-transparent
-            s = 0.018f;                            // smaller
+            col = Color(0.25f, 0.25f, 0.25f, 0.35f); // grey, semi-transparent
+            s = 0.010f;                            // smaller
         }
         vfx_editor::append_box(verts, cols, idx, c, s, col);
     }
