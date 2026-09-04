@@ -1,41 +1,605 @@
-#include "vfx_glb_importer.h"
+#include "vfx_fbx_importer.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/file_access.hpp>
-#include <godot_cpp/classes/json.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/variant/vector4i.hpp>
 #include <cmath>
 #include <cstring>
+#include <algorithm>
+#include <map>
+#include <set>
+#include <unordered_set>
+
+// zlib for FBX compressed arrays
+#include <zlib.h>
 
 using namespace godot;
+using namespace vfx_fbx;
 
-void VFXGLBImporter::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("import_glb", "path"), &VFXGLBImporter::import_glb);
-    ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_position", "gltf_pos"), &VFXGLBImporter::convert_position);
-    ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_normal", "gltf_normal"), &VFXGLBImporter::convert_normal);
-    ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_rotation", "gltf_rot"), &VFXGLBImporter::convert_rotation);
-    ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_transform", "gltf_transform"), &VFXGLBImporter::convert_transform);
+// ============================================================================
+// FBX PROPERTY ACCESSORS
+// ============================================================================
+
+String FBXProperty::as_string() const {
+    if (type == FBXPropType::STRING && !data.empty()) {
+        return String::utf8(reinterpret_cast<const char*>(data.data()), data.size());
+    }
+    if (type == FBXPropType::RAW) {
+        return "<raw:" + String::num_int64(data.size()) + ">";
+    }
+    return "";
 }
 
-VFXGLBImporter::VFXGLBImporter() {}
-VFXGLBImporter::~VFXGLBImporter() {}
-
-Vector3 VFXGLBImporter::convert_position(const Vector3& gltf_pos) {
-    return Vector3(-gltf_pos.x, gltf_pos.y, -gltf_pos.z);
+int64_t FBXProperty::as_int() const {
+    switch (type) {
+        case FBXPropType::INT16: return int_val;
+        case FBXPropType::INT32: return int_val;
+        case FBXPropType::INT64: return int_val;
+        case FBXPropType::BOOL: return bool_val ? 1 : 0;
+        case FBXPropType::FLOAT: return (int64_t)double_val;
+        case FBXPropType::DOUBLE: return (int64_t)double_val;
+        default: return 0;
+    }
 }
 
-Vector3 VFXGLBImporter::convert_normal(const Vector3& gltf_normal) {
-    Vector3 n = Vector3(-gltf_normal.x, gltf_normal.y, -gltf_normal.z);
+double FBXProperty::as_double() const {
+    switch (type) {
+        case FBXPropType::DOUBLE: return double_val;
+        case FBXPropType::FLOAT: return double_val;
+        case FBXPropType::INT16:
+        case FBXPropType::INT32:
+        case FBXPropType::INT64: return (double)int_val;
+        default: return 0.0;
+    }
+}
+
+float FBXProperty::as_float() const {
+    return (float)as_double();
+}
+
+bool FBXProperty::as_bool() const {
+    if (type == FBXPropType::BOOL) return bool_val;
+    return as_int() != 0;
+}
+
+PackedFloat32Array FBXProperty::as_float_array() const {
+    PackedFloat32Array result;
+    if (!is_array()) return result;
+    
+    if (type == FBXPropType::ARRAY_FLOAT) {
+        result.resize(array_count);
+        const float* src = reinterpret_cast<const float*>(data.data());
+        for (uint32_t i = 0; i < array_count; i++) {
+            result[i] = src[i];
+        }
+    } else if (type == FBXPropType::ARRAY_DOUBLE) {
+        result.resize(array_count);
+        const double* src = reinterpret_cast<const double*>(data.data());
+        for (uint32_t i = 0; i < array_count; i++) {
+            result[i] = (float)src[i];
+        }
+    } else if (type == FBXPropType::ARRAY_INT32) {
+        result.resize(array_count);
+        const int32_t* src = reinterpret_cast<const int32_t*>(data.data());
+        for (uint32_t i = 0; i < array_count; i++) {
+            result[i] = (float)src[i];
+        }
+    } else if (type == FBXPropType::ARRAY_INT64) {
+        result.resize(array_count);
+        const int64_t* src = reinterpret_cast<const int64_t*>(data.data());
+        for (uint32_t i = 0; i < array_count; i++) {
+            result[i] = (float)src[i];
+        }
+    }
+    return result;
+}
+
+PackedInt32Array FBXProperty::as_int_array() const {
+    PackedInt32Array result;
+    if (!is_array()) return result;
+    
+    if (type == FBXPropType::ARRAY_INT32) {
+        result.resize(array_count);
+        const int32_t* src = reinterpret_cast<const int32_t*>(data.data());
+        for (uint32_t i = 0; i < array_count; i++) {
+            result[i] = src[i];
+        }
+    } else if (type == FBXPropType::ARRAY_INT64) {
+        result.resize(array_count);
+        const int64_t* src = reinterpret_cast<const int64_t*>(data.data());
+        for (uint32_t i = 0; i < array_count; i++) {
+            result[i] = (int32_t)src[i];
+        }
+    }
+    return result;
+}
+
+PackedVector3Array FBXProperty::as_vec3_array() const {
+    PackedVector3Array result;
+    PackedFloat32Array floats = as_float_array();
+    if (floats.size() < 3) return result;
+    
+    int count = floats.size() / 3;
+    result.resize(count);
+    for (int i = 0; i < count; i++) {
+        result[i] = Vector3(floats[i*3], floats[i*3+1], floats[i*3+2]);
+    }
+    return result;
+}
+
+PackedVector2Array FBXProperty::as_vec2_array() const {
+    PackedVector2Array result;
+    PackedFloat32Array floats = as_float_array();
+    if (floats.size() < 2) return result;
+    
+    int count = floats.size() / 2;
+    result.resize(count);
+    for (int i = 0; i < count; i++) {
+        result[i] = Vector2(floats[i*2], floats[i*2+1]);
+    }
+    return result;
+}
+
+// ============================================================================
+// FBX RECORD HELPERS
+// ============================================================================
+
+const FBXRecord* FBXRecord::find_child(const String& child_name) const {
+    for (const auto& c : children) {
+        if (c->name == child_name) return c.get();
+    }
+    return nullptr;
+}
+
+const FBXProperty* FBXRecord::find_property(int index) const {
+    if (index >= 0 && index < (int)properties.size()) {
+        return &properties[index];
+    }
+    return nullptr;
+}
+
+// ============================================================================
+// FBX DOCUMENT PARSER
+// ============================================================================
+
+bool FBXDocument::_parse_header(const uint8_t* data, int size, String& out_error) {
+    const char* expected = "Kaydara FBX Binary  ";
+    if (size < 27) {
+        out_error = "File too small for FBX header";
+        return false;
+    }
+    if (memcmp(data, expected, 20) != 0) {
+        out_error = "Not a valid FBX binary file (bad header)";
+        return false;
+    }
+    version = *reinterpret_cast<const uint32_t*>(data + 23);
+    if (version < 7000 || version > 8000) {
+        out_error = "Unsupported FBX version: " + String::num_int64(version);
+        return false;
+    }
+    return true;
+}
+
+bool FBXDocument::_decompress_deflate(const uint8_t* src, int src_len, uint8_t* dst, int dst_len, String& out_error) {
+    uLongf dest_len = dst_len;
+    int ret = uncompress(dst, &dest_len, src, src_len);
+    if (ret != Z_OK) {
+        out_error = "zlib decompression failed: " + String::num_int64(ret);
+        return false;
+    }
+    return true;
+}
+
+bool FBXDocument::_parse_property(const uint8_t* data, int size, int& offset, FBXProperty& prop, 
+                                   uint32_t record_version, String& out_error) {
+    if (offset >= size) {
+        out_error = "Unexpected end of file reading property type";
+        return false;
+    }
+    
+    char type_code = static_cast<char>(data[offset]);
+    offset++;
+    
+    auto read_le32 = [&](uint32_t& v) {
+        v = data[offset] | (data[offset+1] << 8) | (data[offset+2] << 16) | (data[offset+3] << 24);
+        offset += 4;
+    };
+    
+    switch (type_code) {
+        case 'Y': { // int16
+            if (offset + 2 > size) { out_error = "Truncated int16"; return false; }
+            int16_t v = data[offset] | (data[offset+1] << 8);
+            offset += 2;
+            prop.type = FBXPropType::INT16; prop.int_val = v;
+            break;
+        }
+        case 'C': { // bool
+            if (offset + 1 > size) { out_error = "Truncated bool"; return false; }
+            prop.type = FBXPropType::BOOL; prop.bool_val = (data[offset] != 0); offset++;
+            break;
+        }
+        case 'I': { // int32
+            if (offset + 4 > size) { out_error = "Truncated int32"; return false; }
+            int32_t v = data[offset] | (data[offset+1] << 8) | (data[offset+2] << 16) | (data[offset+3] << 24);
+            offset += 4;
+            prop.type = FBXPropType::INT32; prop.int_val = v;
+            break;
+        }
+        case 'F': { // float
+            if (offset + 4 > size) { out_error = "Truncated float"; return false; }
+            float v; memcpy(&v, data + offset, 4);
+            offset += 4;
+            prop.type = FBXPropType::FLOAT; prop.double_val = v;
+            break;
+        }
+        case 'D': { // double
+            if (offset + 8 > size) { out_error = "Truncated double"; return false; }
+            double v; memcpy(&v, data + offset, 8);
+            offset += 8;
+            prop.type = FBXPropType::DOUBLE; prop.double_val = v;
+            break;
+        }
+        case 'L': { // int64
+            if (offset + 8 > size) { out_error = "Truncated int64"; return false; }
+            int64_t v; memcpy(&v, data + offset, 8);
+            offset += 8;
+            prop.type = FBXPropType::INT64; prop.int_val = v;
+            break;
+        }
+        case 'f':
+        case 'd':
+        case 'l':
+        case 'i':
+        case 'b': { // arrays
+            if (offset + 12 > size) { out_error = "Truncated array header"; return false; }
+            uint32_t arr_count, encoding, compressed_len;
+            read_le32(arr_count);
+            read_le32(encoding);
+            read_le32(compressed_len);
+            
+            prop.array_count = arr_count;
+            prop.array_encoding = encoding;
+            prop.array_compressed_len = compressed_len;
+            
+            int elem_size = 0;
+            switch (type_code) {
+                case 'f': elem_size = 4; prop.type = FBXPropType::ARRAY_FLOAT; break;
+                case 'd': elem_size = 8; prop.type = FBXPropType::ARRAY_DOUBLE; break;
+                case 'l': elem_size = 8; prop.type = FBXPropType::ARRAY_INT64; break;
+                case 'i': elem_size = 4; prop.type = FBXPropType::ARRAY_INT32; break;
+                case 'b': elem_size = 1; prop.type = FBXPropType::ARRAY_BOOL; break;
+            }
+            
+            int raw_size = arr_count * elem_size;
+            
+            if (encoding == 0) {
+                if (offset + raw_size > size) { out_error = "Truncated array data"; return false; }
+                prop.data.resize(raw_size);
+                memcpy(prop.data.data(), data + offset, raw_size);
+                offset += raw_size;
+            } else if (encoding == 1) {
+                if (offset + (int)compressed_len > size) { out_error = "Truncated compressed data"; return false; }
+                prop.data.resize(raw_size);
+                if (!_decompress_deflate(data + offset, compressed_len, prop.data.data(), raw_size, out_error)) {
+                    return false;
+                }
+                offset += compressed_len;
+            } else {
+                out_error = "Unknown array encoding: " + String::num_int64(encoding);
+                return false;
+            }
+            break;
+        }
+        case 'S': { // string
+            if (offset + 4 > size) { out_error = "Truncated string length"; return false; }
+            uint32_t len;
+            read_le32(len);
+            if (offset + (int)len > size) { out_error = "Truncated string data"; return false; }
+            prop.type = FBXPropType::STRING;
+            prop.data.resize(len);
+            if (len > 0) memcpy(prop.data.data(), data + offset, len);
+            offset += len;
+            break;
+        }
+        case 'R': { // raw binary
+            if (offset + 4 > size) { out_error = "Truncated raw length"; return false; }
+            uint32_t len;
+            read_le32(len);
+            if (offset + (int)len > size) { out_error = "Truncated raw data"; return false; }
+            prop.type = FBXPropType::RAW;
+            prop.data.resize(len);
+            if (len > 0) memcpy(prop.data.data(), data + offset, len);
+            offset += len;
+            break;
+        }
+        default:
+            out_error = "Unknown property type code: " + String::chr(type_code);
+            return false;
+    }
+    return true;
+}
+
+bool FBXDocument::_parse_record(const uint8_t* data, int size, int& offset, FBXRecord* parent,
+                                uint32_t record_version, String& out_error) {
+    bool is_64bit = (record_version >= 7500);
+    int header_size = is_64bit ? 25 : 13;
+    
+    if (offset + header_size > size) {
+        return true;
+    }
+    
+    uint64_t end_offset, num_props, prop_list_len;
+    uint8_t name_len;
+    
+    if (is_64bit) {
+        memcpy(&end_offset, data + offset, 8);
+        memcpy(&num_props, data + offset + 8, 8);
+        memcpy(&prop_list_len, data + offset + 16, 8);
+        name_len = data[offset + 24];
+        offset += 25;
+    } else {
+        uint32_t eo, np, pl;
+        memcpy(&eo, data + offset, 4);
+        memcpy(&np, data + offset + 4, 4);
+        memcpy(&pl, data + offset + 8, 4);
+        end_offset = eo;
+        num_props = np;
+        prop_list_len = pl;
+        name_len = data[offset + 12];
+        offset += 13;
+    }
+    
+    if (end_offset == 0 && num_props == 0 && prop_list_len == 0 && name_len == 0) {
+        return true;
+    }
+    
+    if (end_offset > (uint64_t)size) {
+        out_error = "Record end offset exceeds file size";
+        return false;
+    }
+    
+    auto record = std::make_unique<FBXRecord>();
+    
+    if (offset + name_len > size) { out_error = "Truncated record name"; return false; }
+    if (name_len > 0) {
+        record->name.parse_utf8(reinterpret_cast<const char*>(data + offset), name_len);
+    }
+    offset += name_len;
+    
+    int props_end = offset + (int)prop_list_len;
+    for (uint64_t i = 0; i < num_props; i++) {
+        if (offset > props_end) {
+            out_error = "Property list overflow";
+            return false;
+        }
+        FBXProperty prop;
+        if (!_parse_property(data, size, offset, prop, record_version, out_error)) {
+            return false;
+        }
+        record->properties.push_back(std::move(prop));
+    }
+    
+    if (offset < props_end) offset = props_end;
+    
+    while ((uint64_t)offset < end_offset) {
+        int prev_offset = offset;
+        bool ok = _parse_record(data, size, offset, record.get(), record_version, out_error);
+        if (!ok) return false;
+        if (offset == prev_offset) {
+            if (offset + header_size <= size) {
+                uint64_t eo, np, pl;
+                uint8_t nl;
+                if (is_64bit) {
+                    memcpy(&eo, data + offset, 8);
+                    memcpy(&np, data + offset + 8, 8);
+                    memcpy(&pl, data + offset + 16, 8);
+                    nl = data[offset + 24];
+                } else {
+                    uint32_t teo, tnp, tpl;
+                    memcpy(&teo, data + offset, 4);
+                    memcpy(&tnp, data + offset + 4, 4);
+                    memcpy(&tpl, data + offset + 8, 4);
+                    eo = teo; np = tnp; pl = tpl;
+                    nl = data[offset + 12];
+                }
+                if (eo == 0 && np == 0 && pl == 0 && nl == 0) {
+                    offset += header_size;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    
+    if ((uint64_t)offset > end_offset) {
+        offset = (int)end_offset;
+    }
+    
+    if (parent) {
+        parent->children.push_back(std::move(record));
+    } else {
+        root = std::move(record);
+    }
+    
+    return true;
+}
+
+bool FBXDocument::parse(const PackedByteArray& data, String& out_error) {
+    if (!_parse_header(data.ptr(), data.size(), out_error)) {
+        return false;
+    }
+    
+    root = std::make_unique<FBXRecord>();
+    root->name = "Root";
+    
+    int offset = 27;
+    while (offset < data.size()) {
+        int prev_offset = offset;
+        bool ok = _parse_record(data.ptr(), data.size(), offset, root.get(), version, out_error);
+        if (!ok) return false;
+        if (offset == prev_offset) break;
+    }
+    
+    build_connection_graph();
+    classify_objects();
+    return true;
+}
+
+
+// ============================================================================
+// CONNECTION GRAPH & OBJECT CLASSIFICATION
+// ============================================================================
+
+void FBXDocument::build_connection_graph() {
+    connections.clear();
+    parent_of.clear();
+    objects_by_id.clear();
+    
+    if (!root) return;
+    
+    const FBXRecord* objects = root->find_child("Objects");
+    if (!objects) return;
+    
+    for (const auto& obj : objects->children) {
+        if (obj->properties.empty()) continue;
+        int64_t id = obj->properties[0].as_int();
+        if (id != 0) {
+            objects_by_id[id] = obj.get();
+        }
+    }
+    
+    const FBXRecord* conns = root->find_child("Connections");
+    if (!conns) return;
+    
+    for (const auto& c : conns->children) {
+        if (c->name != "C" && c->name != "Connect") continue;
+        if (c->properties.size() < 3) continue;
+        
+        int64_t child_id = c->properties[1].as_int();
+        int64_t parent_id = c->properties[2].as_int();
+        
+        if (child_id != 0 && parent_id != 0) {
+            connections[parent_id].push_back(child_id);
+            parent_of[child_id] = parent_id;
+        }
+    }
+}
+
+void FBXDocument::classify_objects() {
+    geometry_ids.clear();
+    model_ids.clear();
+    limb_node_ids.clear();
+    mesh_model_ids.clear();
+    skin_ids.clear();
+    cluster_ids.clear();
+    anim_stack_ids.clear();
+    anim_layer_ids.clear();
+    anim_curve_node_ids.clear();
+    anim_curve_ids.clear();
+    pose_ids.clear();
+    unit_scale = 0.01f;
+    
+    for (const auto& kv : objects_by_id) {
+        int64_t id = kv.first;
+        const FBXRecord* rec = kv.second;
+        
+        if (rec->name == "Geometry") {
+            geometry_ids.push_back(id);
+        } else if (rec->name == "Model") {
+            model_ids.push_back(id);
+            if (rec->properties.size() >= 3) {
+                String type = rec->properties[2].as_string();
+                if (type == "Mesh") {
+                    mesh_model_ids.push_back(id);
+                } else if (type == "LimbNode" || type == "Limb") {
+                    limb_node_ids.push_back(id);
+                }
+            }
+        } else if (rec->name == "Deformer") {
+            if (rec->properties.size() >= 3) {
+                String type = rec->properties[2].as_string();
+                if (type == "Skin") {
+                    skin_ids.push_back(id);
+                } else if (type == "Cluster") {
+                    cluster_ids.push_back(id);
+                }
+            }
+        } else if (rec->name == "AnimationStack") {
+            anim_stack_ids.push_back(id);
+        } else if (rec->name == "AnimationLayer") {
+            anim_layer_ids.push_back(id);
+        } else if (rec->name == "AnimationCurveNode") {
+            anim_curve_node_ids.push_back(id);
+        } else if (rec->name == "AnimationCurve") {
+            anim_curve_ids.push_back(id);
+        } else if (rec->name == "Pose") {
+            pose_ids.push_back(id);
+        }
+    }
+    
+    const FBXRecord* gs = root->find_child("GlobalSettings");
+    if (gs) {
+        const FBXRecord* props = gs->find_child("Properties70");
+        if (props) {
+            for (const auto& p : props->children) {
+                if (p->name == "P" && p->properties.size() >= 5) {
+                    String prop_name = p->properties[0].as_string();
+                    if (prop_name == "UnitScaleFactor") {
+                        unit_scale = p->properties[4].as_float() * 0.01f;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// VFX FBX IMPORTER — BINDINGS & LIFECYCLE
+// ============================================================================
+
+void VFXFBXImporter::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("import_fbx", "path"), &VFXFBXImporter::import_fbx);
+    
+    ClassDB::bind_static_method("VFXFBXImporter", D_METHOD("convert_position", "fbx_pos"), &VFXFBXImporter::convert_position);
+    ClassDB::bind_static_method("VFXFBXImporter", D_METHOD("convert_normal", "fbx_normal"), &VFXFBXImporter::convert_normal);
+    ClassDB::bind_static_method("VFXFBXImporter", D_METHOD("convert_rotation", "fbx_rot"), &VFXFBXImporter::convert_rotation);
+    ClassDB::bind_static_method("VFXFBXImporter", D_METHOD("convert_transform", "fbx_transform"), &VFXFBXImporter::convert_transform);
+}
+
+VFXFBXImporter::VFXFBXImporter() {}
+VFXFBXImporter::~VFXFBXImporter() {}
+
+void VFXFBXImporter::_clear_state() {
+    built_meshes.clear();
+    built_skeletons.clear();
+    built_animators.clear();
+    built_skins.clear();
+    built_nodes.clear();
+    cluster_to_bone.clear();
+    model_to_bone.clear();
+    doc.reset();
+}
+
+// ============================================================================
+// COORDINATE CONVERSION
+// ============================================================================
+
+Vector3 VFXFBXImporter::convert_position(const Vector3& fbx_pos) {
+    return Vector3(-fbx_pos.x, fbx_pos.y, -fbx_pos.z);
+}
+
+Vector3 VFXFBXImporter::convert_normal(const Vector3& fbx_normal) {
+    Vector3 n = Vector3(-fbx_normal.x, fbx_normal.y, -fbx_normal.z);
     return n.normalized();
 }
 
-Quaternion VFXGLBImporter::convert_rotation(const Quaternion& gltf_rot) {
-    return Quaternion(-gltf_rot.x, gltf_rot.y, -gltf_rot.z, gltf_rot.w);
+Quaternion VFXFBXImporter::convert_rotation(const Quaternion& fbx_rot) {
+    return Quaternion(-fbx_rot.x, fbx_rot.y, -fbx_rot.z, fbx_rot.w);
 }
 
-Transform3D VFXGLBImporter::convert_transform(const Transform3D& gltf_transform) {
-    Basis b = gltf_transform.get_basis();
-    Vector3 o = gltf_transform.get_origin();
+Transform3D VFXFBXImporter::convert_transform(const Transform3D& fbx_transform) {
+    Basis b = fbx_transform.get_basis();
+    Vector3 o = fbx_transform.get_origin();
     Basis converted;
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 3; j++) {
@@ -48,38 +612,556 @@ Transform3D VFXGLBImporter::convert_transform(const Transform3D& gltf_transform)
     return Transform3D(converted, o2);
 }
 
-Vector3 VFXGLBImporter::_gltf_to_godot_v3(const Vector3& v) { return convert_position(v); }
-Vector3 VFXGLBImporter::_gltf_to_godot_n(const Vector3& n) { return convert_normal(n); }
-Quaternion VFXGLBImporter::_gltf_to_godot_q(const Quaternion& q) { return convert_rotation(q); }
-Transform3D VFXGLBImporter::_gltf_to_godot_t(const Transform3D& t) { return convert_transform(t); }
-Basis VFXGLBImporter::_gltf_to_godot_b(const Basis& b) {
-    return convert_transform(Transform3D(b, Vector3())).get_basis();
+Vector3 VFXFBXImporter::_fbx_to_godot_pos(const Vector3& p) {
+    return convert_position(p);
 }
 
-Transform3D VFXGLBImporter::_get_node_local_transform(const GLBNode& node) const {
-    if (node.has_matrix) {
-        return _gltf_to_godot_t(node.matrix);
+Vector3 VFXFBXImporter::_fbx_to_godot_n(const Vector3& n) {
+    return convert_normal(n);
+}
+
+Quaternion VFXFBXImporter::_fbx_to_godot_q(const Quaternion& q) {
+    return convert_rotation(q);
+}
+
+Transform3D VFXFBXImporter::_fbx_to_godot_transform(const Transform3D& t) {
+    return convert_transform(t);
+}
+
+// ============================================================================
+// FBX IMPORTER HELPERS
+// ============================================================================
+
+const vfx_fbx::FBXRecord* VFXFBXImporter::_get_object_record(int64_t obj_id) const {
+    if (!doc) return nullptr;
+    auto it = doc->objects_by_id.find(obj_id);
+    if (it != doc->objects_by_id.end()) return it->second;
+    return nullptr;
+}
+
+String VFXFBXImporter::_get_object_name(int64_t obj_id) const {
+    const vfx_fbx::FBXRecord* rec = _get_object_record(obj_id);
+    if (!rec) return "";
+    if (rec->properties.size() >= 2) {
+        return rec->properties[1].as_string();
     }
-    Transform3D t;
-    t.set_origin(_gltf_to_godot_v3(node.translation));
-    Basis b(_gltf_to_godot_q(node.rotation));
-    b.scale(node.scale);
-    t.set_basis(b);
-    return t;
+    return "";
 }
 
-void VFXGLBImporter::_clear_document() {
-    buffers.clear();
-    buffer_views.clear();
-    accessors.clear();
-    nodes.clear();
-    meshes.clear();
-    skins.clear();
-    animations.clear();
-    scene_nodes.clear();
+String VFXFBXImporter::_get_object_type(int64_t obj_id) const {
+    const vfx_fbx::FBXRecord* rec = _get_object_record(obj_id);
+    if (!rec) return "";
+    if (rec->properties.size() >= 3) {
+        return rec->properties[2].as_string();
+    }
+    return "";
 }
 
-Dictionary VFXGLBImporter::import_glb(const String& path) {
+std::vector<int64_t> VFXFBXImporter::_get_children_of_type(int64_t parent_id, const String& type) const {
+    std::vector<int64_t> result;
+    if (!doc) return result;
+    auto it = doc->connections.find(parent_id);
+    if (it == doc->connections.end()) return result;
+    for (int64_t child_id : it->second) {
+        if (_get_object_type(child_id) == type) {
+            result.push_back(child_id);
+        }
+    }
+    return result;
+}
+
+int64_t VFXFBXImporter::_get_first_child_of_type(int64_t parent_id, const String& type) const {
+    auto children = _get_children_of_type(parent_id, type);
+    return children.empty() ? 0 : children[0];
+}
+
+Transform3D VFXFBXImporter::_get_model_transform(int64_t model_id) const {
+    const vfx_fbx::FBXRecord* rec = _get_object_record(model_id);
+    if (!rec) return Transform3D();
+    
+    Transform3D result;
+    
+    const vfx_fbx::FBXRecord* props70 = rec->find_child("Properties70");
+    if (props70) {
+        Vector3 lcl_translation;
+        Vector3 lcl_rotation_deg;
+        Vector3 lcl_scale(1, 1, 1);
+        
+        for (const auto& p : props70->children) {
+            if (p->name != "P" || p->properties.empty()) continue;
+            String prop_name = p->properties[0].as_string();
+            
+            if (prop_name == "Lcl Translation" && p->properties.size() >= 7) {
+                lcl_translation = Vector3(
+                    p->properties[4].as_float(),
+                    p->properties[5].as_float(),
+                    p->properties[6].as_float()
+                );
+            } else if (prop_name == "Lcl Rotation" && p->properties.size() >= 7) {
+                lcl_rotation_deg = Vector3(
+                    p->properties[4].as_float(),
+                    p->properties[5].as_float(),
+                    p->properties[6].as_float()
+                );
+            } else if (prop_name == "Lcl Scaling" && p->properties.size() >= 7) {
+                lcl_scale = Vector3(
+                    p->properties[4].as_float(),
+                    p->properties[5].as_float(),
+                    p->properties[6].as_float()
+                );
+            }
+        }
+        
+        Vector3 rot_rad = lcl_rotation_deg * (3.14159265f / 180.0f);
+        Basis rot_basis = Basis::from_euler(rot_rad);
+        
+        Basis scale_basis;
+        scale_basis.scale(lcl_scale);
+        
+        result.set_basis(rot_basis * scale_basis);
+        result.set_origin(lcl_translation);
+    }
+    
+    return result;
+}
+
+
+// ============================================================================
+// MESH EXTRACTION
+// ============================================================================
+
+Ref<VFXMesh> VFXFBXImporter::_build_mesh(int64_t geom_id, String& out_error) {
+    auto it = built_meshes.find(geom_id);
+    if (it != built_meshes.end()) return it->second;
+
+    const vfx_fbx::FBXRecord* geom = _get_object_record(geom_id);
+    if (!geom || geom->name != "Geometry") {
+        out_error = "Invalid geometry object";
+        return Ref<VFXMesh>();
+    }
+
+    Ref<VFXMesh> mesh;
+    mesh.instantiate();
+
+    const vfx_fbx::FBXRecord* verts_rec = geom->find_child("Vertices");
+    const vfx_fbx::FBXRecord* indices_rec = geom->find_child("PolygonVertexIndex");
+    
+    if (!verts_rec || verts_rec->properties.empty()) {
+        out_error = "Geometry missing Vertices";
+        return Ref<VFXMesh>();
+    }
+    if (!indices_rec || indices_rec->properties.empty()) {
+        out_error = "Geometry missing PolygonVertexIndex";
+        return Ref<VFXMesh>();
+    }
+
+    PackedVector3Array positions = verts_rec->properties[0].as_vec3_array();
+    for (int i = 0; i < positions.size(); i++) {
+        positions[i] = _fbx_to_godot_pos(positions[i] * doc->unit_scale);
+    }
+
+    PackedInt32Array poly_indices = indices_rec->properties[0].as_int_array();
+
+    PackedVector3Array normals;
+    const vfx_fbx::FBXRecord* normals_layer = geom->find_child("LayerElementNormal");
+    if (normals_layer) {
+        const vfx_fbx::FBXRecord* norms_rec = normals_layer->find_child("Normals");
+        if (norms_rec && !norms_rec->properties.empty()) {
+            normals = norms_rec->properties[0].as_vec3_array();
+            for (int i = 0; i < normals.size(); i++) {
+                normals[i] = _fbx_to_godot_n(normals[i]);
+            }
+        }
+    }
+
+    PackedVector2Array uvs;
+    const vfx_fbx::FBXRecord* uv_layer = geom->find_child("LayerElementUV");
+    if (uv_layer) {
+        const vfx_fbx::FBXRecord* uvs_rec = uv_layer->find_child("UV");
+        if (uvs_rec && !uvs_rec->properties.empty()) {
+            uvs = uvs_rec->properties[0].as_vec2_array();
+        }
+    }
+
+    std::vector<int> vert_remap;
+    vert_remap.resize(positions.size());
+    for (int i = 0; i < positions.size(); i++) {
+        Vector2 uv = (i < uvs.size()) ? uvs[i] : Vector2();
+        vert_remap[i] = mesh->add_vertex(positions[i], uv, Color(1,1,1,1));
+    }
+
+    std::vector<int> poly;
+    for (int i = 0; i < poly_indices.size(); i++) {
+        int idx = poly_indices[i];
+        bool is_last = (idx < 0);
+        if (is_last) idx = -idx - 1;
+        
+        poly.push_back(idx);
+        
+        if (is_last) {
+            if (poly.size() >= 3) {
+                for (size_t j = 1; j + 1 < poly.size(); j++) {
+                    mesh->add_triangle(
+                        vert_remap[poly[0]],
+                        vert_remap[poly[j]],
+                        vert_remap[poly[j+1]]
+                    );
+                }
+            }
+            poly.clear();
+        }
+    }
+
+    for (int64_t skin_id : doc->skin_ids) {
+        auto it_conn = doc->connections.find(skin_id);
+        if (it_conn == doc->connections.end()) continue;
+        
+        for (int64_t child_id : it_conn->second) {
+            if (std::find(doc->cluster_ids.begin(), doc->cluster_ids.end(), child_id) == doc->cluster_ids.end()) 
+                continue;
+            
+            const vfx_fbx::FBXRecord* cluster = _get_object_record(child_id);
+            if (!cluster) continue;
+            
+            const vfx_fbx::FBXRecord* idx_rec = cluster->find_child("Indexes");
+            const vfx_fbx::FBXRecord* w_rec = cluster->find_child("Weights");
+            
+            if (!idx_rec || !w_rec || idx_rec->properties.empty() || w_rec->properties.empty())
+                continue;
+            
+            PackedInt32Array c_indices = idx_rec->properties[0].as_int_array();
+            PackedFloat32Array c_weights = w_rec->properties[0].as_float_array();
+            
+            auto bone_it = cluster_to_bone.find(child_id);
+            if (bone_it == cluster_to_bone.end()) continue;
+            int bone_idx = bone_it->second;
+            
+            for (int i = 0; i < c_indices.size() && i < c_weights.size(); i++) {
+                int cp_idx = c_indices[i];
+                if (cp_idx < 0 || cp_idx >= (int)vert_remap.size()) continue;
+                
+                int vfx_vidx = vert_remap[cp_idx];
+                float weight = c_weights[i];
+                
+                int bones[4]; float weights[4];
+                mesh->get_vertex_skinning(vfx_vidx, bones, weights);
+                
+                for (int s = 0; s < 4; s++) {
+                    if (weights[s] < 0.001f) {
+                        bones[s] = bone_idx;
+                        weights[s] = weight;
+                        break;
+                    }
+                }
+                mesh->set_vertex_skinning(vfx_vidx, bones, weights);
+            }
+        }
+    }
+
+    int vcount = mesh->get_vertex_count();
+    for (int i = 0; i < vcount; i++) {
+        mesh->normalize_weights(i);
+    }
+
+    mesh->recalculate_normals();
+    mesh->recalculate_bounds();
+    
+    built_meshes[geom_id] = mesh;
+    return mesh;
+}
+
+
+// ============================================================================
+// SKELETON EXTRACTION
+// ============================================================================
+
+Ref<VFXSkeleton> VFXFBXImporter::_build_skeleton(int64_t skin_id, String& out_error) {
+    auto it = built_skeletons.find(skin_id);
+    if (it != built_skeletons.end()) return it->second;
+
+    auto it_conn = doc->connections.find(skin_id);
+    if (it_conn == doc->connections.end()) {
+        out_error = "Skin has no clusters";
+        return Ref<VFXSkeleton>();
+    }
+
+    Ref<VFXSkeleton> skeleton;
+    skeleton.instantiate();
+
+    std::vector<int64_t> cluster_ids_ordered;
+    for (int64_t child_id : it_conn->second) {
+        if (std::find(doc->cluster_ids.begin(), doc->cluster_ids.end(), child_id) != doc->cluster_ids.end()) {
+            cluster_ids_ordered.push_back(child_id);
+        }
+    }
+
+    if (cluster_ids_ordered.empty()) {
+        out_error = "No clusters found in skin";
+        return Ref<VFXSkeleton>();
+    }
+
+    for (size_t i = 0; i < cluster_ids_ordered.size(); i++) {
+        cluster_to_bone[cluster_ids_ordered[i]] = (int)i;
+    }
+
+    for (size_t i = 0; i < cluster_ids_ordered.size(); i++) {
+        int64_t cluster_id = cluster_ids_ordered[i];
+        const vfx_fbx::FBXRecord* cluster = _get_object_record(cluster_id);
+        if (!cluster) continue;
+
+        int64_t linked_model = 0;
+        auto cit = doc->connections.find(cluster_id);
+        if (cit != doc->connections.end()) {
+            for (int64_t child : cit->second) {
+                if (std::find(doc->limb_node_ids.begin(), doc->limb_node_ids.end(), child) != doc->limb_node_ids.end()) {
+                    linked_model = child;
+                    break;
+                }
+            }
+        }
+
+        String bone_name = linked_model ? _get_object_name(linked_model) : ("bone_" + String::num_int64(i));
+        int parent_bone = -1;
+
+        if (linked_model) {
+            model_to_bone[linked_model] = (int)i;
+            
+            auto pit = doc->parent_of.find(linked_model);
+            if (pit != doc->parent_of.end()) {
+                int64_t parent_model = pit->second;
+                auto bit = model_to_bone.find(parent_model);
+                if (bit != model_to_bone.end()) {
+                    parent_bone = bit->second;
+                }
+            }
+        }
+
+        skeleton->add_bone(bone_name, parent_bone);
+    }
+
+    for (size_t i = 0; i < cluster_ids_ordered.size(); i++) {
+        int64_t cluster_id = cluster_ids_ordered[i];
+        const vfx_fbx::FBXRecord* cluster = _get_object_record(cluster_id);
+        if (!cluster) continue;
+
+        const vfx_fbx::FBXRecord* tl_rec = cluster->find_child("TransformLink");
+        if (tl_rec && !tl_rec->properties.empty()) {
+            PackedFloat32Array mat = tl_rec->properties[0].as_float_array();
+            if (mat.size() >= 16) {
+                Basis b;
+                b[0] = Vector3(mat[0], mat[1], mat[2]);
+                b[1] = Vector3(mat[4], mat[5], mat[6]);
+                b[2] = Vector3(mat[8], mat[9], mat[10]);
+                Vector3 o(mat[12], mat[13], mat[14]);
+                Transform3D bind_pose = _fbx_to_godot_transform(Transform3D(b, o));
+                skeleton->set_bone_bind_pose((int)i, bind_pose);
+            }
+        }
+    }
+
+    skeleton->update_transforms();
+    built_skeletons[skin_id] = skeleton;
+    return skeleton;
+}
+
+
+// ============================================================================
+// ANIMATION EXTRACTION
+// ============================================================================
+
+void VFXFBXImporter::_build_animations(Ref<VFXAnimator> animator, const Ref<VFXSkeleton>& skeleton, String& out_error) {
+    if (!doc || doc->anim_stack_ids.empty()) return;
+    if (skeleton.is_null() || skeleton->get_bone_count() == 0) return;
+
+    for (int64_t stack_id : doc->anim_stack_ids) {
+        String stack_name = _get_object_name(stack_id);
+        if (stack_name.is_empty()) stack_name = "Animation";
+
+        auto it = doc->connections.find(stack_id);
+        if (it == doc->connections.end()) continue;
+
+        float duration = 0.0f;
+
+        std::vector<int64_t> curve_nodes;
+        for (int64_t layer_id : it->second) {
+            if (std::find(doc->anim_layer_ids.begin(), doc->anim_layer_ids.end(), layer_id) == doc->anim_layer_ids.end())
+                continue;
+            
+            auto lit = doc->connections.find(layer_id);
+            if (lit == doc->connections.end()) continue;
+            
+            for (int64_t cn_id : lit->second) {
+                if (std::find(doc->anim_curve_node_ids.begin(), doc->anim_curve_node_ids.end(), cn_id) != doc->anim_curve_node_ids.end()) {
+                    curve_nodes.push_back(cn_id);
+                }
+            }
+        }
+
+        if (curve_nodes.empty()) continue;
+
+        for (int64_t cn_id : curve_nodes) {
+            auto cnit = doc->connections.find(cn_id);
+            if (cnit == doc->connections.end()) continue;
+            
+            for (int64_t curve_id : cnit->second) {
+                if (std::find(doc->anim_curve_ids.begin(), doc->anim_curve_ids.end(), curve_id) == doc->anim_curve_ids.end())
+                    continue;
+                
+                const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
+                if (!curve) continue;
+                
+                const vfx_fbx::FBXRecord* keytime_rec = curve->find_child("KeyTime");
+                if (keytime_rec && !keytime_rec->properties.empty()) {
+                    PackedFloat32Array times = keytime_rec->properties[0].as_float_array();
+                    for (int i = 0; i < times.size(); i++) {
+                        float t_sec = times[i] / 46186158000.0f;
+                        duration = (t_sec > duration) ? t_sec : duration;
+                    }
+                }
+            }
+        }
+
+        if (duration <= 0.0f) duration = 1.0f;
+        int clip_idx = animator->create_clip(stack_name, duration, 30.0f);
+
+        for (int64_t cn_id : curve_nodes) {
+            const vfx_fbx::FBXRecord* cn = _get_object_record(cn_id);
+            if (!cn) continue;
+
+            int bone_idx = -1;
+            auto cnit = doc->connections.find(cn_id);
+            if (cnit != doc->connections.end()) {
+                for (int64_t model_id : cnit->second) {
+                    auto bit = model_to_bone.find(model_id);
+                    if (bit != model_to_bone.end()) {
+                        bone_idx = bit->second;
+                        break;
+                    }
+                }
+            }
+            if (bone_idx < 0) continue;
+
+            String cn_name = _get_object_name(cn_id);
+            bool is_translation = cn_name.contains("T") || cn_name.contains("Translation");
+            bool is_rotation = cn_name.contains("R") || cn_name.contains("Rotation");
+            bool is_scale = cn_name.contains("S") || cn_name.contains("Scaling");
+
+            if (!is_translation && !is_rotation && !is_scale) {
+                const vfx_fbx::FBXRecord* props = cn->find_child("Properties70");
+                if (props) {
+                    for (const auto& p : props->children) {
+                        if (p->properties.empty()) continue;
+                        String pname = p->properties[0].as_string();
+                        if (pname.contains("d|X") || pname.contains("d|Y") || pname.contains("d|Z")) {
+                            is_translation = true;
+                        }
+                    }
+                }
+                if (!is_translation && !is_rotation && !is_scale) {
+                    is_translation = true;
+                }
+            }
+
+            auto curve_conn_it = doc->connections.find(cn_id);
+            if (curve_conn_it == doc->connections.end()) continue;
+
+            std::vector<int64_t> curves;
+            for (int64_t curve_id : curve_conn_it->second) {
+                if (std::find(doc->anim_curve_ids.begin(), doc->anim_curve_ids.end(), curve_id) != doc->anim_curve_ids.end()) {
+                    curves.push_back(curve_id);
+                }
+            }
+
+            if (curves.empty()) continue;
+
+            String curve_name = skeleton->get_bone_name(bone_idx) + "_" + 
+                (is_translation ? "translation" : (is_rotation ? "rotation" : "scale"));
+
+            int curve_idx = animator->add_curve(clip_idx, curve_name, bone_idx, is_rotation, is_scale);
+
+            // Collect all unique key times from all curves for this node
+            std::vector<float> all_times_vec;
+            for (int64_t curve_id : curves) {
+                const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
+                if (!curve) continue;
+                const vfx_fbx::FBXRecord* kt = curve->find_child("KeyTime");
+                if (!kt || kt->properties.empty()) continue;
+                PackedFloat32Array t = kt->properties[0].as_float_array();
+                for (int i = 0; i < t.size(); i++) {
+                    all_times_vec.push_back(t[i] / 46186158000.0f);
+                }
+            }
+            
+            std::sort(all_times_vec.begin(), all_times_vec.end());
+            all_times_vec.erase(std::unique(all_times_vec.begin(), all_times_vec.end(), 
+                [](float a, float b){ return fabs(a - b) < 0.0001f; }), all_times_vec.end());
+
+            for (float t : all_times_vec) {
+                Vector3 value;
+                
+                for (size_t ci = 0; ci < curves.size() && ci < 3; ci++) {
+                    int64_t curve_id = curves[ci];
+                    const vfx_fbx::FBXRecord* curve = _get_object_record(curve_id);
+                    float comp_val = 0.0f;
+                    
+                    if (curve) {
+                        const vfx_fbx::FBXRecord* kt = curve->find_child("KeyTime");
+                        const vfx_fbx::FBXRecord* kv = curve->find_child("KeyValueFloat");
+                        if (kt && kv && !kt->properties.empty() && !kv->properties.empty()) {
+                            PackedFloat32Array ctimes = kt->properties[0].as_float_array();
+                            PackedFloat32Array cvals = kv->properties[0].as_float_array();
+                            
+                            if (ctimes.size() > 0 && cvals.size() > 0) {
+                                if (t <= ctimes[0] / 46186158000.0f) {
+                                    comp_val = cvals[0];
+                                } else if (t >= ctimes[ctimes.size()-1] / 46186158000.0f) {
+                                    comp_val = cvals[cvals.size()-1];
+                                } else {
+                                    for (int i = 0; i < (int)ctimes.size() - 1; i++) {
+                                        float t0 = ctimes[i] / 46186158000.0f;
+                                        float t1 = ctimes[i+1] / 46186158000.0f;
+                                        if (t >= t0 && t <= t1) {
+                                            if (t1 - t0 < 0.0001f) {
+                                                comp_val = cvals[i];
+                                            } else {
+                                                float lerp_t = (t - t0) / (t1 - t0);
+                                                comp_val = cvals[i] + (cvals[i+1] - cvals[i]) * lerp_t;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (ci == 0) value.x = comp_val;
+                    else if (ci == 1) value.y = comp_val;
+                    else value.z = comp_val;
+                }
+
+                if (is_rotation) {
+                    Vector3 rot_rad = value * (3.14159265f / 180.0f);
+                    Basis b = Basis::from_euler(rot_rad);
+                    Quaternion q = b.get_rotation_quaternion();
+                    q = _fbx_to_godot_q(q);
+                    animator->add_keyframe_quaternion(clip_idx, curve_idx, t, q, VFXAnimator::INTERP_LINEAR);
+                } else if (is_translation) {
+                    value = _fbx_to_godot_pos(value * doc->unit_scale);
+                    animator->add_keyframe_vector(clip_idx, curve_idx, t, value, VFXAnimator::INTERP_LINEAR);
+                } else {
+                    animator->add_keyframe_vector(clip_idx, curve_idx, t, value, VFXAnimator::INTERP_LINEAR);
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MAIN IMPORT ENTRY POINT
+// ============================================================================
+
+Dictionary VFXFBXImporter::import_fbx(const String& path) {
     Dictionary result;
     result[KEY_SUCCESS] = false;
     result[KEY_ERROR] = "";
@@ -94,6 +1176,8 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     result[KEY_NODE_COUNT] = 0;
     result[KEY_MESH_COUNT] = 0;
 
+    _clear_state();
+
     Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
     if (f.is_null()) {
         result[KEY_ERROR] = "Failed to open file: " + path;
@@ -103,132 +1187,137 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     PackedByteArray data = f->get_buffer(f->get_length());
     f->close();
 
+    doc = std::make_unique<vfx_fbx::FBXDocument>();
     String error;
-    if (!_parse_glb(data, error)) {
+    if (!doc->parse(data, error)) {
         result[KEY_ERROR] = error;
         return result;
     }
 
-    result[KEY_NODE_COUNT] = (int)nodes.size();
-    result[KEY_MESH_COUNT] = (int)meshes.size();
-    result[KEY_ANIMATION_COUNT] = (int)animations.size();
+    result[KEY_NODE_COUNT] = (int)doc->model_ids.size();
+    result[KEY_MESH_COUNT] = (int)doc->mesh_model_ids.size();
+    result[KEY_ANIMATION_COUNT] = (int)doc->anim_stack_ids.size();
 
-    // Create VFXScene and build node hierarchy
     Ref<VFXScene> scene;
     scene.instantiate();
     scene->create_default_root();
 
-    // Create a VFXSceneNode for every glTF node
-    std::vector<Ref<VFXSceneNode>> vfx_nodes(nodes.size());
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        vfx_nodes[i].instantiate();
-        vfx_nodes[i]->set_node_name(nodes[i].name);
-        vfx_nodes[i]->set_local_transform(_get_node_local_transform(nodes[i]));
-        vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_EMPTY);
-    }
+    // Build a set of bone (LimbNode) model IDs so we can skip creating scene nodes for them.
+    // Bones live inside VFXSkeleton only; they should NOT appear as VFXSceneNode items.
+    std::unordered_set<int64_t> bone_model_set(doc->limb_node_ids.begin(), doc->limb_node_ids.end());
 
-    // Build hierarchy: parent -> child links
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        if (nodes[i].parent >= 0 && nodes[i].parent < (int)nodes.size()) {
-            vfx_nodes[nodes[i].parent]->add_child(vfx_nodes[i]);
+    // Helper: find nearest non-bone ancestor for a given model ID
+    auto find_non_bone_parent = [&](int64_t model_id) -> int64_t {
+        auto pit = doc->parent_of.find(model_id);
+        if (pit == doc->parent_of.end()) return 0;
+        int64_t p = pit->second;
+        while (p != 0 && bone_model_set.count(p)) {
+            auto pit2 = doc->parent_of.find(p);
+            if (pit2 == doc->parent_of.end()) break;
+            p = pit2->second;
         }
+        return p;
+    };
+
+    // Create VFXSceneNode for every NON-BONE FBX model only
+    for (int64_t model_id : doc->model_ids) {
+        if (bone_model_set.count(model_id)) continue; // skip bones
+        Ref<VFXSceneNode> node;
+        node.instantiate();
+        node->set_node_name(_get_object_name(model_id));
+        node->set_local_transform(_get_model_transform(model_id));
+        node->set_node_type(VFXSceneNode::NODE_EMPTY);
+        built_nodes[model_id] = node;
     }
 
-    // Attach root-level scene nodes to the scene root
-    for (int scene_node_idx : scene_nodes) {
-        if (scene_node_idx >= 0 && scene_node_idx < (int)nodes.size()) {
-            if (nodes[scene_node_idx].parent < 0) {
-                bool already_child = false;
-                for (int j = 0; j < scene->get_root()->get_child_count(); j++) {
-                    if (scene->get_root()->get_child(j) == vfx_nodes[scene_node_idx]) {
-                        already_child = true;
-                        break;
-                    }
+    // Build hierarchy: parent -> child links, skipping over bone parents
+    for (int64_t model_id : doc->model_ids) {
+        if (bone_model_set.count(model_id)) continue; // skip bones
+        int64_t parent_id = find_non_bone_parent(model_id);
+        if (parent_id != 0) {
+            auto nit = built_nodes.find(parent_id);
+            if (nit != built_nodes.end()) {
+                auto cit = built_nodes.find(model_id);
+                if (cit != built_nodes.end()) {
+                    nit->second->add_child(cit->second);
                 }
-                if (!already_child) {
-                    scene->get_root()->add_child(vfx_nodes[scene_node_idx]);
-                }
-            }
-        }
-    }
-
-    // Ensure ALL orphan nodes are attached (not just scene_nodes)
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        if (nodes[i].parent < 0) {
-            bool already_child = false;
-            for (int j = 0; j < scene->get_root()->get_child_count(); j++) {
-                if (scene->get_root()->get_child(j) == vfx_nodes[i]) {
-                    already_child = true;
-                    break;
-                }
-            }
-            if (!already_child) {
-                scene->get_root()->add_child(vfx_nodes[i]);
             }
         }
     }
 
-    // Build meshes, skeletons, skins, animators per node
-    std::vector<Ref<VFXSkeleton>> built_skeletons(skins.size());
-    std::vector<Ref<VFXAnimator>> built_animators(skins.size());
-    Array mesh_nodes_array;
+    // Attach root-level non-bone models to the scene root
+    for (int64_t model_id : doc->model_ids) {
+        if (bone_model_set.count(model_id)) continue; // skip bones
+        int64_t parent_id = find_non_bone_parent(model_id);
+        if (parent_id == 0) {
+            auto nit = built_nodes.find(model_id);
+            if (nit != built_nodes.end()) {
+                scene->get_root()->add_child(nit->second);
+            }
+        }
+    }
 
     Ref<VFXMesh> first_mesh;
     Ref<VFXSkeleton> first_skeleton;
     Ref<VFXSkin> first_skin;
     Ref<VFXAnimator> first_animator;
+    Array mesh_nodes_array;
 
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        if (nodes[i].mesh >= 0 && nodes[i].mesh < (int)meshes.size()) {
-            const GLBMesh& glb_mesh = meshes[nodes[i].mesh];
-            Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error);
-            if (mesh.is_null()) continue;
+    for (int64_t model_id : doc->mesh_model_ids) {
+        auto it = doc->connections.find(model_id);
+        if (it == doc->connections.end()) continue;
 
-            vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_MESH);
-            vfx_nodes[i]->set_mesh(mesh);
-            mesh_nodes_array.append(vfx_nodes[i]);
+        int64_t geom_id = 0;
+        for (int64_t child_id : it->second) {
+            if (std::find(doc->geometry_ids.begin(), doc->geometry_ids.end(), child_id) != doc->geometry_ids.end()) {
+                geom_id = child_id;
+                break;
+            }
+        }
+        if (geom_id == 0) continue;
 
-            if (!first_mesh.is_valid()) first_mesh = mesh;
+        String err;
+        Ref<VFXMesh> mesh = _build_mesh(geom_id, err);
+        if (mesh.is_null()) continue;
 
-            // Skin
-            if (nodes[i].skin >= 0 && nodes[i].skin < (int)skins.size()) {
-                int skin_idx = nodes[i].skin;
+        auto nit = built_nodes.find(model_id);
+        if (nit == built_nodes.end()) continue;
 
-                if (!built_skeletons[skin_idx].is_valid()) {
-                    built_skeletons[skin_idx] = _build_skeleton(skins[skin_idx], error);
-                }
+        nit->second->set_node_type(VFXSceneNode::NODE_MESH);
+        nit->second->set_mesh(mesh);
+        mesh_nodes_array.append(nit->second);
 
-                if (built_skeletons[skin_idx].is_valid()) {
-                    Ref<VFXSkin> vfx_skin;
-                    vfx_skin.instantiate();
-                    vfx_skin->set_mesh(mesh);
-                    vfx_skin->set_skeleton(built_skeletons[skin_idx]);
-                    vfx_nodes[i]->set_skeleton(built_skeletons[skin_idx]);
-                    vfx_nodes[i]->set_skin(vfx_skin);
+        if (!first_mesh.is_valid()) first_mesh = mesh;
 
-                    if (!first_skeleton.is_valid()) first_skeleton = built_skeletons[skin_idx];
-                    if (!first_skin.is_valid()) first_skin = vfx_skin;
+        int64_t skin_id = 0;
+        for (int64_t child_id : it->second) {
+            if (std::find(doc->skin_ids.begin(), doc->skin_ids.end(), child_id) != doc->skin_ids.end()) {
+                skin_id = child_id;
+                break;
+            }
+        }
 
-                    // Build animator once per skin
-                    if (!built_animators[skin_idx].is_valid()) {
-                        Ref<VFXAnimator> animator;
-                        animator.instantiate();
-                        std::vector<int> node_to_bone(nodes.size(), -1);
-                        for (int j = 0; j < skins[skin_idx].joints.size(); j++) {
-                            int joint_node = skins[skin_idx].joints[j];
-                            if (joint_node >= 0 && joint_node < (int)nodes.size()) {
-                                node_to_bone[joint_node] = j;
-                            }
-                        }
-                        _build_animations(animator, node_to_bone);
-                        if (animator->get_clip_count() > 0) {
-                            built_animators[skin_idx] = animator;
-                        }
-                    }
-                    if (built_animators[skin_idx].is_valid()) {
-                        vfx_nodes[i]->set_animator(built_animators[skin_idx]);
-                        if (!first_animator.is_valid()) first_animator = built_animators[skin_idx];
-                    }
+        if (skin_id != 0) {
+            Ref<VFXSkeleton> skeleton = _build_skeleton(skin_id, err);
+            if (skeleton.is_valid()) {
+                Ref<VFXSkin> skin;
+                skin.instantiate();
+                skin->set_mesh(mesh);
+                skin->set_skeleton(skeleton);
+                skin->auto_weight_from_bones(4);
+
+                nit->second->set_skeleton(skeleton);
+                nit->second->set_skin(skin);
+
+                if (!first_skeleton.is_valid()) first_skeleton = skeleton;
+                if (!first_skin.is_valid()) first_skin = skin;
+
+                Ref<VFXAnimator> animator;
+                animator.instantiate();
+                _build_animations(animator, skeleton, err);
+                if (animator->get_clip_count() > 0) {
+                    nit->second->set_animator(animator);
+                    if (!first_animator.is_valid()) first_animator = animator;
                 }
             }
         }
@@ -242,812 +1331,4 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     if (first_animator.is_valid()) result[KEY_ANIMATOR] = first_animator;
     result[KEY_SUCCESS] = true;
     return result;
-}
-
-bool VFXGLBImporter::_parse_glb(const PackedByteArray& data, String& out_error) {
-    _clear_document();
-
-    if (data.size() < 12) {
-        out_error = "File too small for GLB header";
-        return false;
-    }
-
-    uint32_t magic = *reinterpret_cast<const uint32_t*>(data.ptr());
-    uint32_t version = *reinterpret_cast<const uint32_t*>(data.ptr() + 4);
-    uint32_t length = *reinterpret_cast<const uint32_t*>(data.ptr() + 8);
-
-    if (magic != 0x46546C67) {
-        out_error = "Not a valid GLB file (bad magic)";
-        return false;
-    }
-    if (version != 2) {
-        out_error = "Unsupported GLB version: " + String::num_int64(version);
-        return false;
-    }
-    if ((int)length != data.size()) {
-        out_error = "GLB length mismatch";
-        return false;
-    }
-
-    int offset = 12;
-    PackedByteArray json_chunk;
-    PackedByteArray bin_chunk;
-
-    while (offset < data.size()) {
-        if (offset + 8 > data.size()) {
-            out_error = "Truncated chunk header";
-            return false;
-        }
-        uint32_t chunk_len = *reinterpret_cast<const uint32_t*>(data.ptr() + offset);
-        uint32_t chunk_type = *reinterpret_cast<const uint32_t*>(data.ptr() + offset + 4);
-        offset += 8;
-
-        if (offset + (int)chunk_len > data.size()) {
-            out_error = "Chunk exceeds file bounds";
-            return false;
-        }
-
-        if (chunk_type == 0x4E4F534A) {
-            json_chunk.resize(chunk_len);
-            memcpy(json_chunk.ptrw(), data.ptr() + offset, chunk_len);
-        } else if (chunk_type == 0x004E4942) {
-            bin_chunk.resize(chunk_len);
-            memcpy(bin_chunk.ptrw(), data.ptr() + offset, chunk_len);
-        }
-        offset += chunk_len;
-    }
-
-    if (json_chunk.is_empty()) {
-        out_error = "No JSON chunk found";
-        return false;
-    }
-
-    String json_text;
-    json_text.parse_utf8((const char*)json_chunk.ptr(), json_chunk.size());
-    return _parse_json(json_text, bin_chunk, out_error);
-}
-
-bool VFXGLBImporter::_parse_json(const String& json_text, const PackedByteArray& bin_chunk, String& out_error) {
-    Ref<JSON> json;
-    json.instantiate();
-    Error err = json->parse(json_text);
-    if (err != OK) {
-        out_error = "JSON parse error: " + json->get_error_message() + " at line " + String::num_int64(json->get_error_line());
-        return false;
-    }
-
-    Dictionary doc = json->get_data();
-    if (!doc.has("asset")) {
-        out_error = "Missing asset in glTF";
-        return false;
-    }
-
-    Dictionary asset = doc["asset"];
-    String version = asset.get("version", "2.0");
-    if (!version.begins_with("2.")) {
-        out_error = "Unsupported glTF version: " + version;
-        return false;
-    }
-
-    if (doc.has("scene")) {
-        int scene_idx = doc["scene"];
-        if (doc.has("scenes")) {
-            Array scenes = doc["scenes"];
-            if (scene_idx >= 0 && scene_idx < scenes.size()) {
-                Dictionary scene = scenes[scene_idx];
-                if (scene.has("nodes")) {
-                    Array nodes_arr = scene["nodes"];
-                    for (int i = 0; i < nodes_arr.size(); i++) {
-                        scene_nodes.push_back(nodes_arr[i]);
-                    }
-                }
-            }
-        }
-    }
-
-    if (doc.has("nodes")) {
-        if (!_parse_nodes(doc["nodes"])) {
-            out_error = "Failed to parse nodes";
-            return false;
-        }
-    }
-    if (doc.has("meshes")) {
-        if (!_parse_meshes(doc["meshes"])) {
-            out_error = "Failed to parse meshes";
-            return false;
-        }
-    }
-    if (doc.has("skins")) {
-        if (!_parse_skins(doc["skins"])) {
-            out_error = "Failed to parse skins";
-            return false;
-        }
-    }
-    if (doc.has("animations")) {
-        if (!_parse_animations(doc["animations"])) {
-            out_error = "Failed to parse animations";
-            return false;
-        }
-    }
-    if (doc.has("accessors")) {
-        if (!_parse_accessors(doc["accessors"])) {
-            out_error = "Failed to parse accessors";
-            return false;
-        }
-    }
-    if (doc.has("bufferViews")) {
-        if (!_parse_buffer_views(doc["bufferViews"])) {
-            out_error = "Failed to parse buffer views";
-            return false;
-        }
-    }
-    if (doc.has("buffers")) {
-        if (!_parse_buffers(doc["buffers"], bin_chunk)) {
-            out_error = "Failed to parse buffers";
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool VFXGLBImporter::_parse_nodes(const Array& nodes_arr) {
-    for (int i = 0; i < nodes_arr.size(); i++) {
-        Dictionary n = nodes_arr[i];
-        GLBNode node;
-        node.name = n.get("name", "node_" + String::num_int64(i));
-        if (n.has("mesh")) node.mesh = n["mesh"];
-        if (n.has("skin")) node.skin = n["skin"];
-        if (n.has("children")) {
-            Array c = n["children"];
-            for (int j = 0; j < c.size(); j++) {
-                node.children.push_back(c[j]);
-            }
-        }
-        if (n.has("translation")) {
-            Array t = n["translation"];
-            node.translation = Vector3(t[0], t[1], t[2]);
-        }
-        if (n.has("rotation")) {
-            Array r = n["rotation"];
-            node.rotation = Quaternion(r[0], r[1], r[2], r[3]);
-        }
-        if (n.has("scale")) {
-            Array s = n["scale"];
-            node.scale = Vector3(s[0], s[1], s[2]);
-        }
-        if (n.has("matrix")) {
-            Array m = n["matrix"];
-            Basis b;
-            b[0] = Vector3(m[0], m[1], m[2]);
-            b[1] = Vector3(m[4], m[5], m[6]);
-            b[2] = Vector3(m[8], m[9], m[10]);
-            node.matrix = Transform3D(b, Vector3(m[12], m[13], m[14]));
-            node.has_matrix = true;
-        }
-        nodes.push_back(node);
-    }
-    for (int i = 0; i < (int)nodes.size(); i++) {
-        for (int child : nodes[i].children) {
-            if (child >= 0 && child < (int)nodes.size()) {
-                nodes[child].parent = i;
-            }
-        }
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_parse_meshes(const Array& meshes_arr) {
-    for (int i = 0; i < meshes_arr.size(); i++) {
-        Dictionary m = meshes_arr[i];
-        GLBMesh mesh;
-        mesh.name = m.get("name", "mesh_" + String::num_int64(i));
-        if (m.has("primitives")) {
-            Array prims = m["primitives"];
-            for (int j = 0; j < prims.size(); j++) {
-                Dictionary p = prims[j];
-                GLBPrimitive prim;
-                if (p.has("attributes")) prim.attributes = p["attributes"];
-                if (p.has("indices")) prim.indices = p["indices"];
-                if (p.has("mode")) prim.mode = p["mode"];
-                if (p.has("material")) prim.material = p["material"];
-                mesh.primitives.push_back(prim);
-            }
-        }
-        meshes.push_back(mesh);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_parse_skins(const Array& skins_arr) {
-    for (int i = 0; i < skins_arr.size(); i++) {
-        Dictionary s = skins_arr[i];
-        GLBSkin skin;
-        if (s.has("inverseBindMatrices")) skin.inverse_bind_matrices = s["inverseBindMatrices"];
-        if (s.has("joints")) {
-            Array j = s["joints"];
-            for (int k = 0; k < j.size(); k++) skin.joints.push_back(j[k]);
-        }
-        if (s.has("skeleton")) skin.skeleton_root = s["skeleton"];
-        skins.push_back(skin);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_parse_animations(const Array& anims_arr) {
-    for (int i = 0; i < anims_arr.size(); i++) {
-        Dictionary a = anims_arr[i];
-        GLBAnimation anim;
-        anim.name = a.get("name", "anim_" + String::num_int64(i));
-        if (a.has("samplers")) {
-            Array samps = a["samplers"];
-            for (int j = 0; j < samps.size(); j++) {
-                Dictionary s = samps[j];
-                GLBAnimationSampler sampler;
-                if (s.has("input")) sampler.input = s["input"];
-                if (s.has("output")) sampler.output = s["output"];
-                if (s.has("interpolation")) sampler.interpolation = s["interpolation"];
-                anim.samplers.push_back(sampler);
-            }
-        }
-        if (a.has("channels")) {
-            Array chans = a["channels"];
-            for (int j = 0; j < chans.size(); j++) {
-                Dictionary c = chans[j];
-                GLBAnimationChannel channel;
-                if (c.has("sampler")) channel.sampler = c["sampler"];
-                if (c.has("target")) {
-                    Dictionary t = c["target"];
-                    if (t.has("node")) channel.target_node = t["node"];
-                    if (t.has("path")) channel.target_path = t["path"];
-                }
-                anim.channels.push_back(channel);
-            }
-        }
-        animations.push_back(anim);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_parse_accessors(const Array& acc_arr) {
-    for (int i = 0; i < acc_arr.size(); i++) {
-        Dictionary a = acc_arr[i];
-        GLBAccessor acc;
-        acc.buffer_view = a.get("bufferView", -1);
-        acc.byte_offset = a.get("byteOffset", 0);
-        acc.component_type = a["componentType"];
-        acc.count = a["count"];
-        acc.type = a["type"];
-        acc.normalized = a.get("normalized", false);
-        if (a.has("min")) {
-            Array m = a["min"];
-            for (int j = 0; j < m.size(); j++) acc.min.append(m[j]);
-        }
-        if (a.has("max")) {
-            Array m = a["max"];
-            for (int j = 0; j < m.size(); j++) acc.max.append(m[j]);
-        }
-        accessors.push_back(acc);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_parse_buffer_views(const Array& bv_arr) {
-    for (int i = 0; i < bv_arr.size(); i++) {
-        Dictionary b = bv_arr[i];
-        GLBBufferView bv;
-        bv.buffer = b["buffer"];
-        bv.byte_offset = b.get("byteOffset", 0);
-        bv.byte_length = b["byteLength"];
-        bv.byte_stride = b.get("byteStride", 0);
-        bv.target = b.get("target", 0);
-        buffer_views.push_back(bv);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_parse_buffers(const Array& buf_arr, const PackedByteArray& bin_chunk) {
-    for (int i = 0; i < buf_arr.size(); i++) {
-        Dictionary b = buf_arr[i];
-        GLBBuffer buf;
-        if (b.has("uri")) {
-            // External / data URI not supported
-        } else if (i == 0 && !bin_chunk.is_empty()) {
-            buf.data = bin_chunk;
-        }
-        buffers.push_back(buf);
-    }
-    return true;
-}
-
-
-int VFXGLBImporter::_accessor_component_count(const String& type) const {
-    if (type == "SCALAR") return 1;
-    if (type == "VEC2") return 2;
-    if (type == "VEC3") return 3;
-    if (type == "VEC4") return 4;
-    if (type == "MAT2") return 4;
-    if (type == "MAT3") return 9;
-    if (type == "MAT4") return 16;
-    return 1;
-}
-
-int VFXGLBImporter::_accessor_component_size(int component_type) const {
-    switch (component_type) {
-        case 5120: return 1;
-        case 5121: return 1;
-        case 5122: return 2;
-        case 5123: return 2;
-        case 5125: return 4;
-        case 5126: return 4;
-        default: return 1;
-    }
-}
-
-PackedByteArray VFXGLBImporter::_read_accessor_raw(int accessor_idx, String& out_error) {
-    PackedByteArray empty;
-    if (accessor_idx < 0 || accessor_idx >= (int)accessors.size()) {
-        out_error = "Invalid accessor index";
-        return empty;
-    }
-    const GLBAccessor& acc = accessors[accessor_idx];
-    if (acc.buffer_view < 0 || acc.buffer_view >= (int)buffer_views.size()) {
-        out_error = "Invalid buffer view index";
-        return empty;
-    }
-    const GLBBufferView& bv = buffer_views[acc.buffer_view];
-    if (bv.buffer < 0 || bv.buffer >= (int)buffers.size()) {
-        out_error = "Invalid buffer index";
-        return empty;
-    }
-    const GLBBuffer& buf = buffers[bv.buffer];
-
-    int comp_size = _accessor_component_size(acc.component_type);
-    int comp_count = _accessor_component_count(acc.type);
-    int element_size = comp_size * comp_count;
-    int stride = bv.byte_stride > 0 ? bv.byte_stride : element_size;
-
-    int total_bytes = acc.count * element_size;
-    PackedByteArray result;
-    result.resize(total_bytes);
-
-    int src_offset = bv.byte_offset + acc.byte_offset;
-    int dst_offset = 0;
-
-    for (int i = 0; i < acc.count; i++) {
-        if (src_offset + element_size > buf.data.size()) {
-            out_error = "Accessor read out of bounds";
-            return empty;
-        }
-        memcpy(result.ptrw() + dst_offset, buf.data.ptr() + src_offset, element_size);
-        src_offset += stride;
-        dst_offset += element_size;
-    }
-
-    return result;
-}
-
-bool VFXGLBImporter::_read_accessor_floats(int accessor_idx, PackedFloat32Array& out, String& out_error) {
-    out.clear();
-    if (accessor_idx < 0) return true;
-    PackedByteArray raw = _read_accessor_raw(accessor_idx, out_error);
-    if (raw.is_empty() && !out_error.is_empty()) return false;
-
-    const GLBAccessor& acc = accessors[accessor_idx];
-    int comp_count = _accessor_component_count(acc.type);
-    int total_elements = acc.count * comp_count;
-
-    out.resize(total_elements);
-
-    if (acc.component_type == 5126) {
-        memcpy(out.ptrw(), raw.ptr(), total_elements * 4);
-    } else if (acc.component_type == 5121) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < total_elements; i++) {
-            out[i] = acc.normalized ? (p[i] / 255.0f) : (float)p[i];
-        }
-    } else if (acc.component_type == 5123) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < total_elements; i++) {
-            uint16_t v = p[i*2] | (p[i*2+1] << 8);
-            out[i] = acc.normalized ? (v / 65535.0f) : (float)v;
-        }
-    } else if (acc.component_type == 5125) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < total_elements; i++) {
-            uint32_t v = p[i*4] | (p[i*4+1] << 8) | (p[i*4+2] << 16) | (p[i*4+3] << 24);
-            out[i] = (float)v;
-        }
-    } else if (acc.component_type == 5120) {
-        const int8_t* p = reinterpret_cast<const int8_t*>(raw.ptr());
-        for (int i = 0; i < total_elements; i++) {
-            out[i] = acc.normalized ? (MAX(p[i], (int8_t)-127) / 127.0f) : (float)p[i];
-        }
-    } else if (acc.component_type == 5122) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < total_elements; i++) {
-            int16_t v = (int16_t)(p[i*2] | (p[i*2+1] << 8));
-            out[i] = acc.normalized ? (MAX(v, (int16_t)-32767) / 32767.0f) : (float)v;
-        }
-    } else {
-        out_error = "Unsupported component type: " + String::num_int64(acc.component_type);
-        return false;
-    }
-
-    return true;
-}
-
-bool VFXGLBImporter::_read_accessor_vec3(int accessor_idx, PackedVector3Array& out, String& out_error) {
-    out.clear();
-    PackedFloat32Array floats;
-    if (!_read_accessor_floats(accessor_idx, floats, out_error)) return false;
-    const GLBAccessor& acc = accessors[accessor_idx];
-    if (_accessor_component_count(acc.type) != 3) {
-        out_error = "Accessor is not VEC3";
-        return false;
-    }
-    out.resize(acc.count);
-    for (int i = 0; i < acc.count; i++) {
-        out[i] = Vector3(floats[i*3], floats[i*3+1], floats[i*3+2]);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_read_accessor_vec2(int accessor_idx, PackedVector2Array& out, String& out_error) {
-    out.clear();
-    PackedFloat32Array floats;
-    if (!_read_accessor_floats(accessor_idx, floats, out_error)) return false;
-    const GLBAccessor& acc = accessors[accessor_idx];
-    if (_accessor_component_count(acc.type) != 2) {
-        out_error = "Accessor is not VEC2";
-        return false;
-    }
-    out.resize(acc.count);
-    for (int i = 0; i < acc.count; i++) {
-        out[i] = Vector2(floats[i*2], floats[i*2+1]);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_read_accessor_indices(int accessor_idx, PackedInt32Array& out, String& out_error) {
-    out.clear();
-    if (accessor_idx < 0) return true;
-    PackedByteArray raw = _read_accessor_raw(accessor_idx, out_error);
-    if (raw.is_empty() && !out_error.is_empty()) return false;
-
-    const GLBAccessor& acc = accessors[accessor_idx];
-    out.resize(acc.count);
-
-    if (acc.component_type == 5123) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < acc.count; i++) {
-            out[i] = p[i*2] | (p[i*2+1] << 8);
-        }
-    } else if (acc.component_type == 5125) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < acc.count; i++) {
-            out[i] = p[i*4] | (p[i*4+1] << 8) | (p[i*4+2] << 16) | (p[i*4+3] << 24);
-        }
-    } else if (acc.component_type == 5121) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < acc.count; i++) out[i] = p[i];
-    } else {
-        out_error = "Unsupported index component type";
-        return false;
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_read_accessor_vec4i(int accessor_idx, std::vector<Vector4i>& out, String& out_error) {
-    out.clear();
-    if (accessor_idx < 0) return true;
-    PackedByteArray raw = _read_accessor_raw(accessor_idx, out_error);
-    if (raw.is_empty() && !out_error.is_empty()) return false;
-
-    const GLBAccessor& acc = accessors[accessor_idx];
-    if (_accessor_component_count(acc.type) != 4) {
-        out_error = "Accessor is not VEC4";
-        return false;
-    }
-    out.resize(acc.count);
-
-    if (acc.component_type == 5121) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < acc.count; i++) {
-            out[i] = Vector4i(p[i*4], p[i*4+1], p[i*4+2], p[i*4+3]);
-        }
-    } else if (acc.component_type == 5123) {
-        const uint8_t* p = raw.ptr();
-        for (int i = 0; i < acc.count; i++) {
-            out[i] = Vector4i(
-                p[i*8] | (p[i*8+1] << 8),
-                p[i*8+2] | (p[i*8+3] << 8),
-                p[i*8+4] | (p[i*8+5] << 8),
-                p[i*8+6] | (p[i*8+7] << 8)
-            );
-        }
-    } else {
-        out_error = "Unsupported joints component type";
-        return false;
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_read_accessor_vec4f(int accessor_idx, std::vector<Vector4>& out, String& out_error) {
-    out.clear();
-    PackedFloat32Array floats;
-    if (!_read_accessor_floats(accessor_idx, floats, out_error)) return false;
-    const GLBAccessor& acc = accessors[accessor_idx];
-    if (_accessor_component_count(acc.type) != 4) {
-        out_error = "Accessor is not VEC4";
-        return false;
-    }
-    out.resize(acc.count);
-    for (int i = 0; i < acc.count; i++) {
-        out[i] = Vector4(floats[i*4], floats[i*4+1], floats[i*4+2], floats[i*4+3]);
-    }
-    return true;
-}
-
-bool VFXGLBImporter::_read_accessor_mat4(int accessor_idx, std::vector<Transform3D>& out, String& out_error) {
-    out.clear();
-    PackedFloat32Array floats;
-    if (!_read_accessor_floats(accessor_idx, floats, out_error)) return false;
-    const GLBAccessor& acc = accessors[accessor_idx];
-    if (_accessor_component_count(acc.type) != 16) {
-        out_error = "Accessor is not MAT4";
-        return false;
-    }
-    out.resize(acc.count);
-    for (int i = 0; i < acc.count; i++) {
-        int b = i * 16;
-        Basis basis;
-        basis[0] = Vector3(floats[b+0], floats[b+1], floats[b+2]);
-        basis[1] = Vector3(floats[b+4], floats[b+5], floats[b+6]);
-        basis[2] = Vector3(floats[b+8], floats[b+9], floats[b+10]);
-        Vector3 origin(floats[b+12], floats[b+13], floats[b+14]);
-        out[i] = Transform3D(basis, origin);
-    }
-    return true;
-}
-
-Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_error) {
-    Ref<VFXMesh> mesh;
-    mesh.instantiate();
-
-    for (const GLBPrimitive& prim : glb_mesh.primitives) {
-        if (prim.mode != 4) continue;
-
-        int pos_acc = -1, norm_acc = -1, uv_acc = -1, col_acc = -1;
-        int joints_acc = -1, weights_acc = -1;
-
-        Array attr_keys = prim.attributes.keys();
-        for (int i = 0; i < attr_keys.size(); i++) {
-            String key = attr_keys[i];
-            int idx = prim.attributes[key];
-            if (key == "POSITION") pos_acc = idx;
-            else if (key == "NORMAL") norm_acc = idx;
-            else if (key == "TEXCOORD_0") uv_acc = idx;
-            else if (key == "COLOR_0") col_acc = idx;
-            else if (key == "JOINTS_0") joints_acc = idx;
-            else if (key == "WEIGHTS_0") weights_acc = idx;
-        }
-
-        if (pos_acc < 0) {
-            out_error = "Primitive missing POSITION attribute";
-            return Ref<VFXMesh>();
-        }
-
-        PackedVector3Array positions;
-        if (!_read_accessor_vec3(pos_acc, positions, out_error)) {
-            return Ref<VFXMesh>();
-        }
-
-        PackedVector3Array normals;
-        if (norm_acc >= 0) {
-            if (!_read_accessor_vec3(norm_acc, normals, out_error)) return Ref<VFXMesh>();
-        }
-
-        PackedVector2Array uvs;
-        if (uv_acc >= 0) {
-            if (!_read_accessor_vec2(uv_acc, uvs, out_error)) return Ref<VFXMesh>();
-        }
-
-        PackedInt32Array indices;
-        if (prim.indices >= 0) {
-            if (!_read_accessor_indices(prim.indices, indices, out_error)) return Ref<VFXMesh>();
-        }
-
-        std::vector<Vector4> colors;
-        if (col_acc >= 0) {
-            std::vector<Vector4> cols;
-            if (!_read_accessor_vec4f(col_acc, cols, out_error)) return Ref<VFXMesh>();
-            colors = cols;
-        }
-
-        std::vector<Vector4i> joints;
-        std::vector<Vector4> weights;
-        if (joints_acc >= 0) {
-            if (!_read_accessor_vec4i(joints_acc, joints, out_error)) return Ref<VFXMesh>();
-        }
-        if (weights_acc >= 0) {
-            if (!_read_accessor_vec4f(weights_acc, weights, out_error)) return Ref<VFXMesh>();
-        }
-
-        for (int i = 0; i < positions.size(); i++) {
-            positions[i] = _gltf_to_godot_v3(positions[i]);
-        }
-        for (int i = 0; i < normals.size(); i++) {
-            normals[i] = _gltf_to_godot_n(normals[i]);
-        }
-        for (int i = 0; i < uvs.size(); i++) {
-            uvs[i].y = 1.0f - uvs[i].y;
-        }
-
-        int vert_base = mesh->get_vertex_count();
-        for (int i = 0; i < positions.size(); i++) {
-            Vector2 uv = (i < uvs.size()) ? uvs[i] : Vector2();
-            Color col = Color(1,1,1,1);
-            if (i < (int)colors.size()) {
-                col = Color(colors[i].x, colors[i].y, colors[i].z, colors[i].w);
-            }
-            mesh->add_vertex(positions[i], uv, col);
-        }
-
-        if (!joints.empty() && !weights.empty()) {
-            for (int i = 0; i < positions.size() && i < (int)joints.size() && i < (int)weights.size(); i++) {
-                mesh->set_vertex_bones(vert_base + i, joints[i].x, joints[i].y, joints[i].z, joints[i].w);
-                mesh->set_vertex_weights(vert_base + i, weights[i].x, weights[i].y, weights[i].z, weights[i].w);
-            }
-        }
-
-        if (indices.is_empty()) {
-            for (int i = 0; i < positions.size(); i += 3) {
-                if (i + 2 < positions.size()) {
-                    mesh->add_triangle(vert_base + i, vert_base + i + 1, vert_base + i + 2);
-                }
-            }
-        } else {
-            for (int i = 0; i < indices.size(); i += 3) {
-                if (i + 2 < indices.size()) {
-                    mesh->add_triangle(vert_base + indices[i], vert_base + indices[i+1], vert_base + indices[i+2]);
-                }
-            }
-        }
-    }
-
-    mesh->recalculate_normals();
-    mesh->recalculate_bounds();
-    return mesh;
-}
-
-Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String& out_error) {
-    Ref<VFXSkeleton> skeleton;
-    skeleton.instantiate();
-
-    int joint_count = glb_skin.joints.size();
-    if (joint_count == 0) {
-        out_error = "Skin has no joints";
-        return Ref<VFXSkeleton>();
-    }
-
-    std::vector<Transform3D> ibms;
-    if (glb_skin.inverse_bind_matrices >= 0) {
-        if (!_read_accessor_mat4(glb_skin.inverse_bind_matrices, ibms, out_error)) {
-            return Ref<VFXSkeleton>();
-        }
-    }
-    if ((int)ibms.size() < joint_count) {
-        ibms.resize(joint_count);
-        for (int i = 0; i < joint_count; i++) ibms[i] = Transform3D();
-    }
-
-    for (int i = 0; i < joint_count; i++) {
-        int node_idx = glb_skin.joints[i];
-        String name = (node_idx >= 0 && node_idx < (int)nodes.size()) ? nodes[node_idx].name : ("bone_" + String::num_int64(i));
-        int parent_bone = -1;
-        if (node_idx >= 0 && node_idx < (int)nodes.size()) {
-            int parent_node = nodes[node_idx].parent;
-            for (int j = 0; j < joint_count; j++) {
-                if (glb_skin.joints[j] == parent_node) {
-                    parent_bone = j;
-                    break;
-                }
-            }
-        }
-        skeleton->add_bone(name, parent_bone);
-    }
-
-    std::vector<Transform3D> bind_poses(joint_count);
-    for (int i = 0; i < joint_count; i++) {
-        Transform3D ibm = _gltf_to_godot_t(ibms[i]);
-        bind_poses[i] = ibm.affine_inverse();
-    }
-
-    for (int i = 0; i < joint_count; i++) {
-        skeleton->set_bone_bind_pose(i, bind_poses[i]);
-
-        int parent = skeleton->get_bone_parent(i);
-        Transform3D local;
-        if (parent >= 0) {
-            Transform3D parent_inv = bind_poses[parent].affine_inverse();
-            local = parent_inv * bind_poses[i];
-        } else {
-            local = bind_poses[i];
-        }
-
-        skeleton->set_bone_local_position(i, local.get_origin());
-        skeleton->set_bone_local_rotation(i, local.get_basis().get_rotation_quaternion());
-        skeleton->set_bone_local_scale(i, local.get_basis().get_scale());
-    }
-
-    skeleton->update_transforms();
-    return skeleton;
-}
-
-void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone) {
-    for (const GLBAnimation& anim : animations) {
-        float duration = 0.0f;
-        for (const GLBAnimationSampler& sampler : anim.samplers) {
-            if (sampler.input >= 0 && sampler.input < (int)accessors.size()) {
-                PackedFloat32Array times;
-                String err;
-                if (_read_accessor_floats(sampler.input, times, err) && !times.is_empty()) {
-                    duration = MAX(duration, times[times.size() - 1]);
-                }
-            }
-        }
-        if (duration <= 0.0f) duration = 1.0f;
-
-        int clip_idx = animator->create_clip(anim.name, duration, 30.0f);
-
-        for (const GLBAnimationChannel& channel : anim.channels) {
-            if (channel.target_node < 0 || channel.target_node >= (int)nodes.size()) continue;
-            if (channel.sampler < 0 || channel.sampler >= (int)anim.samplers.size()) continue;
-
-            int bone_id = node_to_bone[channel.target_node];
-            if (bone_id < 0) continue;
-
-            const GLBAnimationSampler& sampler = anim.samplers[channel.sampler];
-            if (sampler.input < 0 || sampler.output < 0) continue;
-
-            PackedFloat32Array times;
-            PackedFloat32Array values;
-            String err;
-            if (!_read_accessor_floats(sampler.input, times, err)) continue;
-            if (!_read_accessor_floats(sampler.output, values, err)) continue;
-
-            bool is_rotation = (channel.target_path == "rotation");
-            bool is_scale = (channel.target_path == "scale");
-            bool is_translation = (channel.target_path == "translation");
-            if (!is_rotation && !is_scale && !is_translation) continue;
-
-            String curve_name = nodes[channel.target_node].name + "_" + channel.target_path;
-            int curve_idx = animator->add_curve(clip_idx, curve_name, bone_id, is_rotation, is_scale);
-
-            int comp_count = is_rotation ? 4 : 3;
-            if ((int)values.size() < times.size() * comp_count) continue;
-
-            int interp = VFXAnimator::INTERP_LINEAR;
-            if (sampler.interpolation == "STEP") interp = VFXAnimator::INTERP_STEP;
-
-            for (int k = 0; k < times.size(); k++) {
-                float t = times[k];
-                int base = k * comp_count;
-
-                if (is_rotation) {
-                    Quaternion q(values[base], values[base+1], values[base+2], values[base+3]);
-                    q = _gltf_to_godot_q(q);
-                    animator->add_keyframe_quaternion(clip_idx, curve_idx, t, q, interp);
-                } else if (is_scale) {
-                    Vector3 s(values[base], values[base+1], values[base+2]);
-                    animator->add_keyframe_vector(clip_idx, curve_idx, t, s, interp);
-                } else {
-                    Vector3 p(values[base], values[base+1], values[base+2]);
-                    p = _gltf_to_godot_v3(p);
-                    animator->add_keyframe_vector(clip_idx, curve_idx, t, p, interp);
-                }
-            }
-        }
-    }
 }
