@@ -166,7 +166,21 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
         vfx_nodes[i]->set_node_name(nodes[i].name);
         vfx_nodes[i]->set_local_transform(_get_node_local_transform(nodes[i]));
         vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_EMPTY);
+	// Mark armature roots: non-skeleton nodes that are ancestors of skeletons
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        if (!skeleton_node_set.count(i)) continue;
+        int p = nodes[i].parent;
+        while (p >= 0 && p < (int)nodes.size()) {
+            if (!skeleton_node_set.count(p)) {
+               if (vfx_nodes[p].is_valid()) {
+                   vfx_nodes[p]->set_node_type(VFXSceneNode::NODE_ARMATURE);
+               }
+               break;
+            }
+            p = nodes[p].parent;
+        }
     }
+
 
     // Build hierarchy: parent -> child links, skipping over skeleton parents
     for (int i = 0; i < (int)nodes.size(); i++) {
