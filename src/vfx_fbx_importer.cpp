@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <unordered_set>
 
 // zlib for FBX compressed arrays
 #include <zlib.h>
@@ -1201,21 +1202,39 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
     scene.instantiate();
     scene->create_default_root();
 
-    std::vector<Ref<VFXSceneNode>> vfx_nodes;
+    // Build a set of bone (LimbNode) model IDs so we can skip creating scene nodes for them.
+    // Bones live inside VFXSkeleton only; they should NOT appear as VFXSceneNode items.
+    std::unordered_set<int64_t> bone_model_set(doc->limb_node_ids.begin(), doc->limb_node_ids.end());
+
+    // Helper: find nearest non-bone ancestor for a given model ID
+    auto find_non_bone_parent = [&](int64_t model_id) -> int64_t {
+        auto pit = doc->parent_of.find(model_id);
+        if (pit == doc->parent_of.end()) return 0;
+        int64_t p = pit->second;
+        while (p != 0 && bone_model_set.count(p)) {
+            auto pit2 = doc->parent_of.find(p);
+            if (pit2 == doc->parent_of.end()) break;
+            p = pit2->second;
+        }
+        return p;
+    };
+
+    // Create VFXSceneNode for every NON-BONE FBX model only
     for (int64_t model_id : doc->model_ids) {
+        if (bone_model_set.count(model_id)) continue; // skip bones
         Ref<VFXSceneNode> node;
         node.instantiate();
         node->set_node_name(_get_object_name(model_id));
         node->set_local_transform(_get_model_transform(model_id));
         node->set_node_type(VFXSceneNode::NODE_EMPTY);
         built_nodes[model_id] = node;
-        vfx_nodes.push_back(node);
     }
 
+    // Build hierarchy: parent -> child links, skipping over bone parents
     for (int64_t model_id : doc->model_ids) {
-        auto pit = doc->parent_of.find(model_id);
-        if (pit != doc->parent_of.end()) {
-            int64_t parent_id = pit->second;
+        if (bone_model_set.count(model_id)) continue; // skip bones
+        int64_t parent_id = find_non_bone_parent(model_id);
+        if (parent_id != 0) {
             auto nit = built_nodes.find(parent_id);
             if (nit != built_nodes.end()) {
                 auto cit = built_nodes.find(model_id);
@@ -1226,9 +1245,11 @@ Dictionary VFXFBXImporter::import_fbx(const String& path) {
         }
     }
 
+    // Attach root-level non-bone models to the scene root
     for (int64_t model_id : doc->model_ids) {
-        auto pit = doc->parent_of.find(model_id);
-        if (pit == doc->parent_of.end() || pit->second == 0) {
+        if (bone_model_set.count(model_id)) continue; // skip bones
+        int64_t parent_id = find_non_bone_parent(model_id);
+        if (parent_id == 0) {
             auto nit = built_nodes.find(model_id);
             if (nit != built_nodes.end()) {
                 scene->get_root()->add_child(nit->second);
