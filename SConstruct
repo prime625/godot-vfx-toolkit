@@ -16,6 +16,8 @@ if env["platform"] == "android":
         env.Append(CCFLAGS=["-mfpu=neon"])
     # Link math library
     env.Append(LIBS=["m"])
+    # Link zlib for FBX decompression
+    env.Append(LIBS=["z"])
 
 # C++17 required for our data structures
 env.Append(CXXFLAGS=["-std=c++17"])
