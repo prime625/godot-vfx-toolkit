@@ -409,7 +409,7 @@ void VFXEditorNode::_update_gizmo_scale() {
     float target_px = 80.0f;
     float world_size = dist * tanf(fov_rad * 0.5f) * 2.0f * (target_px / vp_h);
 
-    world_size = vfx::clampf(world_size, 0.5f, 3.4f);
+    world_size = vfx::clampf(world_size, gizmo_min_size, gizmo_max_size);
 
     if (fabs(world_size - gizmo_screen_scale) > 0.001f) {
         gizmo_screen_scale = world_size;
