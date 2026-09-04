@@ -301,6 +301,10 @@ public:
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
 	void set_gizmo_screen_scale(float scale);
+	float gizmo_min_size = 0.5f;   // was 0.35f
+	float gizmo_max_size = 8.0f;
+
+
 	float get_gizmo_screen_scale() const;
     void set_gizmo_local(bool p_local);
     bool get_gizmo_local() const;
