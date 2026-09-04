@@ -246,7 +246,7 @@ void VFXEditorNode::_notification(int p_what) {
             animator->advance(get_process_delta_time());
         }
 
-        // Dirty-flagged scene sync — only rebuilds when data changes
+        // Dirty-flagged scene sync â€” only rebuilds when data changes
         if (scene.is_valid() && scene_visuals_dirty) {
             scene_visuals_dirty = false;
             _sync_scene_visuals();
@@ -282,7 +282,7 @@ bool VFXEditorNode::get_gizmo_locked() const {
 }
 
 // ============================================================================
-// INTERNAL — ENSURE CHILD NODES
+// INTERNAL â€” ENSURE CHILD NODES
 // ============================================================================
 void VFXEditorNode::_ensure_mesh_instance() {
     if (!mesh_instance) {
@@ -763,7 +763,7 @@ void VFXEditorNode::set_falloff_mode(int mode) {
 int VFXEditorNode::get_falloff_mode() const { return falloff_mode; }
 
 // ============================================================================
-// GIZMO — SIMPLE ACCESSORS
+// GIZMO â€” SIMPLE ACCESSORS
 // ============================================================================
 void VFXEditorNode::set_gizmo_mode(int mode) {
     gizmo_mode = mode;
@@ -784,7 +784,7 @@ void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
 Transform3D VFXEditorNode::get_gizmo_transform() const { return gizmo_transform; }
 
 // ============================================================================
-// SKELETON — SIMPLE ACCESSORS
+// SKELETON â€” SIMPLE ACCESSORS
 // ============================================================================
 void VFXEditorNode::set_selected_bone(int idx) {
     selected_bone = idx;
@@ -819,7 +819,7 @@ void VFXEditorNode::set_symmetry_axis(int axis) { symmetry_axis = axis; }
 int VFXEditorNode::get_symmetry_axis() const { return symmetry_axis; }
 
 // ============================================================================
-// SCENE TREE — HIGH LEVEL
+// SCENE TREE â€” HIGH LEVEL
 // ============================================================================
 void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
     scene = p_scene;
