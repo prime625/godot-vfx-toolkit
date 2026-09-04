@@ -83,7 +83,7 @@ void VFXEditorNode::_build_selection_mesh() {
             r = 0.008f;
         } else {
             col = Color(0.22f, 0.22f, 0.22f, 0.35f); // dark gray
-            r = 0.001f;                              // thinner
+            r = 0.0025f;                              // thinner
         }
         vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
     }
@@ -104,7 +104,7 @@ void VFXEditorNode::_build_selection_mesh() {
             s = 0.025f;
         } else {
             col = Color(0.25f, 0.25f, 0.25f, 0.40f); // dark gray
-            s = 0.008f;                               // smaller
+            s = 0.014f;                               // smaller
         }
         vfx_editor::append_box(verts, cols, idx, v->position, s, col);
     }
