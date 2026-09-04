@@ -130,39 +130,59 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
         }
     }
 
-    // Helper: find nearest non-joint ancestor for a given node index
-    auto find_non_joint_parent = [&](int node_idx) -> int {
+    // Also mark descendants of joints as skeleton-related (end bones, leaf tips, etc.)
+    // UNLESS they carry a mesh (e.g. a weapon parented to a hand bone).
+    std::unordered_set<int> skeleton_node_set = joint_node_set;
+    for (int i = 0; i < (int)nodes.size(); i++) {
+        if (joint_node_set.count(i)) continue;
+        int p = nodes[i].parent;
+        bool has_joint_ancestor = false;
+        while (p >= 0 && p < (int)nodes.size()) {
+            if (joint_node_set.count(p)) {
+                has_joint_ancestor = true;
+                break;
+            }
+            p = nodes[p].parent;
+        }
+        if (has_joint_ancestor && nodes[i].mesh < 0) {
+            skeleton_node_set.insert(i);
+        }
+    }
+
+    // Helper: find nearest non-skeleton ancestor for a given node index
+    auto find_non_skeleton_parent = [&](int node_idx) -> int {
         int p = nodes[node_idx].parent;
-        while (p >= 0 && p < (int)nodes.size() && joint_node_set.count(p)) {
+        while (p >= 0 && p < (int)nodes.size() && skeleton_node_set.count(p)) {
             p = nodes[p].parent;
         }
         return p;
     };
 
-    // Create a VFXSceneNode for every NON-JOINT glTF node only
+    // Create a VFXSceneNode for every NON-SKELETON glTF node only
     std::vector<Ref<VFXSceneNode>> vfx_nodes(nodes.size());
     for (int i = 0; i < (int)nodes.size(); i++) {
-        if (joint_node_set.count(i)) continue; // skip bones
+        if (skeleton_node_set.count(i)) continue; // skip bones & bone descendants
         vfx_nodes[i].instantiate();
         vfx_nodes[i]->set_node_name(nodes[i].name);
         vfx_nodes[i]->set_local_transform(_get_node_local_transform(nodes[i]));
         vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_EMPTY);
     }
 
-    // Build hierarchy: parent -> child links, skipping over joint parents
+    // Build hierarchy: parent -> child links, skipping over skeleton parents
     for (int i = 0; i < (int)nodes.size(); i++) {
-        if (joint_node_set.count(i)) continue; // skip bones
-        int parent = find_non_joint_parent(i);
+        if (skeleton_node_set.count(i)) continue; // skip bones & bone descendants
+        int parent = find_non_skeleton_parent(i);
         if (parent >= 0 && parent < (int)nodes.size() && vfx_nodes[parent].is_valid()) {
             vfx_nodes[parent]->add_child(vfx_nodes[i]);
         }
     }
 
-    // Attach root-level non-joint scene nodes to the scene root
+    // Attach root-level non-skeleton scene nodes to the scene root
     for (int scene_node_idx : scene_nodes) {
         if (scene_node_idx >= 0 && scene_node_idx < (int)nodes.size()) {
-            if (joint_node_set.count(scene_node_idx)) continue; // skip bones
-            if (nodes[scene_node_idx].parent < 0 || joint_node_set.count(nodes[scene_node_idx].parent)) {
+            if (skeleton_node_set.count(scene_node_idx)) continue;
+            int parent = find_non_skeleton_parent(scene_node_idx);
+            if (parent < 0) {
                 bool already_child = false;
                 for (int j = 0; j < scene->get_root()->get_child_count(); j++) {
                     if (scene->get_root()->get_child(j) == vfx_nodes[scene_node_idx]) {
@@ -177,10 +197,10 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
         }
     }
 
-    // Ensure ALL orphan non-joint nodes are attached (not just scene_nodes)
+    // Ensure ALL orphan non-skeleton nodes are attached (not just scene_nodes)
     for (int i = 0; i < (int)nodes.size(); i++) {
-        if (joint_node_set.count(i)) continue; // skip bones
-        int parent = find_non_joint_parent(i);
+        if (skeleton_node_set.count(i)) continue;
+        int parent = find_non_skeleton_parent(i);
         if (parent < 0) {
             bool already_child = false;
             for (int j = 0; j < scene->get_root()->get_child_count(); j++) {
@@ -206,6 +226,7 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     Ref<VFXAnimator> first_animator;
 
     for (int i = 0; i < (int)nodes.size(); i++) {
+        if (!vfx_nodes[i].is_valid()) continue; // skeleton node, no scene representation
         if (nodes[i].mesh >= 0 && nodes[i].mesh < (int)meshes.size()) {
             const GLBMesh& glb_mesh = meshes[nodes[i].mesh];
             Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error);
