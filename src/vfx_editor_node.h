@@ -186,7 +186,7 @@ private:
     void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
-	Transform3D _get_active_mesh_transform() const;
+        Transform3D _get_active_mesh_transform() const;
     void _update_gizmo_scale();
 
     // Scene tree integration
@@ -300,12 +300,12 @@ public:
     void gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir);
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
-	void set_gizmo_screen_scale(float scale);
-	float gizmo_min_size = 0.5f;   // was 0.35f
-	float gizmo_max_size = 8.0f;
+        void set_gizmo_screen_scale(float scale);
+        float gizmo_min_size = 0.5f;   // was 0.35f
+        float gizmo_max_size = 8.0f;
 
 
-	float get_gizmo_screen_scale() const;
+        float get_gizmo_screen_scale() const;
     void set_gizmo_local(bool p_local);
     bool get_gizmo_local() const;
 
@@ -327,6 +327,9 @@ public:
     void set_gizmo_select_pixel_tolerance(float px);
     float get_gizmo_select_pixel_tolerance() const;
     float bone_selection_radius = 0.05;
+    void set_bone_selection_radius(float radius);
+    float get_bone_selection_radius() const;
+
     // === SCREEN SELECT ===
     int screen_select_vertex(const Vector2& screen_pos);
     int screen_select_edge(const Vector2& screen_pos);
