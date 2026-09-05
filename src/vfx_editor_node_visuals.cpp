@@ -192,6 +192,6 @@ void VFXEditorNode::_build_skeleton_mesh() {
     mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
     mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
     mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);  // <-- ADD THIS
     skel_visual->set_material_override(mat);
-    skel_visual->set_mesh(am);
 }
