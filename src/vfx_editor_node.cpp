@@ -1052,7 +1052,7 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos) {
    // === SCENE MODE (OBJECT-level selection) ===
    if (scene.is_valid() && edit_mode == MODE_OBJECT) {
-       if (!gizmo_locked && active_scene_node.is_valid() && gizmo_node && gizmo_node->is_visible()) {
+       if (!gizmo_locked && gizmo_node && gizmo_node->is_visible() && (active_scene_node.is_valid() || selected_bone >= 0)) {
            int axis;
            if (camera && screen_pos.x >= 0.0f)
                axis = screen_raycast_gizmo(screen_pos);
@@ -1074,13 +1074,17 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
            }
        }
 
-       Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
-       if (hit.is_valid()) {
-           set_active_scene_node(hit);
-           return SCENE_NODE_HIT;
+       // Only select/deselect scene nodes if no bone is currently selected.
+       // When rigging a bone we don't want an empty click to clear the scene node
+       // and wipe our bone selection + gizmo.
+       if (selected_bone < 0) {
+           Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
+           if (hit.is_valid()) {
+               set_active_scene_node(hit);
+               return SCENE_NODE_HIT;
+           }
+           set_active_scene_node(Ref<VFXSceneNode>());
        }
-
-       set_active_scene_node(Ref<VFXSceneNode>());
        return -1;
    }
 
