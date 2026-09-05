@@ -88,9 +88,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_gizmo_locked"), &VFXEditorNode::get_gizmo_locked);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gizmo_locked"), "set_gizmo_locked", "get_gizmo_locked");
 
-	ClassDB::bind_method(D_METHOD("set_bone_selection_radius", "radius"), &VFXEditorNode::set_bone_selection_radius);
-	ClassDB::bind_method(D_METHOD("get_bone_selection_radius"), &VFXEditorNode::get_bone_selection_radius);
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_selection_radius"), "set_bone_selection_radius", "get_bone_selection_radius");
+        ClassDB::bind_method(D_METHOD("set_bone_selection_radius", "radius"), &VFXEditorNode::set_bone_selection_radius);
+        ClassDB::bind_method(D_METHOD("get_bone_selection_radius"), &VFXEditorNode::get_bone_selection_radius);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_selection_radius"), "set_bone_selection_radius", "get_bone_selection_radius");
 
     ClassDB::bind_method(D_METHOD("set_selected_bone", "idx"), &VFXEditorNode::set_selected_bone);
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
@@ -173,7 +173,7 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("bevel_selection", "amount"), &VFXEditorNode::bevel_selection);
     ClassDB::bind_method(D_METHOD("knife_selection", "p0", "p1"), &VFXEditorNode::knife_selection);
     ADD_SIGNAL(MethodInfo("mesh_changed", PropertyInfo(Variant::OBJECT, "mesh")));
-    
+
     // === ENUMS ===
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_OBJECT", MODE_OBJECT);
     ClassDB::bind_integer_constant(get_class_static(), "", "MODE_VERTEX", MODE_VERTEX);
@@ -1050,100 +1050,110 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 // UNIFIED TOUCH API
 // ============================================================================
 int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_pos) {
-    // === SCENE MODE (OBJECT-level selection) ===
-    if (scene.is_valid() && edit_mode == MODE_OBJECT) {
-        if (!gizmo_locked && active_scene_node.is_valid() && gizmo_node && gizmo_node->is_visible()) {
-            int axis;
-            if (camera && screen_pos.x >= 0.0f)
-                axis = screen_raycast_gizmo(screen_pos);
-            else
-                axis = raycast_gizmo(ray_origin, ray_dir);
+   // === SCENE MODE (OBJECT-level selection) ===
+   if (scene.is_valid() && edit_mode == MODE_OBJECT) {
+       if (!gizmo_locked && active_scene_node.is_valid() && gizmo_node && gizmo_node->is_visible()) {
+           int axis;
+           if (camera && screen_pos.x >= 0.0f)
+               axis = screen_raycast_gizmo(screen_pos);
+           else
+               axis = raycast_gizmo(ray_origin, ray_dir);
 
-            if (axis >= 0) {
-                gizmo_begin_drag(axis, ray_origin, ray_dir);
-                return -2;
-            }
-        }
+           if (axis >= 0) {
+               gizmo_begin_drag(axis, ray_origin, ray_dir);
+               return -2;
+           }
+       }
 
-        Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
-        if (hit.is_valid()) {
-            set_active_scene_node(hit);
-            return SCENE_NODE_HIT;
-        }
+       // When skeleton is visible, bones take priority over mesh selection
+       if (show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
+           int bone = raycast_bone(ray_origin, ray_dir);
+           if (bone >= 0) {
+               set_selected_bone(bone);
+               return bone;
+           }
+       }
 
-        set_active_scene_node(Ref<VFXSceneNode>());
-        return -1;
-    }
+       Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
+       if (hit.is_valid()) {
+           set_active_scene_node(hit);
+           return SCENE_NODE_HIT;
+       }
 
-    // === MESH EDIT MODE ===
-    if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
-                                  !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
-        if (!gizmo_locked && has_mesh_selection && gizmo_node && gizmo_node->is_visible()) {
-            int axis;
-            if (camera && screen_pos.x >= 0.0f)
-                axis = screen_raycast_gizmo(screen_pos);
-            else
-                axis = raycast_gizmo(ray_origin, ray_dir);
+       set_active_scene_node(Ref<VFXSceneNode>());
+       return -1;
+   }
 
-            if (axis >= 0) {
-                gizmo_begin_drag(axis, ray_origin, ray_dir);
-                return -2;
-            }
-        }
+   // === MESH EDIT MODE ===
+   if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
+       bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
+                                 !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
+       if (!gizmo_locked && has_mesh_selection && gizmo_node && gizmo_node->is_visible()) {
+           int axis;
+           if (camera && screen_pos.x >= 0.0f)
+               axis = screen_raycast_gizmo(screen_pos);
+           else
+               axis = raycast_gizmo(ray_origin, ray_dir);
 
-        int hit = -1;
-        if (camera && screen_pos.x >= 0.0f) {
-            switch (edit_mode) {
-                case MODE_VERTEX: hit = screen_select_vertex(screen_pos); break;
-                case MODE_EDGE:   hit = screen_select_edge(screen_pos); break;
-                case MODE_FACE:   hit = screen_select_face(screen_pos); break;
-            }
-        } else {
-            hit = raycast_select(ray_origin, ray_dir);
-        }
+           if (axis >= 0) {
+               gizmo_begin_drag(axis, ray_origin, ray_dir);
+               return -2;
+           }
+       }
 
-        if (hit >= 0) {
-            _handle_element_selection(hit);
-            _build_selection_mesh();
-            _update_gizmo_for_selection();
-                        _update_gizmo_visibility();
-            return MESH_ELEMENT_HIT;
-        }
+       int hit = -1;
+       if (camera && screen_pos.x >= 0.0f) {
+           switch (edit_mode) {
+               case MODE_VERTEX: hit = screen_select_vertex(screen_pos); break;
+               case MODE_EDGE:   hit = screen_select_edge(screen_pos); break;
+               case MODE_FACE:   hit = screen_select_face(screen_pos); break;
+           }
+       } else {
+           hit = raycast_select(ray_origin, ray_dir);
+       }
 
-        if (selection_mode == SELECTION_MODE_SINGLE) {
-            clear_selection();
-        } else {
-            // Multi/Loop: hide gizmo on empty click so next click isn't stolen by gizmo raycast
-            if (gizmo_node) gizmo_node->set_visible(false);
-        }
-        return -1;
-    }
+       if (hit >= 0) {
+           _handle_element_selection(hit);
+           _build_selection_mesh();
+           _update_gizmo_for_selection();
+           _update_gizmo_visibility();
+           return MESH_ELEMENT_HIT;
+       }
 
-    // === SKELETON MODE ===
-    if (show_skeleton) {
-        if (!gizmo_locked && skeleton.is_valid() && selected_bone >= 0) {
-            int axis;
-            if (camera && screen_pos.x >= 0.0f)
-                axis = screen_raycast_gizmo(screen_pos);
-            else
-                axis = raycast_gizmo(ray_origin, ray_dir);
+       if (selection_mode == SELECTION_MODE_SINGLE) {
+           clear_selection();
+       } else {
+           // Multi/Loop: hide gizmo on empty click so next click isn't stolen by gizmo raycast
+           if (gizmo_node) gizmo_node->set_visible(false);
+       }
+       return -1;
+   }
 
-            if (axis >= 0) {
-                gizmo_begin_drag(axis, ray_origin, ray_dir);
-                return -2;
-            }
-        }
-        if (skeleton.is_valid() && skeleton->get_bone_count() > 0) {
-            int bone = raycast_bone(ray_origin, ray_dir);
-            if (bone >= 0) {
-                set_selected_bone(bone);
-                return bone;
-            }
-        }
-    }
-    return -1;
+   // === SKELETON MODE (fallback when no scene/mesh) ===
+   if (show_skeleton) {
+       if (!gizmo_locked && skeleton.is_valid() && selected_bone >= 0) {
+           int axis;
+           if (camera && screen_pos.x >= 0.0f)
+               axis = screen_raycast_gizmo(screen_pos);
+           else
+               axis = raycast_gizmo(ray_origin, ray_dir);
+
+           if (axis >= 0) {
+               gizmo_begin_drag(axis, ray_origin, ray_dir);
+               return -2;
+           }
+       }
+       if (skeleton.is_valid() && skeleton->get_bone_count() > 0) {
+           int bone = raycast_bone(ray_origin, ray_dir);
+           if (bone >= 0) {
+               set_selected_bone(bone);
+               return bone;
+           }
+       }
+   }
+   return -1;
 }
+
 
 
 void VFXEditorNode::refresh_scene() {
