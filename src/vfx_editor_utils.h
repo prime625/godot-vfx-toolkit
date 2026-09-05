@@ -29,6 +29,8 @@ void append_box(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Ar
     const Vector3& center, float size, const Color& col);
 bool ray_vs_sphere(const Vector3& ro, const Vector3& rd,
     const Vector3& sc, float sr, Vector3& out_hit, Vector3& out_normal);
+void append_sphere(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Array& idx,
+    const Vector3& center, float radius, const Color& col);
 
 // ============================================================================
 // RAY MATH
