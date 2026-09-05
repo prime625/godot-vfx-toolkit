@@ -88,6 +88,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_gizmo_locked"), &VFXEditorNode::get_gizmo_locked);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gizmo_locked"), "set_gizmo_locked", "get_gizmo_locked");
 
+	ClassDB::bind_method(D_METHOD("set_bone_selection_radius", "radius"), &VFXEditorNode::set_bone_selection_radius);
+	ClassDB::bind_method(D_METHOD("get_bone_selection_radius"), &VFXEditorNode::get_bone_selection_radius);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_selection_radius"), "set_bone_selection_radius", "get_bone_selection_radius");
 
     ClassDB::bind_method(D_METHOD("set_selected_bone", "idx"), &VFXEditorNode::set_selected_bone);
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
@@ -1168,6 +1171,13 @@ void VFXEditorNode::set_gizmo_local(bool p_local) {
 
 bool VFXEditorNode::get_gizmo_local() const {
     return gizmo_local;
+}
+
+void VFXEditorNode::set_bone_selection_radius(float radius) {
+    bone_selection_radius = MAX(radius, 0.001f);
+}
+float VFXEditorNode::get_bone_selection_radius() const {
+    return bone_selection_radius;
 }
 
 void VFXEditorNode::set_gizmo_screen_scale(float scale) {
