@@ -326,7 +326,7 @@ public:
     float get_select_pixel_tolerance() const;
     void set_gizmo_select_pixel_tolerance(float px);
     float get_gizmo_select_pixel_tolerance() const;
-
+    float bone_selection_radius = 0.05
     // === SCREEN SELECT ===
     int screen_select_vertex(const Vector2& screen_pos);
     int screen_select_edge(const Vector2& screen_pos);
