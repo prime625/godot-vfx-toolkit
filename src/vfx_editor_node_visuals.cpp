@@ -172,10 +172,22 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
     skeleton->update_transforms();
 
-    // Prisma3D proportions: hairline bones, tiny sphere joints
-    float bone_r = 0.0025f;       // wire-thin bone line
-    float joint_r = 0.005f;       // small joint dot
-    float sel_joint_r = 0.007f;   // slightly larger when selected
+    // === SCREEN-SPACE CONSISTENT SCALE (Prisma3D style) ===
+    float cam_dist = 5.0f;
+    if (camera) {
+        Vector3 skel_center = skeleton->get_bone_model_transform(0).get_origin();
+        cam_dist = camera->get_global_transform().get_origin().distance_to(skel_center);
+        if (cam_dist < 0.001f) cam_dist = 0.001f;
+    }
+    float dist_scale = cam_dist / 5.0f;
+    if (dist_scale < 0.2f) dist_scale = 0.2f;
+    if (dist_scale > 3.0f) dist_scale = 3.0f;
+
+    const float BASE_BONE_R = 0.0020f;   // hairline bone
+    const float BASE_JOINT_R = 0.006f;   // visible joint dot
+    float bone_r = BASE_BONE_R * dist_scale;
+    float joint_r = BASE_JOINT_R * dist_scale;
+    float sel_joint_r = joint_r * 1.4f;
 
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
         int parent = skeleton->get_bone_parent(i);
@@ -186,18 +198,17 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
         bool is_selected = (i == selected_bone);
 
-        // Bone line: clean white, warm yellow when selected
+        // Bone line: pure white, warm yellow when selected
         Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
-                                     : Color(0.90f, 0.90f, 0.92f);
+                                     : Color(1.0f, 1.0f, 1.0f);
 
-        // Thin cylinder from parent to this bone (skip zero-length)
         if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
             vfx_editor::append_cylinder(verts, colors, indices, parent_pos, pos, bone_r, 4, bone_col);
         }
 
-        // Joint sphere at this bone's position
+        // Joint dot: pure white, warm yellow when selected
         Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
-                                      : Color(0.96f, 0.96f, 0.98f);
+                                      : Color(1.0f, 1.0f, 1.0f);
         float jr = is_selected ? sel_joint_r : joint_r;
         vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
     }
