@@ -201,91 +201,92 @@ int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_
 // ============================================================================
 // GIZMO PLACEMENT FOR SELECTION
 // ============================================================================
+
 void VFXEditorNode::_update_gizmo_for_selection() {
-    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
-        gizmo_transform = active_scene_node->get_global_transform();
-    } else if (edit_mode == MODE_OBJECT) {
-        gizmo_transform = Transform3D();
-    }
-    else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
-        Vector3 center;
-        int count = 0;
+   if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
+       gizmo_transform = active_scene_node->get_global_transform();
+   } else if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
+       gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
+   } else if (edit_mode == MODE_OBJECT) {
+       gizmo_transform = Transform3D();
+   }
+   else if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
+       Vector3 center;
+       int count = 0;
 
-        // Single selection
-        if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
-            center = mesh->get_vertices()[selected_vertex]->position;
-            count = 1;
-        } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
-            int v0, v1;
-            mesh->get_edge_endpoints(selected_edge, v0, v1);
-            if (v0 >= 0 && v1 >= 0) {
-                center = (mesh->get_vertices()[v0]->position + mesh->get_vertices()[v1]->position) * 0.5f;
-                count = 2;
-            }
-        } else if (edit_mode == MODE_FACE && selected_face >= 0) {
-            std::vector<vfx::HEVertex*> fverts;
-            mesh->get_face_vertices(selected_face, fverts);
-            for (auto* v : fverts) {
-                if (!v->deleted) {
-                    center += v->position;
-                    count++;
-                }
-            }
-            if (count > 0) center /= (float)count;
-        }
+       // Single selection
+       if (edit_mode == MODE_VERTEX && selected_vertex >= 0) {
+           center = mesh->get_vertices()[selected_vertex]->position;
+           count = 1;
+       } else if (edit_mode == MODE_EDGE && selected_edge >= 0) {
+           int v0, v1;
+           mesh->get_edge_endpoints(selected_edge, v0, v1);
+           if (v0 >= 0 && v1 >= 0) {
+               center = (mesh->get_vertices()[v0]->position + mesh->get_vertices()[v1]->position) * 0.5f;
+               count = 2;
+           }
+       } else if (edit_mode == MODE_FACE && selected_face >= 0) {
+           std::vector<vfx::HEVertex*> fverts;
+           mesh->get_face_vertices(selected_face, fverts);
+           for (auto* v : fverts) {
+               if (!v->deleted) {
+                   center += v->position;
+                   count++;
+               }
+           }
+           if (count > 0) center /= (float)count;
+       }
 
-        // Multi-select fallback
-        if (count == 0) {
-            if (edit_mode == MODE_VERTEX && !selected_vertices.empty()) {
-                for (int v : selected_vertices) {
-                    if (v >= 0 && v < mesh->get_vertex_count() && !mesh->get_vertices()[v]->deleted) {
-                        center += mesh->get_vertices()[v]->position;
-                        count++;
-                    }
-                }
-            } else if (edit_mode == MODE_EDGE && !selected_edges.empty()) {
-                for (int e : selected_edges) {
-                    int v0, v1;
-                    mesh->get_edge_endpoints(e, v0, v1);
-                    if (v0 >= 0 && !mesh->get_vertices()[v0]->deleted) {
-                        center += mesh->get_vertices()[v0]->position;
-                        count++;
-                    }
-                    if (v1 >= 0 && !mesh->get_vertices()[v1]->deleted) {
-                        center += mesh->get_vertices()[v1]->position;
-                        count++;
-                    }
-                }
-            } else if (edit_mode == MODE_FACE && !selected_faces.empty()) {
-                for (int f : selected_faces) {
-                    std::vector<vfx::HEVertex*> fverts;
-                    mesh->get_face_vertices(f, fverts);
-                    for (auto* v : fverts) {
-                        if (!v->deleted) {
-                            center += v->position;
-                            count++;
-                        }
-                    }
-                }
-            }
-            if (count > 0) center /= (float)count;
-        }
+       // Multi-select fallback
+       if (count == 0) {
+           if (edit_mode == MODE_VERTEX && !selected_vertices.empty()) {
+               for (int v : selected_vertices) {
+                   if (v >= 0 && v < mesh->get_vertex_count() && !mesh->get_vertices()[v]->deleted) {
+                       center += mesh->get_vertices()[v]->position;
+                       count++;
+                   }
+               }
+           } else if (edit_mode == MODE_EDGE && !selected_edges.empty()) {
+               for (int e : selected_edges) {
+                   int v0, v1;
+                   mesh->get_edge_endpoints(e, v0, v1);
+                   if (v0 >= 0 && !mesh->get_vertices()[v0]->deleted) {
+                       center += mesh->get_vertices()[v0]->position;
+                       count++;
+                   }
+                   if (v1 >= 0 && !mesh->get_vertices()[v1]->deleted) {
+                       center += mesh->get_vertices()[v1]->position;
+                       count++;
+                   }
+               }
+           } else if (edit_mode == MODE_FACE && !selected_faces.empty()) {
+               for (int f : selected_faces) {
+                   std::vector<vfx::HEVertex*> fverts;
+                   mesh->get_face_vertices(f, fverts);
+                   for (auto* v : fverts) {
+                       if (!v->deleted) {
+                           center += v->position;
+                           count++;
+                       }
+                   }
+               }
+           }
+           if (count > 0) center /= (float)count;
+       }
 
-        if (count > 0) {
-            gizmo_transform.set_origin(center);
-            if (!gizmo_local) {
-                gizmo_transform.set_basis(Transform3D().get_basis());
-            }
-        }
-    }
+       if (count > 0) {
+           gizmo_transform.set_origin(center);
+           if (!gizmo_local) {
+               gizmo_transform.set_basis(Transform3D().get_basis());
+           }
+       }
+   }
 
-    if (gizmo_node) {
-        gizmo_node->set_transform(_get_visual_gizmo_transform());
-        _build_gizmo_mesh();
-    }
+   if (gizmo_node) {
+       gizmo_node->set_transform(_get_visual_gizmo_transform());
+       _build_gizmo_mesh();
+   }
 }
-
-
 
 
 // ============================================================================
