@@ -190,4 +190,29 @@ bool ray_vs_sphere(const Vector3& ro, const Vector3& rd,
     return true;
 }
 
+void append_sphere(PackedVector3Array& verts, PackedColorArray& cols, PackedInt32Array& idx,
+    const Vector3& center, float radius, const Color& col) {
+    int base = verts.size();
+
+    // Octahedron — 6 verts, 8 faces, lightweight but reads as a sphere at small sizes
+    verts.push_back(center + Vector3(0,  radius, 0)); cols.push_back(col); // 0  north
+    verts.push_back(center + Vector3(0, -radius, 0)); cols.push_back(col); // 1  south
+    verts.push_back(center + Vector3( radius, 0, 0)); cols.push_back(col); // 2  +x
+    verts.push_back(center + Vector3(-radius, 0, 0)); cols.push_back(col); // 3  -x
+    verts.push_back(center + Vector3(0, 0,  radius)); cols.push_back(col); // 4  +z
+    verts.push_back(center + Vector3(0, 0, -radius)); cols.push_back(col); // 5  -z
+
+    const int faces[8][3] = {
+        {0, 4, 2}, {0, 3, 4}, {0, 5, 3}, {0, 2, 5},  // top half
+        {1, 2, 4}, {1, 4, 3}, {1, 3, 5}, {1, 5, 2}   // bottom half
+    };
+    for (int i = 0; i < 8; i++) {
+        idx.push_back(base + faces[i][0]);
+        idx.push_back(base + faces[i][1]);
+        idx.push_back(base + faces[i][2]);
+    }
+}
+
+
+
 } // namespace vfx_editor
