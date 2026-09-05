@@ -132,7 +132,7 @@ void VFXEditorNode::_build_selection_mesh() {
 
 
 // ============================================================================
-// SKELETON VISUAL — BLENDER-STYLE OCTAHEDRAL + JOINT SPHERES
+// SKELETON VISUAL — PRISMA3D-STYLE: thin wire bones + small sphere joints
 // ============================================================================
 void VFXEditorNode::_build_skeleton_mesh() {
     if (!skel_visual) _ensure_skeleton_visual();
@@ -150,60 +150,34 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
     skeleton->update_transforms();
 
-    auto add_tapered_bone = [&](const Vector3& head, const Vector3& tail, const Color& col) {
-        Vector3 dir = tail - head;
-        float len = dir.length();
-        if (len < 0.0001f) return;
-
-        Vector3 up = fabs(dir.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
-        Vector3 right = dir.cross(up).normalized();
-        up = right.cross(dir).normalized();
-
-        // Thickness scales with bone length so short bones don't become dots
-        float r_head = MIN(MAX(len * 0.30f, 0.005f), 0.018f);
-        float r_tail = MIN(MAX(len * 0.12f, 0.003f), 0.008f);
-
-        int base = verts.size();
-        for (int i = 0; i <= 4; i++) {
-            float ang = (float)i / 4.0f * 3.14159265f * 2.0f;
-            Vector3 offset = right * cosf(ang) + up * sinf(ang);
-            verts.push_back(head + offset * r_head); colors.push_back(col);
-            verts.push_back(tail + offset * r_tail); colors.push_back(col);
-        }
-
-        for (int i = 0; i < 4; i++) {
-            int a = base + i * 2;
-            int b = base + i * 2 + 1;
-            int c = base + ((i + 1) % 4) * 2 + 1;
-            int d = base + ((i + 1) % 4) * 2;
-            indices.push_back(a); indices.push_back(b); indices.push_back(d);
-            indices.push_back(b); indices.push_back(c); indices.push_back(d);
-        }
-    };
+    // Prisma3D proportions: hairline bones, tiny sphere joints
+    float bone_r = 0.0025f;       // wire-thin bone line
+    float joint_r = 0.005f;       // small joint dot
+    float sel_joint_r = 0.007f;   // slightly larger when selected
 
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
         int parent = skeleton->get_bone_parent(i);
-        Vector3 head = (parent >= 0)
+        Vector3 pos = skeleton->get_bone_model_transform(i).get_origin();
+        Vector3 parent_pos = (parent >= 0)
             ? skeleton->get_bone_model_transform(parent).get_origin()
-            : skeleton->get_bone_model_transform(i).get_origin();
-        Vector3 tail = skeleton->get_bone_model_transform(i).get_origin();
+            : pos;
 
         bool is_selected = (i == selected_bone);
+
+        // Bone line: clean white, warm yellow when selected
         Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
-                                     : Color(0.88f, 0.88f, 0.90f);
+                                     : Color(0.90f, 0.90f, 0.92f);
 
-        add_tapered_bone(head, tail, bone_col);
+        // Thin cylinder from parent to this bone (skip zero-length)
+        if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
+            vfx_editor::append_cylinder(verts, colors, indices, parent_pos, pos, bone_r, 4, bone_col);
+        }
 
-        // HEAD dot — bright white, slightly larger (the "start" joint)
-        Color head_col = is_selected ? Color(1.0f, 0.9f, 0.3f)
-                                     : Color(0.98f, 0.98f, 1.0f);
-        vfx_editor::append_box(verts, colors, indices, head, 0.020f, head_col);
-
-        // TAIL dot — bone color, slightly smaller (the "end" tip)
-        // Render for EVERY bone so you can see where each bone ends
-        Color tail_col = is_selected ? Color(1.0f, 0.7f, 0.2f)
-                                     : Color(0.75f, 0.75f, 0.78f);
-        vfx_editor::append_box(verts, colors, indices, tail, 0.012f, tail_col);
+        // Joint sphere at this bone's position
+        Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
+                                      : Color(0.96f, 0.96f, 0.98f);
+        float jr = is_selected ? sel_joint_r : joint_r;
+        vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
     }
 
     if (verts.size() > 0) {
