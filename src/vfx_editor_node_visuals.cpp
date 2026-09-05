@@ -150,8 +150,37 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
     skeleton->update_transforms();
 
-    const float BONE_THICKNESS = 0.015f;   // thin line, Prisma3D style
-    const float JOINT_SIZE     = 0.022f;   // small dot at each joint
+    const float JOINT_DOT = 0.018f;      // small dot at each joint
+
+    auto add_tapered_bone = [&](const Vector3& head, const Vector3& tail, const Color& col) {
+        Vector3 dir = tail - head;
+        float len = dir.length();
+        if (len < 0.0001f) return;
+
+        Vector3 up = fabs(dir.dot(Vector3(0, 1, 0))) < 0.99f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+        Vector3 right = dir.cross(up).normalized();
+        up = right.cross(dir).normalized();
+
+        float r_head = 0.020f;   // thicker at parent joint
+        float r_tail = 0.008f;   // thinner at tip
+
+        int base = verts.size();
+        for (int i = 0; i <= 4; i++) {
+            float ang = (float)i / 4.0f * 3.14159265f * 2.0f;
+            Vector3 offset = right * cosf(ang) + up * sinf(ang);
+            verts.push_back(head + offset * r_head); colors.push_back(col);
+            verts.push_back(tail + offset * r_tail); colors.push_back(col);
+        }
+
+        for (int i = 0; i < 4; i++) {
+            int a = base + i * 2;
+            int b = base + i * 2 + 1;
+            int c = base + ((i + 1) % 4) * 2 + 1;
+            int d = base + ((i + 1) % 4) * 2;
+            indices.push_back(a); indices.push_back(b); indices.push_back(d);
+            indices.push_back(b); indices.push_back(c); indices.push_back(d);
+        }
+    };
 
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
         int parent = skeleton->get_bone_parent(i);
@@ -161,20 +190,21 @@ void VFXEditorNode::_build_skeleton_mesh() {
         Vector3 tail = skeleton->get_bone_model_transform(i).get_origin();
 
         bool is_selected = (i == selected_bone);
-        Color col = is_selected ? Color(1.0f, 0.6f, 0.0f) : Color(0.25f, 0.55f, 0.85f);
-        if (i == 0) col = Color(0.6f, 0.6f, 0.6f);
 
-        // Thin bone line (cylinder)
-        vfx_editor::append_cylinder(verts, colors, indices, head, tail, BONE_THICKNESS, 4, col);
+        // Prisma3D-style light gray/white bone color
+        Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)   // warm yellow-white selected
+                                     : Color(0.88f, 0.88f, 0.90f); // cool light gray unselected
 
-        // Joint dot at head
-        Color joint_col = is_selected ? Color(1.0f, 0.8f, 0.2f) : Color(0.35f, 0.65f, 0.95f);
-        if (i == 0) joint_col = Color(0.7f, 0.7f, 0.7f);
-        vfx_editor::append_box(verts, colors, indices, head, JOINT_SIZE, joint_col);
+        add_tapered_bone(head, tail, bone_col);
 
-        // Joint dot at tail (tip) for leaf bones
+        // Small joint dot at head
+        Color joint_col = is_selected ? Color(1.0f, 0.9f, 0.4f)
+                                      : Color(0.92f, 0.92f, 0.94f);
+        vfx_editor::append_box(verts, colors, indices, head, JOINT_DOT, joint_col);
+
+        // Small joint dot at tail for leaf bones
         if (skeleton->get_bone_children(i).size() == 0) {
-            vfx_editor::append_box(verts, colors, indices, tail, JOINT_SIZE * 0.7f, col);
+            vfx_editor::append_box(verts, colors, indices, tail, JOINT_DOT * 0.6f, bone_col);
         }
     }
 
@@ -192,6 +222,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
     mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
     mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
     mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
-    mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);  // <-- ADD THIS
+    mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
     skel_visual->set_material_override(mat);
+    skel_visual->set_mesh(am);
 }
