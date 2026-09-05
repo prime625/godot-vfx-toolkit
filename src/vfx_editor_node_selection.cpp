@@ -310,8 +310,8 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
         Vector3 tail = skeleton->get_bone_model_transform(i).get_origin();
 
         float t;
-        float radius = (tail - head).length() * 0.35f;
-        if (radius < 0.08f) radius = 0.08f;
+        float radius = bone_selection_radius
+        
 
         if (vfx_editor::ray_vs_segment(ray_origin, rd, head, tail, radius, t)) {
             if (t < best_t) {
@@ -532,4 +532,3 @@ void VFXEditorNode::box_select(const Rect2& screen_rect) {
     _build_selection_mesh();
     _update_gizmo_for_selection();
 }
-
