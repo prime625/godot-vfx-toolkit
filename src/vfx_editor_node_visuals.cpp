@@ -150,8 +150,6 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
     skeleton->update_transforms();
 
-    const float JOINT_DOT = 0.018f;      // small dot at each joint
-
     auto add_tapered_bone = [&](const Vector3& head, const Vector3& tail, const Color& col) {
         Vector3 dir = tail - head;
         float len = dir.length();
@@ -161,8 +159,9 @@ void VFXEditorNode::_build_skeleton_mesh() {
         Vector3 right = dir.cross(up).normalized();
         up = right.cross(dir).normalized();
 
-        float r_head = 0.020f;   // thicker at parent joint
-        float r_tail = 0.008f;   // thinner at tip
+        // Thickness scales with bone length so short bones don't become dots
+        float r_head = MIN(MAX(len * 0.30f, 0.005f), 0.018f);
+        float r_tail = MIN(MAX(len * 0.12f, 0.003f), 0.008f);
 
         int base = verts.size();
         for (int i = 0; i <= 4; i++) {
@@ -190,22 +189,21 @@ void VFXEditorNode::_build_skeleton_mesh() {
         Vector3 tail = skeleton->get_bone_model_transform(i).get_origin();
 
         bool is_selected = (i == selected_bone);
-
-        // Prisma3D-style light gray/white bone color
-        Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)   // warm yellow-white selected
-                                     : Color(0.88f, 0.88f, 0.90f); // cool light gray unselected
+        Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
+                                     : Color(0.88f, 0.88f, 0.90f);
 
         add_tapered_bone(head, tail, bone_col);
 
-        // Small joint dot at head
-        Color joint_col = is_selected ? Color(1.0f, 0.9f, 0.4f)
-                                      : Color(0.92f, 0.92f, 0.94f);
-        vfx_editor::append_box(verts, colors, indices, head, JOINT_DOT, joint_col);
+        // HEAD dot — bright white, slightly larger (the "start" joint)
+        Color head_col = is_selected ? Color(1.0f, 0.9f, 0.3f)
+                                     : Color(0.98f, 0.98f, 1.0f);
+        vfx_editor::append_box(verts, colors, indices, head, 0.020f, head_col);
 
-        // Small joint dot at tail for leaf bones
-        if (skeleton->get_bone_children(i).size() == 0) {
-            vfx_editor::append_box(verts, colors, indices, tail, JOINT_DOT * 0.6f, bone_col);
-        }
+        // TAIL dot — bone color, slightly smaller (the "end" tip)
+        // Render for EVERY bone so you can see where each bone ends
+        Color tail_col = is_selected ? Color(1.0f, 0.7f, 0.2f)
+                                     : Color(0.75f, 0.75f, 0.78f);
+        vfx_editor::append_box(verts, colors, indices, tail, 0.012f, tail_col);
     }
 
     if (verts.size() > 0) {
