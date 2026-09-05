@@ -1,3 +1,37 @@
+#include "vfx_editor_node.h"
+#include "vfx_editor_utils.h"
+#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
+
+using namespace godot;
+
+// ============================================================================
+// MESH INSTANCE — UPDATE FROM VFXMesh
+// ============================================================================
+void VFXEditorNode::_update_godot_mesh() {
+    _ensure_mesh_instance();
+    if (mesh.is_null()) return;
+
+    Ref<ArrayMesh> am = _build_array_mesh_for_node(mesh, skeleton, skin, show_weights, visualize_bone);
+    if (am.is_null() || am->get_surface_count() == 0) {
+        mesh_instance->set_mesh(Ref<ArrayMesh>());
+        return;
+    }
+
+    mesh_instance->set_mesh(am);  // SET MESH FIRST
+
+    if (show_weights && skin.is_valid()) {
+        mesh_instance->set_surface_override_material(0, weight_material);
+    } else {
+        mesh_instance->set_surface_override_material(0, base_material);
+    }
+}
+
+// ============================================================================
+// SELECTION VISUAL — PRISMA3D-STYLE WIREFRAME + VERTEX/FACE/EDGE HIGHLIGHTS
+// ============================================================================
 void VFXEditorNode::_build_selection_mesh() {
     if (!selection_visual) _ensure_selection_visual();
     if (mesh.is_null() || !show_wireframe) {
@@ -116,4 +150,73 @@ void VFXEditorNode::_build_selection_mesh() {
     selection_visual->set_material_override(mat);
     selection_visual->set_mesh(am);
     selection_visual->set_transform(_get_active_mesh_transform());
+}
+
+
+// ============================================================================
+// SKELETON VISUAL — PRISMA3D-STYLE: thin wire bones + small sphere joints
+// ============================================================================
+void VFXEditorNode::_build_skeleton_mesh() {
+    if (!skel_visual) _ensure_skeleton_visual();
+    if (skeleton.is_null() || skeleton->get_bone_count() == 0) {
+        skel_visual->set_mesh(Ref<ArrayMesh>());
+        return;
+    }
+
+    Ref<ArrayMesh> am;
+    am.instantiate();
+
+    PackedVector3Array verts;
+    PackedColorArray colors;
+    PackedInt32Array indices;
+
+    skeleton->update_transforms();
+
+    // Prisma3D proportions: hairline bones, tiny sphere joints
+    float bone_r = 0.0025f;       // wire-thin bone line
+    float joint_r = 0.005f;       // small joint dot
+    float sel_joint_r = 0.007f;   // slightly larger when selected
+
+    for (int i = 0; i < skeleton->get_bone_count(); i++) {
+        int parent = skeleton->get_bone_parent(i);
+        Vector3 pos = skeleton->get_bone_model_transform(i).get_origin();
+        Vector3 parent_pos = (parent >= 0)
+            ? skeleton->get_bone_model_transform(parent).get_origin()
+            : pos;
+
+        bool is_selected = (i == selected_bone);
+
+        // Bone line: clean white, warm yellow when selected
+        Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
+                                     : Color(0.90f, 0.90f, 0.92f);
+
+        // Thin cylinder from parent to this bone (skip zero-length)
+        if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
+            vfx_editor::append_cylinder(verts, colors, indices, parent_pos, pos, bone_r, 4, bone_col);
+        }
+
+        // Joint sphere at this bone's position
+        Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
+                                      : Color(0.96f, 0.96f, 0.98f);
+        float jr = is_selected ? sel_joint_r : joint_r;
+        vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
+    }
+
+    if (verts.size() > 0) {
+        Array arrays;
+        arrays.resize(Mesh::ARRAY_MAX);
+        arrays[Mesh::ARRAY_VERTEX] = verts;
+        arrays[Mesh::ARRAY_COLOR] = colors;
+        arrays[Mesh::ARRAY_INDEX] = indices;
+        am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    }
+
+    Ref<StandardMaterial3D> mat;
+    mat.instantiate();
+    mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
+    skel_visual->set_material_override(mat);
+    skel_visual->set_mesh(am);
 }
