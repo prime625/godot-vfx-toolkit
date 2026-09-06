@@ -202,8 +202,8 @@ void VFXEditorNode::_append_mesh_surface_transformed(
     if (dist_scale < 0.2f) dist_scale = 0.2f;
     if (dist_scale > 3.0f) dist_scale = 3.0f;
 
-    const float BASE_EDGE_R = 0.0025f;
-    const float BASE_VERT_S = 0.014f;
+    const float BASE_EDGE_R = 0.008f;
+    const float BASE_VERT_S = 0.030f;
     float base_edge_r = BASE_EDGE_R * dist_scale;
     float base_vert_s = BASE_VERT_S * dist_scale;
 
