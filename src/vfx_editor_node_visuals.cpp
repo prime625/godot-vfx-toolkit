@@ -261,16 +261,14 @@ void VFXEditorNode::_build_skeleton_mesh() {
                     shaft_t.basis = b;
                     shaft_t.origin = parent_pos;
 
-                    _append_mesh_surface_transformed(verts, colors, indices,
-                        bone_shaft_mesh, shaft_t, tint);
+                    _append_mesh_surface_transformed(verts, colors, indices,bone_shaft_mesh, shaft_t, tint);
                 }
             }
 
             Transform3D joint_t;
             joint_t.basis = Basis().scaled(Vector3(dist_scale, dist_scale, dist_scale));
             joint_t.origin = pos;
-            _append_mesh_surface_transformed(verts, colors, indices,
-                bone_joint_mesh, joint_t, tint);
+            _append_mesh_surface_transformed(verts, colors, indices,bone_joint_mesh, joint_t, tint);
 
         } else {
             // --- PROCEDURAL FALLBACK: thick bones + visible joints ---
