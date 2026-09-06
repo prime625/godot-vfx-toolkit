@@ -707,7 +707,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         }
 
         skeleton->update_transforms();
-        gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
+        gizmo_transform = _get_bone_gizmo_transform(selected_bone);
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
         _build_skeleton_mesh();
 
