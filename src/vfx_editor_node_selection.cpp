@@ -359,6 +359,31 @@ static bool _segment_intersects_rect_2d(const Vector2& a, const Vector2& b, cons
            intersect(a, b, br, bl) || intersect(a, b, bl, tl);
 }
 
+
+float VFXEditorNode::_vertex_screen_distance(const Vector2& screen_pos, int vidx) const {
+    if (!camera || vidx < 0 || !mesh.is_valid()) return 1e10f;
+    Vector3 world = _get_active_mesh_transform().xform(mesh->get_vertex_position(vidx));
+    Vector2 screen = camera->unproject_position(world);
+    return screen_pos.distance_to(screen);
+}
+
+float VFXEditorNode::_edge_screen_distance(const Vector2& screen_pos, int eidx) const {
+    if (!camera || !mesh.is_valid()) return 1e10f;
+    int v0, v1;
+    mesh->get_edge_endpoints(eidx, v0, v1);
+    if (v0 < 0) return 1e10f;
+    Transform3D gt = _get_active_mesh_transform();
+    Vector2 s0 = camera->unproject_position(gt.xform(mesh->get_vertex_position(v0)));
+    Vector2 s1 = camera->unproject_position(gt.xform(mesh->get_vertex_position(v1)));
+    return Math::sqrt(_point_segment_dist_sq_2d(screen_pos, s0, s1));
+}
+
+float VFXEditorNode::_face_screen_distance(const Vector2& screen_pos, int fidx) const {
+    if (!camera || !mesh.is_valid()) return 1e10f;
+    Vector3 center = _get_active_mesh_transform().xform(mesh->get_face_center(fidx));
+    return screen_pos.distance_to(camera->unproject_position(center));
+}
+
 PackedInt32Array VFXEditorNode::screen_select_box(const Rect2& screen_rect) const {
     PackedInt32Array result;
     if (!mesh.is_valid() || !camera || screen_rect.size.x < 2.0f || screen_rect.size.y < 2.0f)
