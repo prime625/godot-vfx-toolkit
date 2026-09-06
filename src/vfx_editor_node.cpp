@@ -829,6 +829,17 @@ int VFXEditorNode::get_selected_bone() const {
     return selected_bone;
 }
 
+void VFXEditorNode::set_bone_shaft_mesh(const Ref<Mesh>& p_mesh) {
+    bone_shaft_mesh = p_mesh;
+    if (show_skeleton) _build_skeleton_mesh();
+}
+Ref<Mesh> VFXEditorNode::get_bone_shaft_mesh() const {
+    return bone_shaft_mesh;
+}
+void VFXEditorNode::set_bone_joint_mesh(const Ref<Mesh>& p_mesh) {
+    bone_joint_mesh = p_mesh;
+    if (show_skeleton) _build_skeleton_mesh();
+}
 Ref<Mesh> VFXEditorNode::get_bone_joint_mesh() const {
     return bone_joint_mesh;
 }
