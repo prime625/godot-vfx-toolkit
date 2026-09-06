@@ -112,6 +112,12 @@ private:
     // === MATERIALS ===
     Ref<StandardMaterial3D> base_material;
     Ref<StandardMaterial3D> weight_material;
+    Ref<Mesh> bone_shaft_mesh;
+    Ref<Mesh> bone_joint_mesh;
+    float bone_shaft_radius = 0.008f;
+    float bone_joint_radius = 0.018f;
+    float bone_tip_radius   = 0.012f;
+
 
     // === STATE ===
     bool show_skeleton = false;
@@ -186,7 +192,7 @@ private:
     void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
-        Transform3D _get_active_mesh_transform() const;
+    Transform3D _get_active_mesh_transform() const;
     void _update_gizmo_scale();
 
     // Scene tree integration
@@ -300,14 +306,24 @@ public:
     void gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir);
     void gizmo_end_drag();
     bool is_gizmo_dragging() const;
-        void set_gizmo_screen_scale(float scale);
-        float gizmo_min_size = 0.5f;   // was 0.35f
-        float gizmo_max_size = 8.0f;
+    void set_gizmo_screen_scale(float scale);
+    float gizmo_min_size = 0.5f;   // was 0.35f
+    float gizmo_max_size = 8.0f;
 
 
-        float get_gizmo_screen_scale() const;
+    float get_gizmo_screen_scale() const;
     void set_gizmo_local(bool p_local);
     bool get_gizmo_local() const;
+	void set_bone_shaft_mesh(const Ref<Mesh>& p_mesh);
+    Ref<Mesh> get_bone_shaft_mesh() const;
+    void set_bone_joint_mesh(const Ref<Mesh>& p_mesh);
+    Ref<Mesh> get_bone_joint_mesh() const;
+    void set_bone_shaft_radius(float p_r);
+    float get_bone_shaft_radius() const;
+    void set_bone_joint_radius(float p_r);
+    float get_bone_joint_radius() const;
+    void set_bone_tip_radius(float p_r);
+    float get_bone_tip_radius() const;
 
 
     // === GIZMO LOCK (NEW) ===
