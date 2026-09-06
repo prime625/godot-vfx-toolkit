@@ -814,7 +814,7 @@ void VFXEditorNode::set_selected_bone(int idx) {
 
     _update_gizmo_visibility();
     if (skeleton.is_valid() && idx >= 0) {
-        gizmo_transform = skeleton->get_bone_model_transform(idx);
+        gizmo_transform = _get_bone_gizmo_transform(idx);
         if (gizmo_node) {
             gizmo_node->set_transform(_get_visual_gizmo_transform());
             _build_gizmo_mesh();
@@ -1261,4 +1261,17 @@ Transform3D VFXEditorNode::_get_active_mesh_transform() const {
         return active_scene_node->get_global_transform();
     }
     return get_global_transform();
+}
+
+Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
+    if (skeleton.is_null() || bone_idx < 0) return Transform3D();
+    Transform3D bone_world = skeleton->get_bone_model_transform(bone_idx);
+    int parent = skeleton->get_bone_parent(bone_idx);
+    Vector3 gizmo_origin = (parent >= 0)
+        ? skeleton->get_bone_model_transform(parent).get_origin()
+        : bone_world.get_origin();
+    Transform3D result;
+    result.set_origin(gizmo_origin);
+    result.basis = bone_world.basis;
+    return result;
 }
