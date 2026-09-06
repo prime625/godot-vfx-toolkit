@@ -271,21 +271,55 @@ void VFXEditorNode::_build_skeleton_mesh() {
             _append_mesh_surface_transformed(verts, colors, indices,bone_joint_mesh, joint_t, tint);
 
         } else {
-            // --- PROCEDURAL FALLBACK: thick bones + visible joints ---
+            // --- BLENDER-STYLE OCTAHEDRAL BONES ---
             float bone_r = bone_shaft_radius * dist_scale;
             float joint_r = bone_joint_radius * dist_scale;
-            float tip_r   = bone_tip_radius * dist_scale;
 
             Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
                                          : Color(1.0f, 1.0f, 1.0f);
             Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
                                           : Color(1.0f, 1.0f, 1.0f);
 
-            // Bone shaft: thick cylinder from parent to child
+            // Tapered pyramid shaft: wide base at parent, sharp apex at child
             if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
-                vfx_editor::append_cylinder(verts, colors, indices, parent_pos, pos, bone_r, 6, bone_col);
-                // Small tip sphere at child end (gives the bone a "head")
-                vfx_editor::append_sphere(verts, colors, indices, pos, tip_r, bone_col);
+                Vector3 dir = pos - parent_pos;
+                float len = dir.length();
+                Vector3 y = dir / len;
+                Vector3 x = y.cross(Vector3(0, 0, 1)).normalized();
+                if (x.length_squared() < 0.001f) x = Vector3(1, 0, 0);
+                Vector3 z = x.cross(y).normalized();
+
+                float w = bone_r * 2.5f;  // base width
+
+                // Square base at parent (perpendicular to bone axis)
+                Vector3 b0 = parent_pos + (x + z) * w;
+                Vector3 b1 = parent_pos + (-x + z) * w;
+                Vector3 b2 = parent_pos + (-x - z) * w;
+                Vector3 b3 = parent_pos + (x - z) * w;
+                Vector3 apex = pos;
+
+                int base = verts.size();
+                Vector3 v[5] = {apex, b0, b1, b2, b3};
+                for (int i = 0; i < 5; i++) {
+                    verts.append(v[i]);
+                    cols.append(bone_col);
+                }
+                // 4 side faces
+                idx.append(base+0); idx.append(base+1); idx.append(base+2);
+                idx.append(base+0); idx.append(base+2); idx.append(base+3);
+                idx.append(base+0); idx.append(base+3); idx.append(base+4);
+                idx.append(base+0); idx.append(base+4); idx.append(base+1);
+
+                // Base cap (2 triangles)
+                int cb = verts.size();
+                verts.append(b0); cols.append(bone_col);
+                verts.append(b2); cols.append(bone_col);
+                verts.append(b1); cols.append(bone_col);
+                verts.append(b0); cols.append(bone_col);
+                verts.append(b3); cols.append(bone_col);
+                verts.append(b2); cols.append(bone_col);
+                idx.append(cb+0); idx.append(cb+1); idx.append(cb+2);
+                idx.append(cb+3); idx.append(cb+4); idx.append(cb+5);
             }
 
             // Joint sphere at this bone's position
