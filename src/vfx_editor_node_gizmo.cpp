@@ -183,7 +183,11 @@ int VFXEditorNode::raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_d
 // ============================================================================
 // GIZMO — SCREEN-SPACE RAYCAST
 // ============================================================================
-int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
+// ============================================================================
+// GIZMO — PURE SCREEN-SPACE QUERY (no side effects)
+// ============================================================================
+int VFXEditorNode::_query_gizmo_screen_hit(const Vector2& screen_pos, float& out_best_dist_sq) const {
+    out_best_dist_sq = 1e20f;
     if (!gizmo_node || !gizmo_node->is_visible() || !camera) return GIZMO_NONE;
 
     Transform3D visual = _get_visual_gizmo_transform();
@@ -242,7 +246,6 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
         int segs = 32;
         Transform3D cam_inv = camera->get_global_transform().affine_inverse();
 
-        // === AXIS RINGS ===
         for (int i = 0; i < 3; i++) {
             Vector3 u = visual.basis.get_column((i + 1) % 3).normalized();
             Vector3 v = visual.basis.get_column((i + 2) % 3).normalized();
@@ -268,7 +271,6 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
                 if (d2 < closest_d2) closest_d2 = d2;
             }
 
-            // Edge-on fallback: treat as screen-space circle
             if (visible_segs < 4) {
                 Vector2 center_screen = camera->unproject_position(o);
                 float dist_from_center = screen_pos.distance_to(center_screen);
@@ -283,7 +285,6 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
             }
         }
 
-        // === VIEW ROTATION RING (outer) ===
         if (best == GIZMO_NONE) {
             Vector2 center_screen = camera->unproject_position(o);
             float view_r = (camera->unproject_position(o + visual.basis.get_column(0) * s * 1.05f) - center_screen).length();
@@ -294,14 +295,13 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
             }
         }
 
-        // === TRACKBALL (inner sphere area) ===
         if (best == GIZMO_NONE) {
-            // Use actual screen-space radius of trackball visual (s * 0.08f) instead of full pixel tolerance
             float track_r_screen = (camera->unproject_position(o + visual.basis.get_column(0) * s * 0.08f) - o_screen).length();
-            float trackball_tol_sq = MAX(track_r_screen * track_r_screen, 36.0f); // min 6px radius
+            float trackball_tol_sq = MAX(track_r_screen * track_r_screen, 36.0f);
             float d2 = screen_pos.distance_squared_to(o_screen);
             if (d2 < trackball_tol_sq) {
                 best = GIZMO_TRACKBALL;
+                best_score = d2;
             }
         }
     }
@@ -317,20 +317,40 @@ int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
         }
 
         float d2 = screen_pos.distance_squared_to(o_screen);
-        // Use actual screen-space size of center box (box_s * 0.8f = s * 0.056f) instead of full pixel tolerance
         float box_r_screen = (camera->unproject_position(o + visual.basis.get_column(0) * s * 0.056f) - o_screen).length();
-        float box_tol_sq = MAX(box_r_screen * box_r_screen, 36.0f); // min 6px radius
+        float box_tol_sq = MAX(box_r_screen * box_r_screen, 36.0f);
         if (d2 < box_tol_sq && d2 < best_score) {
             best_score = d2;
             best = GIZMO_XYZ;
         }
     }
 
+    out_best_dist_sq = best_score;
+    return best;
+}
+
+// ============================================================================
+// GIZMO — SCREEN-SPACE RAYCAST (with hover/build side effects)
+// ============================================================================
+int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
+    float dist_sq = 0.0f;
+    int best = _query_gizmo_screen_hit(screen_pos, dist_sq);
     if (best != gizmo_hover_axis) {
         gizmo_hover_axis = best;
         _build_gizmo_mesh();
     }
     return best;
+}
+
+// ============================================================================
+// GIZMO — SCREEN-SPACE DISTANCE TO A SPECIFIC AXIS
+// ============================================================================
+float VFXEditorNode::_gizmo_screen_distance(const Vector2& screen_pos, int axis) const {
+    if (axis == GIZMO_NONE) return 1e10f;
+    float dist_sq = 0.0f;
+    int hit = _query_gizmo_screen_hit(screen_pos, dist_sq);
+    if (hit == axis) return Math::sqrt(dist_sq);
+    return 1e10f;
 }
 
 // ============================================================================
@@ -701,7 +721,7 @@ void VFXEditorNode::gizmo_end_drag() {
     gizmo_drag_axis = GIZMO_NONE;
     gizmo_is_trackball = false;
     gizmo_rotation_angle = 0.0f;
-    
+
     // Resync gizmo transform with actual object/bone/mesh selection
     _update_gizmo_for_selection();
     _build_gizmo_mesh();
