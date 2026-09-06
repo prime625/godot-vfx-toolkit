@@ -272,8 +272,8 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
         } else {
             // --- BLENDER-STYLE OCTAHEDRAL BONES ---
-            float bone_r = bone_shaft_radius * dist_scale;
-            float joint_r = bone_joint_radius * dist_scale;
+            float bone_r = bone_shaft_radius // * dist_scale;
+            float joint_r = bone_joint_radius // * dist_scale;
 
             Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
                                          : Color(1.0f, 1.0f, 1.0f);
