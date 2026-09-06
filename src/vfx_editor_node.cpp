@@ -48,6 +48,22 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_visualize_bone"), &VFXEditorNode::get_visualize_bone);
     ClassDB::bind_method(D_METHOD("set_auto_update", "auto_up"), &VFXEditorNode::set_auto_update);
     ClassDB::bind_method(D_METHOD("get_auto_update"), &VFXEditorNode::get_auto_update);
+    ClassDB::bind_method(D_METHOD("set_bone_shaft_mesh", "mesh"), &VFXEditorNode::set_bone_shaft_mesh);
+    ClassDB::bind_method(D_METHOD("get_bone_shaft_mesh"), &VFXEditorNode::get_bone_shaft_mesh);
+    ClassDB::bind_method(D_METHOD("set_bone_joint_mesh", "mesh"), &VFXEditorNode::set_bone_joint_mesh);
+    ClassDB::bind_method(D_METHOD("get_bone_joint_mesh"), &VFXEditorNode::get_bone_joint_mesh);
+    ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "bone_shaft_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_bone_shaft_mesh", "get_bone_shaft_mesh");
+    ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "bone_joint_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_bone_joint_mesh", "get_bone_joint_mesh");
+
+    ClassDB::bind_method(D_METHOD("set_bone_shaft_radius", "radius"), &VFXEditorNode::set_bone_shaft_radius);
+    ClassDB::bind_method(D_METHOD("get_bone_shaft_radius"), &VFXEditorNode::get_bone_shaft_radius);
+    ClassDB::bind_method(D_METHOD("set_bone_joint_radius", "radius"), &VFXEditorNode::set_bone_joint_radius);
+    ClassDB::bind_method(D_METHOD("get_bone_joint_radius"), &VFXEditorNode::get_bone_joint_radius);
+    ClassDB::bind_method(D_METHOD("set_bone_tip_radius", "radius"), &VFXEditorNode::set_bone_tip_radius);
+    ClassDB::bind_method(D_METHOD("get_bone_tip_radius"), &VFXEditorNode::get_bone_tip_radius);
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_shaft_radius", PROPERTY_HINT_RANGE, "0.001,0.5,0.001,or_greater"), "set_bone_shaft_radius", "get_bone_shaft_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_joint_radius", PROPERTY_HINT_RANGE, "0.001,0.5,0.001,or_greater"), "set_bone_joint_radius", "get_bone_joint_radius");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_tip_radius", PROPERTY_HINT_RANGE, "0.001,0.5,0.001,or_greater"), "set_bone_tip_radius", "get_bone_tip_radius");
 
     ClassDB::bind_method(D_METHOD("set_brush_cursor", "world_pos", "radius"), &VFXEditorNode::set_brush_cursor);
     ClassDB::bind_method(D_METHOD("clear_brush_cursor"), &VFXEditorNode::clear_brush_cursor);
@@ -88,9 +104,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_gizmo_locked"), &VFXEditorNode::get_gizmo_locked);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "gizmo_locked"), "set_gizmo_locked", "get_gizmo_locked");
 
-        ClassDB::bind_method(D_METHOD("set_bone_selection_radius", "radius"), &VFXEditorNode::set_bone_selection_radius);
-        ClassDB::bind_method(D_METHOD("get_bone_selection_radius"), &VFXEditorNode::get_bone_selection_radius);
-        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_selection_radius"), "set_bone_selection_radius", "get_bone_selection_radius");
+    ClassDB::bind_method(D_METHOD("set_bone_selection_radius", "radius"), &VFXEditorNode::set_bone_selection_radius);
+    ClassDB::bind_method(D_METHOD("get_bone_selection_radius"), &VFXEditorNode::get_bone_selection_radius);
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bone_selection_radius"), "set_bone_selection_radius", "get_bone_selection_radius");
 
     ClassDB::bind_method(D_METHOD("set_selected_bone", "idx"), &VFXEditorNode::set_selected_bone);
     ClassDB::bind_method(D_METHOD("get_selected_bone"), &VFXEditorNode::get_selected_bone);
@@ -811,6 +827,32 @@ void VFXEditorNode::set_selected_bone(int idx) {
 
 int VFXEditorNode::get_selected_bone() const {
     return selected_bone;
+}
+
+Ref<Mesh> VFXEditorNode::get_bone_joint_mesh() const {
+    return bone_joint_mesh;
+}
+
+void VFXEditorNode::set_bone_shaft_radius(float p_r) {
+    bone_shaft_radius = MAX(p_r, 0.0001f);
+    if (show_skeleton) _build_skeleton_mesh();
+}
+float VFXEditorNode::get_bone_shaft_radius() const {
+    return bone_shaft_radius;
+}
+void VFXEditorNode::set_bone_joint_radius(float p_r) {
+    bone_joint_radius = MAX(p_r, 0.0001f);
+    if (show_skeleton) _build_skeleton_mesh();
+}
+float VFXEditorNode::get_bone_joint_radius() const {
+    return bone_joint_radius;
+}
+void VFXEditorNode::set_bone_tip_radius(float p_r) {
+    bone_tip_radius = MAX(p_r, 0.0001f);
+    if (show_skeleton) _build_skeleton_mesh();
+}
+float VFXEditorNode::get_bone_tip_radius() const {
+    return bone_tip_radius;
 }
 
 // ============================================================================
