@@ -302,24 +302,24 @@ void VFXEditorNode::_build_skeleton_mesh() {
                 Vector3 v[5] = {apex, b0, b1, b2, b3};
                 for (int i = 0; i < 5; i++) {
                     verts.append(v[i]);
-                    cols.append(bone_col);
+                    colors.append(bone_col);
                 }
                 // 4 side faces
-                idx.append(base+0); idx.append(base+1); idx.append(base+2);
-                idx.append(base+0); idx.append(base+2); idx.append(base+3);
-                idx.append(base+0); idx.append(base+3); idx.append(base+4);
-                idx.append(base+0); idx.append(base+4); idx.append(base+1);
+                indices.append(base+0); indices.append(base+1); indices.append(base+2);
+                indices.append(base+0); indices.append(base+2); indices.append(base+3);
+                indices.append(base+0); indices.append(base+3); indices.append(base+4);
+                indices.append(base+0); indices.append(base+4); indices.append(base+1);
 
                 // Base cap (2 triangles)
                 int cb = verts.size();
-                verts.append(b0); cols.append(bone_col);
-                verts.append(b2); cols.append(bone_col);
-                verts.append(b1); cols.append(bone_col);
-                verts.append(b0); cols.append(bone_col);
-                verts.append(b3); cols.append(bone_col);
-                verts.append(b2); cols.append(bone_col);
-                idx.append(cb+0); idx.append(cb+1); idx.append(cb+2);
-                idx.append(cb+3); idx.append(cb+4); idx.append(cb+5);
+                verts.append(b0); colors.append(bone_col);
+                verts.append(b2); colors.append(bone_col);
+                verts.append(b1); colors.append(bone_col);
+                verts.append(b0); colors.append(bone_col);
+                verts.append(b3); colors.append(bone_col);
+                verts.append(b2); colors.append(bone_col);
+                indices.append(cb+0); indices.append(cb+1); indices.append(cb+2);
+                indices.append(cb+3); indices.append(cb+4); indices.append(cb+5);
             }
 
             // Joint sphere at this bone's position
