@@ -210,7 +210,7 @@ private:
     // Gizmo pure query (no hover/build side effects)
     int _query_gizmo_screen_hit(const Vector2& screen_pos, float& out_best_dist_sq) const;
 
-   
+
     // Scene visuals
     MeshInstance3D* _get_scene_visual(uint64_t node_id);
     void _clear_scene_visuals();
@@ -223,8 +223,8 @@ private:
     float _ray_sphere_intersect(const Vector3& ro, const Vector3& rd, const Vector3& sc, float sr) const;
 
     // Screen-space selection helpers
-    float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b);
-    bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly);
+    float _point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b) const;
+    bool _point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly) const;
 
     // Selection mode internals
     void _handle_element_selection(int hit);
