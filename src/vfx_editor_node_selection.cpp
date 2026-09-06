@@ -9,7 +9,7 @@ using namespace godot;
 // ============================================================================
 // SCREEN-SPACE SELECTION HELPERS
 // ============================================================================
-float VFXEditorNode::_point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b) {
+float VFXEditorNode::_point_segment_dist_sq_2d(const Vector2& p, const Vector2& a, const Vector2& b) const {
     Vector2 ab = b - a;
     float len2 = ab.length_squared();
     if (len2 < 0.0001f) return p.distance_squared_to(a);
@@ -17,7 +17,7 @@ float VFXEditorNode::_point_segment_dist_sq_2d(const Vector2& p, const Vector2& 
     return p.distance_squared_to(a + ab * t);
 }
 
-bool VFXEditorNode::_point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly) {
+bool VFXEditorNode::_point_in_polygon_2d(const Vector2& p, const PackedVector2Array& poly) const {
     bool inside = false;
     int n = poly.size();
     for (int i = 0, j = n - 1; i < n; j = i++) {
