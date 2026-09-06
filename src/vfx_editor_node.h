@@ -207,6 +207,11 @@ private:
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
     void mark_scene_dirty();
+    // Gizmo pure query (no hover/build side effects)
+    int _query_gizmo_screen_hit(const Vector2& screen_pos, float& out_best_dist_sq) const;
+
+    // Screen-space distance to a specific gizmo axis
+    float _gizmo_screen_distance(const Vector2& screen_pos, int axis) const;
 
     // Scene visuals
     MeshInstance3D* _get_scene_visual(uint64_t node_id);
