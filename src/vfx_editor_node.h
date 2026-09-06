@@ -203,6 +203,8 @@ private:
     Transform3D _get_visual_gizmo_transform() const;
     Transform3D _get_active_mesh_transform() const;
     void _update_gizmo_scale();
+    Transform3D _get_bone_gizmo_transform(int bone_idx) const;
+
 
     // Scene tree integration
     void _on_scene_node_selected(Ref<VFXSceneNode> p_node);
