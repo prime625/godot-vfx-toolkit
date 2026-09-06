@@ -231,15 +231,18 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
     bool use_custom = bone_shaft_mesh.is_valid() && bone_joint_mesh.is_valid();
 
+    // === PASS 1: all UNSELECTED bones ===
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
+        if (i == selected_bone) continue; // skip selected, draw it last
+
         int parent = skeleton->get_bone_parent(i);
         Vector3 pos = skeleton->get_bone_model_transform(i).get_origin();
         Vector3 parent_pos = (parent >= 0)
             ? skeleton->get_bone_model_transform(parent).get_origin()
             : pos;
 
-        bool is_selected = (i == selected_bone);
-        Color tint = is_selected ? Color(1.0f, 0.92f, 0.35f) : Color(1.0f, 1.0f, 1.0f);
+        bool is_selected = false;
+        Color tint = Color(1.0f, 1.0f, 1.0f);
 
         if (use_custom) {
             // --- CUSTOM MESH MODE ---
@@ -261,24 +264,22 @@ void VFXEditorNode::_build_skeleton_mesh() {
                     shaft_t.basis = b;
                     shaft_t.origin = parent_pos;
 
-                    _append_mesh_surface_transformed(verts, colors, indices,bone_shaft_mesh, shaft_t, tint);
+                    _append_mesh_surface_transformed(verts, colors, indices, bone_shaft_mesh, shaft_t, tint);
                 }
             }
 
             Transform3D joint_t;
             joint_t.basis = Basis().scaled(Vector3(dist_scale, dist_scale, dist_scale));
             joint_t.origin = pos;
-            _append_mesh_surface_transformed(verts, colors, indices,bone_joint_mesh, joint_t, tint);
+            _append_mesh_surface_transformed(verts, colors, indices, bone_joint_mesh, joint_t, tint);
 
         } else {
             // --- BLENDER-STYLE OCTAHEDRAL BONES ---
-            float bone_r = bone_shaft_radius; // * dist_scale;
-            float joint_r = bone_joint_radius; // * dist_scale;
+            float bone_r = bone_shaft_radius;
+            float joint_r = bone_joint_radius;
 
-            Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
-                                         : Color(1.0f, 1.0f, 1.0f);
-            Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
-                                          : Color(1.0f, 1.0f, 1.0f);
+            Color bone_col = Color(1.0f, 1.0f, 1.0f);
+            Color joint_col = Color(1.0f, 1.0f, 1.0f);
 
             // Tapered pyramid shaft: wide base at parent, sharp apex at child
             if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
@@ -289,9 +290,8 @@ void VFXEditorNode::_build_skeleton_mesh() {
                 if (x.length_squared() < 0.001f) x = Vector3(1, 0, 0);
                 Vector3 z = x.cross(y).normalized();
 
-                float w = bone_r * 2.5f;  // base width
+                float w = bone_r * 2.5f;
 
-                // Square base at parent (perpendicular to bone axis)
                 Vector3 b0 = parent_pos + (x + z) * w;
                 Vector3 b1 = parent_pos + (-x + z) * w;
                 Vector3 b2 = parent_pos + (-x - z) * w;
@@ -300,17 +300,15 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
                 int base = verts.size();
                 Vector3 v[5] = {apex, b0, b1, b2, b3};
-                for (int i = 0; i < 5; i++) {
-                    verts.append(v[i]);
+                for (int k = 0; k < 5; k++) {
+                    verts.append(v[k]);
                     colors.append(bone_col);
                 }
-                // 4 side faces
                 indices.append(base+0); indices.append(base+1); indices.append(base+2);
                 indices.append(base+0); indices.append(base+2); indices.append(base+3);
                 indices.append(base+0); indices.append(base+3); indices.append(base+4);
                 indices.append(base+0); indices.append(base+4); indices.append(base+1);
 
-                // Base cap (2 triangles)
                 int cb = verts.size();
                 verts.append(b0); colors.append(bone_col);
                 verts.append(b2); colors.append(bone_col);
@@ -322,12 +320,99 @@ void VFXEditorNode::_build_skeleton_mesh() {
                 indices.append(cb+3); indices.append(cb+4); indices.append(cb+5);
             }
 
-            // Joint sphere at this bone's position
-            float jr = is_selected ? joint_r * 1.3f : joint_r;
+            float jr = joint_r;
             vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
         }
     }
 
+    // === PASS 2: SELECTED bone on top ===
+    if (selected_bone >= 0 && selected_bone < skeleton->get_bone_count()) {
+        int i = selected_bone;
+        int parent = skeleton->get_bone_parent(i);
+        Vector3 pos = skeleton->get_bone_model_transform(i).get_origin();
+        Vector3 parent_pos = (parent >= 0)
+            ? skeleton->get_bone_model_transform(parent).get_origin()
+            : pos;
+
+        Color tint = Color(1.0f, 0.92f, 0.35f);
+
+        if (use_custom) {
+            if (parent >= 0) {
+                Vector3 dir = pos - parent_pos;
+                float len = dir.length();
+                if (len > 0.0001f) {
+                    Vector3 y = dir / len;
+                    Vector3 x = y.cross(Vector3(0, 0, 1)).normalized();
+                    if (x.length_squared() < 0.001f) x = Vector3(1, 0, 0);
+                    Vector3 z = x.cross(y).normalized();
+
+                    Basis b;
+                    b.set_column(0, x * dist_scale);
+                    b.set_column(1, y * len);
+                    b.set_column(2, z * dist_scale);
+
+                    Transform3D shaft_t;
+                    shaft_t.basis = b;
+                    shaft_t.origin = parent_pos;
+
+                    _append_mesh_surface_transformed(verts, colors, indices, bone_shaft_mesh, shaft_t, tint);
+                }
+            }
+
+            Transform3D joint_t;
+            joint_t.basis = Basis().scaled(Vector3(dist_scale, dist_scale, dist_scale));
+            joint_t.origin = pos;
+            _append_mesh_surface_transformed(verts, colors, indices, bone_joint_mesh, joint_t, tint);
+
+        } else {
+            float bone_r = bone_shaft_radius;
+            float joint_r = bone_joint_radius;
+
+            Color bone_col = Color(1.0f, 0.95f, 0.5f);
+            Color joint_col = Color(1.0f, 0.92f, 0.35f);
+
+            if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
+                Vector3 dir = pos - parent_pos;
+                float len = dir.length();
+                Vector3 y = dir / len;
+                Vector3 x = y.cross(Vector3(0, 0, 1)).normalized();
+                if (x.length_squared() < 0.001f) x = Vector3(1, 0, 0);
+                Vector3 z = x.cross(y).normalized();
+
+                float w = bone_r * 2.5f;
+
+                Vector3 b0 = parent_pos + (x + z) * w;
+                Vector3 b1 = parent_pos + (-x + z) * w;
+                Vector3 b2 = parent_pos + (-x - z) * w;
+                Vector3 b3 = parent_pos + (x - z) * w;
+                Vector3 apex = pos;
+
+                int base = verts.size();
+                Vector3 v[5] = {apex, b0, b1, b2, b3};
+                for (int k = 0; k < 5; k++) {
+                    verts.append(v[k]);
+                    colors.append(bone_col);
+                }
+                indices.append(base+0); indices.append(base+1); indices.append(base+2);
+                indices.append(base+0); indices.append(base+2); indices.append(base+3);
+                indices.append(base+0); indices.append(base+3); indices.append(base+4);
+                indices.append(base+0); indices.append(base+4); indices.append(base+1);
+
+                int cb = verts.size();
+                verts.append(b0); colors.append(bone_col);
+                verts.append(b2); colors.append(bone_col);
+                verts.append(b1); colors.append(bone_col);
+                verts.append(b0); colors.append(bone_col);
+                verts.append(b3); colors.append(bone_col);
+                verts.append(b2); colors.append(bone_col);
+                indices.append(cb+0); indices.append(cb+1); indices.append(cb+2);
+                indices.append(cb+3); indices.append(cb+4); indices.append(cb+5);
+            }
+
+            float jr = joint_r * 1.3f;
+            vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
+        }
+    }
     if (verts.size() > 0) {
         Array arrays;
         arrays.resize(Mesh::ARRAY_MAX);
