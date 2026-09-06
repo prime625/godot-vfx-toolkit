@@ -20,7 +20,7 @@ void VFXEditorNode::_update_godot_mesh() {
         return;
     }
 
-    mesh_instance->set_mesh(am);  // SET MESH FIRST
+    mesh_instance->set_mesh(am);
 
     if (show_weights && skin.is_valid()) {
         mesh_instance->set_surface_override_material(0, weight_material);
@@ -30,7 +30,7 @@ void VFXEditorNode::_update_godot_mesh() {
 }
 
 // ============================================================================
-// SELECTION VISUAL — PRISMA3D-STYLE WIREFRAME + VERTEX/FACE/EDGE HIGHLIGHTS
+// SELECTION VISUAL — PRISMA3D-STYLE WIREFRAME
 // ============================================================================
 void VFXEditorNode::_build_selection_mesh() {
     if (!selection_visual) _ensure_selection_visual();
@@ -47,27 +47,22 @@ void VFXEditorNode::_build_selection_mesh() {
     PackedInt32Array idx;
 
     // === SCREEN-SPACE CONSISTENT SCALE (Prisma3D style) ===
-    // Wireframe keeps the same on-screen thickness regardless of zoom,
-    // but clamps so it never gets too thick when far or too thin when close.
     float cam_dist = 5.0f;
     if (camera) {
         Vector3 mesh_pos = _get_active_mesh_transform().get_origin();
         cam_dist = camera->get_global_transform().get_origin().distance_to(mesh_pos);
         if (cam_dist < 0.001f) cam_dist = 0.001f;
     }
-
-    // At 5 units distance, scale = 1.0 (matches old fixed values)
     float dist_scale = cam_dist / 5.0f;
-    if (dist_scale < 0.2f) dist_scale = 0.2f;   // close-up: thinner
-    if (dist_scale > 3.0f) dist_scale = 3.0f;   // far away: thicker, clamped
+    if (dist_scale < 0.2f) dist_scale = 0.2f;
+    if (dist_scale > 3.0f) dist_scale = 3.0f;
 
     const float BASE_EDGE_R = 0.0025f;
     const float BASE_VERT_S = 0.014f;
-
     float base_edge_r = BASE_EDGE_R * dist_scale;
     float base_vert_s = BASE_VERT_S * dist_scale;
 
-    // Build set of edge IDs that border selected faces (for face-mode highlighting)
+    // Build set of edge IDs that border selected faces
     std::set<int> selected_face_edge_ids;
     if (edit_mode == MODE_FACE) {
         for (auto* f : mesh->get_faces()) {
@@ -82,7 +77,7 @@ void VFXEditorNode::_build_selection_mesh() {
         }
     }
 
-    // Wireframe edges — Prisma3D style: black, screen-space consistent thickness
+    // Wireframe edges — black, screen-space consistent thickness
     for (auto* e : mesh->get_edges()) {
         if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
         Vector3 a = e->next->vertex->position;
@@ -94,22 +89,22 @@ void VFXEditorNode::_build_selection_mesh() {
         Color col;
         float r;
         if (is_active) {
-            col = Color(1.0f, 0.8f, 0.2f, 1.0f);   // bright yellow active
+            col = Color(1.0f, 0.8f, 0.2f, 1.0f);
             r = base_edge_r * 4.0f;
         } else if (in_set) {
-            col = Color(1.0f, 0.5f, 0.0f, 1.0f);   // orange selected
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);
             r = base_edge_r * 3.2f;
         } else if (is_face_selected) {
-            col = Color(1.0f, 0.5f, 0.0f, 1.0f);   // orange for selected face border
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);
             r = base_edge_r * 3.2f;
         } else {
-            col = Color(0.0f, 0.0f, 0.0f, 1.0f);   // black
+            col = Color(0.0f, 0.0f, 0.0f, 1.0f);
             r = base_edge_r;
         }
         vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
     }
 
-    // Vertices — ONLY in vertex mode, Prisma3D style: black dots
+    // Vertices — ONLY in vertex mode, black dots
     if (edit_mode == MODE_VERTEX) {
         for (auto* v : mesh->get_vertices()) {
             if (v->deleted) continue;
@@ -125,7 +120,7 @@ void VFXEditorNode::_build_selection_mesh() {
                 col = Color(1.0f, 0.5f, 0.0f, 1.0f);
                 s = base_vert_s * 2.0f;
             } else {
-                col = Color(0.0f, 0.0f, 0.0f, 1.0f); // black
+                col = Color(0.0f, 0.0f, 0.0f, 1.0f);
                 s = base_vert_s;
             }
             vfx_editor::append_box(verts, cols, idx, v->position, s, col);
@@ -152,9 +147,205 @@ void VFXEditorNode::_build_selection_mesh() {
     selection_visual->set_transform(_get_active_mesh_transform());
 }
 
+// ============================================================================
+// CUSTOM MESH SURFACE APPENDER
+// ============================================================================
+void VFXEditorNode::_append_mesh_surface_transformed(
+    PackedVector3Array& r_verts,
+    PackedColorArray& r_cols,
+    PackedInt32Array& r_idx,
+    const Ref<Mesh>& p_mesh,
+    const Transform3D& p_transform,
+    const Color& p_tint)
+{
+    if (p_mesh.is_null()) return;
+
+    int base_vert = r_verts.size();
+
+    for (int surf = 0; surf < p_mesh->get_surface_count(); surf++) {
+        Array arrays = p_mesh->surface_get_arrays(surf);
+        if (arrays.is_empty()) continue;
+
+        PackedVector3Array src_verts = arrays[Mesh::ARRAY_VERTEX];
+        PackedColorArray src_cols = arrays[Mesh::ARRAY_COLOR];
+        PackedInt32Array src_idx = arrays[Mesh::ARRAY_INDEX];
+
+        if (src_verts.is_empty()) continue;
+
+        bool has_color = src_cols.size() == src_verts.size();
+
+        for (int i = 0; i < src_verts.size(); i++) {
+            r_verts.append(p_transform.xform(src_verts[i]));
+            if (has_color) {
+                Color c = src_cols[i] * p_tint;
+                c.a_selection_visual();
+    if (mesh.is_null() || !show_wireframe) {
+        selection_visual->set_mesh(Ref<ArrayMesh>());
+        return;
+    }
+
+    Ref<ArrayMesh> am;
+    am.instantiate();
+
+    PackedVector3Array verts;
+    PackedColorArray cols;
+    PackedInt32Array idx;
+
+    // === SCREEN-SPACE CONSISTENT SCALE (Prisma3D style) ===
+    float cam_dist = 5.0f;
+    if (camera) {
+        Vector3 mesh_pos = _get_active_mesh_transform().get_origin();
+        cam_dist = camera->get_global_transform().get_origin().distance_to(mesh_pos);
+        if (cam_dist < 0.001f) cam_dist = 0.001f;
+    }
+    float dist_scale = cam_dist / 5.0f;
+    if (dist_scale < 0.2f) dist_scale = 0.2f;
+    if (dist_scale > 3.0f) dist_scale = 3.0f;
+
+    const float BASE_EDGE_R = 0.0025f;
+    const float BASE_VERT_S = 0.014f;
+    float base_edge_r = BASE_EDGE_R * dist_scale;
+    float base_vert_s = BASE_VERT_S * dist_scale;
+
+    // Build set of edge IDs that border selected faces
+    std::set<int> selected_face_edge_ids;
+    if (edit_mode == MODE_FACE) {
+        for (auto* f : mesh->get_faces()) {
+            if (f->deleted || !f->halfedge) continue;
+            if (selected_faces.find((int)f->id) == selected_faces.end()) continue;
+            auto* he = f->halfedge;
+            auto* start = he;
+            do {
+                if (he && he->id >= 0) selected_face_edge_ids.insert((int)he->id);
+                he = he->next;
+            } while (he && he != start);
+        }
+    }
+
+    // Wireframe edges — black, screen-space consistent thickness
+    for (auto* e : mesh->get_edges()) {
+        if (e->deleted || !e->vertex || !e->next || !e->next->vertex) continue;
+        Vector3 a = e->next->vertex->position;
+        Vector3 b = e->vertex->position;
+        bool in_set = selected_edges.find((int)e->id) != selected_edges.end();
+        bool is_active = (edit_mode == MODE_EDGE && selected_edge == (int)e->id);
+        bool is_face_selected = (edit_mode == MODE_FACE && selected_face_edge_ids.find((int)e->id) != selected_face_edge_ids.end());
+
+        Color col;
+        float r;
+        if (is_active) {
+            col = Color(1.0f, 0.8f, 0.2f, 1.0f);
+            r = base_edge_r * 4.0f;
+        } else if (in_set) {
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);
+            r = base_edge_r * 3.2f;
+        } else if (is_face_selected) {
+            col = Color(1.0f, 0.5f, 0.0f, 1.0f);
+            r = base_edge_r * 3.2f;
+        } else {
+            col = Color(0.0f, 0.0f, 0.0f, 1.0f);
+            r = base_edge_r;
+        }
+        vfx_editor::append_cylinder(verts, cols, idx, a, b, r, 4, col);
+    }
+
+    // Vertices — ONLY in vertex mode, black dots
+    if (edit_mode == MODE_VERTEX) {
+        for (auto* v : mesh->get_vertices()) {
+            if (v->deleted) continue;
+            bool in_set = selected_vertices.find((int)v->id) != selected_vertices.end();
+            bool is_active = (selected_vertex == (int)v->id);
+
+            Color col;
+            float s;
+            if (is_active) {
+                col = Color(1.0f, 0.8f, 0.2f, 1.0f);
+                s = base_vert_s * 2.5f;
+            } else if (in_set) {
+                col = Color(1.0f, 0.5f, 0.0f, 1.0f);
+                s = base_vert_s * 2.0f;
+            } else {
+                col = Color(0.0f, 0.0f, 0.0f, 1.0f);
+                s = base_vert_s;
+            }
+            vfx_editor::append_box(verts, cols, idx, v->position, s, col);
+        }
+    }
+
+    if (verts.size() > 0) {
+        Array arrays;
+        arrays.resize(Mesh::ARRAY_MAX);
+        arrays[Mesh::ARRAY_VERTEX] = verts;
+        arrays[Mesh::ARRAY_COLOR] = cols;
+        arrays[Mesh::ARRAY_INDEX] = idx;
+        am->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+    }
+
+    Ref<StandardMaterial3D> mat;
+    mat.instantiate();
+    mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+    mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
+    mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
+    selection_visual->set_material_override(mat);
+    selection_visual->set_mesh(am);
+    selection_visual->set_transform(_get_active_mesh_transform());
+}
 
 // ============================================================================
-// SKELETON VISUAL — PRISMA3D-STYLE: thin wire bones + small sphere joints
+// CUSTOM MESH SURFACE APPENDER
+// ============================================================================
+void VFXEditorNode::_append_mesh_surface_transformed(
+    PackedVector3Array& r_verts,
+    PackedColorArray& r_cols,
+    PackedInt32Array& r_idx,
+    const Ref<Mesh>& p_mesh,
+    const Transform3D& p_transform,
+    const Color& p_tint)
+{
+    if (p_mesh.is_null()) return;
+
+    int base_vert = r_verts.size();
+
+    for (int surf = 0; surf < p_mesh->get_surface_count(); surf++) {
+        Array arrays = p_mesh->surface_get_arrays(surf);
+        if (arrays.is_empty()) continue;
+
+        PackedVector3Array src_verts = arrays[Mesh::ARRAY_VERTEX];
+        PackedColorArray src_cols = arrays[Mesh::ARRAY_COLOR];
+        PackedInt32Array src_idx = arrays[Mesh::ARRAY_INDEX];
+
+        if (src_verts.is_empty()) continue;
+
+        bool has_color = src_cols.size() == src_verts.size();
+
+        for (int i = 0; i < src_verts.size(); i++) {
+            r_verts.append(p_transform.xform(src_verts[i]));
+            if (has_color) {
+                Color c = src_cols[i] * p_tint;
+                c.a = src_cols[i].a;
+                r_cols.append(c);
+            } else {
+                r_cols.append(p_tint);
+            }
+        }
+
+        if (!src_idx.is_empty()) {
+            for (int i = 0; i < src_idx.size(); i++) {
+                r_idx.append(src_idx[i] + base_vert);
+            }
+        } else {
+            for (int i = 0; i < src_verts.size(); i++) {
+                r_idx.append(base_vert + i);
+            }
+        }
+
+        base_vert = r_verts.size();
+    }
+}
+
+// ============================================================================
+// SKELETON VISUAL — custom mesh or procedural fallback
 // ============================================================================
 void VFXEditorNode::_build_skeleton_mesh() {
     if (!skel_visual) _ensure_skeleton_visual();
@@ -172,7 +363,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
 
     skeleton->update_transforms();
 
-    // === SCREEN-SPACE CONSISTENT SCALE (Prisma3D style) ===
+    // === SCREEN-SPACE CONSISTENT SCALE ===
     float cam_dist = 5.0f;
     if (camera) {
         Vector3 skel_center = skeleton->get_bone_model_transform(0).get_origin();
@@ -183,11 +374,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
     if (dist_scale < 0.2f) dist_scale = 0.2f;
     if (dist_scale > 3.0f) dist_scale = 3.0f;
 
-    const float BASE_BONE_R = 0.0020f;   // hairline bone
-    const float BASE_JOINT_R = 0.006f;   // visible joint dot
-    float bone_r = BASE_BONE_R * dist_scale;
-    float joint_r = BASE_JOINT_R * dist_scale;
-    float sel_joint_r = joint_r * 1.4f;
+    bool use_custom = bone_shaft_mesh.is_valid() && bone_joint_mesh.is_valid();
 
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
         int parent = skeleton->get_bone_parent(i);
@@ -197,20 +384,61 @@ void VFXEditorNode::_build_skeleton_mesh() {
             : pos;
 
         bool is_selected = (i == selected_bone);
+        Color tint = is_selected ? Color(1.0f, 0.92f, 0.35f) : Color(1.0f, 1.0f, 1.0f);
 
-        // Bone line: pure white, warm yellow when selected
-        Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
-                                     : Color(1.0f, 1.0f, 1.0f);
+        if (use_custom) {
+            // --- CUSTOM MESH MODE ---
+            if (parent >= 0) {
+                Vector3 dir = pos - parent_pos;
+                float len = dir.length();
+                if (len > 0.0001f) {
+                    Vector3 y = dir / len;
+                    Vector3 x = y.cross(Vector3(0, 0, 1)).normalized();
+                    if (x.length_squared() < 0.001f) x = Vector3(1, 0, 0);
+                    Vector3 z = x.cross(y).normalized();
 
-        if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
-            vfx_editor::append_cylinder(verts, colors, indices, parent_pos, pos, bone_r, 4, bone_col);
+                    Basis b;
+                    b.set_column(0, x * dist_scale);
+                    b.set_column(1, y * len);
+                    b.set_column(2, z * dist_scale);
+
+                    Transform3D shaft_t;
+                    shaft_t.basis = b;
+                    shaft_t.origin = parent_pos;
+
+                    _append_mesh_surface_transformed(verts, colors, indices,
+                        bone_shaft_mesh, shaft_t, tint);
+                }
+            }
+
+            Transform3D joint_t;
+            joint_t.basis = Basis().scaled(Vector3(dist_scale, dist_scale, dist_scale));
+            joint_t.origin = pos;
+            _append_mesh_surface_transformed(verts, colors, indices,
+                bone_joint_mesh, joint_t, tint);
+
+        } else {
+            // --- PROCEDURAL FALLBACK: thick bones + visible joints ---
+            float bone_r = bone_shaft_radius * dist_scale;
+            float joint_r = bone_joint_radius * dist_scale;
+            float tip_r   = bone_tip_radius * dist_scale;
+
+            Color bone_col = is_selected ? Color(1.0f, 0.95f, 0.5f)
+                                         : Color(1.0f, 1.0f, 1.0f);
+            Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
+                                          : Color(1.0f, 1.0f, 1.0f);
+
+            // Bone shaft: thick cylinder from parent to child
+            if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
+                vfx_editor::append_cylinder(verts, colors, indices, parent_pos, pos, bone_r, 6, bone_col);
+                // Small tip sphere at child end (gives the bone a "head")
+                vfx_editor::append_sphere(verts, colors, indices, pos, tip_r, bone_col);
+            }
+
+            // Joint sphere at this bone's position
+            float jr = is_selected ? joint_r * 1.3f : joint_r;
+            vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
         }
-
-        // Joint dot: pure white, warm yellow when selected
-        Color joint_col = is_selected ? Color(1.0f, 0.92f, 0.35f)
-                                      : Color(1.0f, 1.0f, 1.0f);
-        float jr = is_selected ? sel_joint_r : joint_r;
-        vfx_editor::append_sphere(verts, colors, indices, pos, jr, joint_col);
     }
 
     if (verts.size() > 0) {
