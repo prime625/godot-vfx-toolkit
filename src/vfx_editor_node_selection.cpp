@@ -206,7 +206,7 @@ void VFXEditorNode::_update_gizmo_for_selection() {
    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
        gizmo_transform = active_scene_node->get_global_transform();
    } else if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
-       gizmo_transform = skeleton->get_bone_model_transform(selected_bone);
+       gizmo_transform = _get_bone_gizmo_transform(selected_bone);
    } else if (edit_mode == MODE_OBJECT) {
        gizmo_transform = Transform3D();
    }
