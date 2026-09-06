@@ -185,6 +185,12 @@ private:
     void _ensure_skeleton_visual();
     void _ensure_scene_container();
 
+    float _vertex_screen_distance(const Vector2& screen_pos, int vidx) const;
+    float _edge_screen_distance(const Vector2& screen_pos, int eidx) const;
+    float _face_screen_distance(const Vector2& screen_pos, int fidx) const;
+    float _gizmo_screen_distance(const Vector2& screen_pos, int axis) const;
+    float _bone_screen_distance(const Vector2& screen_pos, int bone_idx) const;
+
     void _update_godot_mesh();
     void _build_gizmo_mesh();
     void _build_skeleton_mesh();
