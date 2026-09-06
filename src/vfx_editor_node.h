@@ -189,6 +189,9 @@ private:
     void _build_gizmo_mesh();
     void _build_skeleton_mesh();
     void _build_selection_mesh();
+    void _append_mesh_surface_transformed(
+        PackedVector3Array& r_verts, PackedColorArray& r_cols, PackedInt32Array& r_idx,
+        const Ref<Mesh>& p_mesh, const Transform3D& p_transform, const Color& p_tint);
     void _update_gizmo_for_selection();
     void _update_gizmo_visibility();
     Transform3D _get_visual_gizmo_transform() const;
@@ -314,7 +317,7 @@ public:
     float get_gizmo_screen_scale() const;
     void set_gizmo_local(bool p_local);
     bool get_gizmo_local() const;
-	void set_bone_shaft_mesh(const Ref<Mesh>& p_mesh);
+        void set_bone_shaft_mesh(const Ref<Mesh>& p_mesh);
     Ref<Mesh> get_bone_shaft_mesh() const;
     void set_bone_joint_mesh(const Ref<Mesh>& p_mesh);
     Ref<Mesh> get_bone_joint_mesh() const;
