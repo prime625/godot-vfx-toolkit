@@ -12,6 +12,10 @@ using namespace godot;
 // ============================================================================
 void VFXEditorNode::_update_godot_mesh() {
     _ensure_mesh_instance();
+    if (scene.is_valid()) {
+        if (mesh_instance) mesh_instance->set_visible(false);
+        return;
+    }
     if (mesh.is_null()) return;
 
     Ref<ArrayMesh> am = _build_array_mesh_for_node(mesh, skeleton, skin, show_weights, visualize_bone);
@@ -30,7 +34,7 @@ void VFXEditorNode::_update_godot_mesh() {
 }
 
 // ============================================================================
-// SELECTION VISUAL — PRISMA3D-STYLE WIREFRAME
+// SELECTION VISUAL — WIREFRAME
 // ============================================================================
 void VFXEditorNode::_build_selection_mesh() {
     if (!selection_visual) _ensure_selection_visual();
