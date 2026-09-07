@@ -104,6 +104,8 @@ private:
     MeshInstance3D* brush_cursor = nullptr;
     MeshInstance3D* gizmo_node = nullptr;
     MeshInstance3D* selection_visual = nullptr;
+    MeshInstance3D* origin_indicator = nullptr;
+
     MeshInstance3D* skel_visual = nullptr;
     Node3D* scene_container = nullptr;
     VFXSceneTreePanel* scene_tree_panel = nullptr;
@@ -203,6 +205,9 @@ private:
     Transform3D _get_visual_gizmo_transform() const;
     Transform3D _get_active_mesh_transform() const;
     void _update_gizmo_scale();
+    void _ensure_origin_indicator();
+    void _update_origin_indicator();
+
     Transform3D _get_bone_gizmo_transform(int bone_idx) const;
 
 
