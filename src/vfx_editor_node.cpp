@@ -22,7 +22,7 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_vfx_mesh", "mesh"), &VFXEditorNode::set_vfx_mesh);
     ClassDB::bind_method(D_METHOD("get_vfx_mesh"), &VFXEditorNode::get_vfx_mesh);
     ClassDB::bind_method(D_METHOD("refresh_mesh"), &VFXEditorNode::refresh_mesh);
-    
+
     ClassDB::bind_method(D_METHOD("set_gizmo_priority", "priority"), &VFXEditorNode::set_gizmo_priority);
     ClassDB::bind_method(D_METHOD("get_gizmo_priority"), &VFXEditorNode::get_gizmo_priority);
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gizmo_priority", PROPERTY_HINT_RANGE, "0,1,0.05"), "set_gizmo_priority", "get_gizmo_priority");
@@ -253,6 +253,7 @@ void VFXEditorNode::_notification(int p_what) {
         _ensure_scene_container();
 
         // Create scene tree panel (hidden by default, UI script toggles visibility)
+        /*
         if (!scene_tree_panel) {
             scene_tree_panel = memnew(VFXSceneTreePanel);
             scene_tree_panel->set_name("SceneTreePanel");
@@ -261,6 +262,7 @@ void VFXEditorNode::_notification(int p_what) {
             add_child(scene_tree_panel);
             scene_tree_panel->set_owner(this);
         }
+        */
     }
     if (p_what == NOTIFICATION_PROCESS) {
         _update_gizmo_scale();
@@ -377,9 +379,6 @@ void VFXEditorNode::_ensure_scene_container() {
 // ============================================================================
 // SCENE TREE INTEGRATION
 // ============================================================================
-void VFXEditorNode::_on_scene_node_selected(Ref<VFXSceneNode> p_node) {
-    set_active_scene_node(p_node);
-}
 
 void VFXEditorNode::mark_scene_dirty() {
     scene_visuals_dirty = true;
@@ -891,9 +890,9 @@ void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
     } else {
         if (mesh_instance) mesh_instance->set_visible(true);
     }
-    if (scene_tree_panel) {
-        scene_tree_panel->set_scene(scene);
-    }
+   // if (scene_tree_panel) {
+       // scene_tree_panel->set_scene(scene);
+    
     mark_scene_dirty();
 }
 
