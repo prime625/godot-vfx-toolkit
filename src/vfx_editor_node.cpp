@@ -871,6 +871,7 @@ void VFXEditorNode::set_selected_bone(int idx) {
     selected_face = -1;
     selected_edge = -1;
     selected_vertex = -1;
+    active_scene_node = Ref<VFXSceneNode>();
     if (selection_visual) _build_selection_mesh();
 
     _update_gizmo_visibility();
