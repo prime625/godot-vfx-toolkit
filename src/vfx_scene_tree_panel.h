@@ -60,7 +60,7 @@ private:
     void _on_search_text_changed(const String& text);
     void _on_add_pressed();
     void _on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx);
-
+    void _on_tree_cell_selected(int column);
     void _sync_selection_to_scene();
     void _sync_expansion_to_scene();
     void _reparent_item(TreeItem* item, TreeItem* new_parent);
