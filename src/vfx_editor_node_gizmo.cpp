@@ -682,7 +682,16 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
         Transform3D local = parent_world.affine_inverse() * gizmo_transform;
+
+        // FIX: gizmo is at bone head (parent joint). For rotation/scale,
+        // gizmo_transform.origin equals parent_world.origin, which converts
+        // to local zero and collapses the bone. Preserve original local position.
+        if (gizmo_mode != GIZMO_TRANSLATE) {
+            local.set_origin(skeleton->get_bone_local_position(selected_bone));
+        }
+
         skeleton->set_bone_pose(selected_bone, local);
+
 
         if (symmetry_enabled) {
             int sym_bone = skeleton->get_symmetric_bone(selected_bone);
