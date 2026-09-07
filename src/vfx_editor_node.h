@@ -146,7 +146,7 @@ private:
     float select_pixel_tolerance = 8.0f;
     float gizmo_screen_scale = 1.0f;
     float gizmo_select_pixel_tolerance = 12.0f;
-
+    float gizmo_priority = 0.6f;          // 0 = mesh always wins, 1 = gizmo always wins
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
     int gizmo_drag_axis = GIZMO_NONE;
@@ -357,6 +357,9 @@ public:
     void set_gizmo_select_pixel_tolerance(float px);
     float get_gizmo_select_pixel_tolerance() const;
     float bone_selection_radius = 0.05;
+    void set_gizmo_priority(float p);
+    float get_gizmo_priority() const;
+
     void set_bone_selection_radius(float radius);
     float get_bone_selection_radius() const;
 
