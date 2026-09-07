@@ -269,15 +269,23 @@ void VFXEditorNode::_notification(int p_what) {
         _update_gizmo_scale();
         _update_origin_indicator();
 
+        // CRITICAL: mesh_instance must NEVER be visible in scene mode
+        if (mesh_instance) {
+            mesh_instance->set_visible(!scene.is_valid());
+        }
+
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
         }
 
-        // Dirty-flagged scene sync â€” only rebuilds when data changes
-        if (scene.is_valid() && scene_visuals_dirty) {
-            scene_visuals_dirty = false;
-            _sync_scene_visuals();
-        } else if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights && !scene.is_valid()) {
+        // Scene visuals: update transforms every frame (cheap), full rebuild only when dirty
+        if (scene.is_valid()) {
+            _update_scene_visual_transforms();
+            if (scene_visuals_dirty) {
+                scene_visuals_dirty = false;
+                _sync_scene_visuals();
+            }
+        } else if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
             _update_godot_mesh();
         }
 
@@ -316,8 +324,10 @@ void VFXEditorNode::_ensure_mesh_instance() {
         mesh_instance = memnew(MeshInstance3D);
         add_child(mesh_instance);
         mesh_instance->set_owner(this);
+        mesh_instance->set_visible(!scene.is_valid());
     }
 }
+
 
 void VFXEditorNode::_ensure_brush_cursor() {
     if (!brush_cursor) {
@@ -989,8 +999,10 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
 
     // IMMEDIATE: update all scene visual transforms so children follow parent
     _update_scene_visual_transforms();
-    mark_scene_dirty(); // full mesh data rebuild deferred to next process frame
+    mark_scene_dirty();
 }
+
+
 
 
 
