@@ -674,6 +674,8 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             local = parent->get_global_transform().affine_inverse() * global;
         }
         active_scene_node->set_local_transform(local);
+        // Immediate transform update — children follow parent without frame delay
+        _update_scene_visual_transforms();
         mark_scene_dirty();
         return;
     }
