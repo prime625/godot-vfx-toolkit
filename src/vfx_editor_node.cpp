@@ -1133,6 +1133,29 @@ void VFXEditorNode::_sync_scene_visuals() {
     }
 }
 
+void VFXEditorNode::_update_scene_visual_transforms() {
+    if (scene.is_null() || !scene_container) return;
+    if (!scene->get_root().is_valid()) return;
+    _update_scene_visual_transforms_recursive(scene->get_root());
+}
+
+void VFXEditorNode::_update_scene_visual_transforms_recursive(const Ref<VFXSceneNode>& p_node) {
+    if (p_node.is_null() || !p_node->is_visible()) return;
+
+    if (p_node->get_node_type() == VFXSceneNode::NODE_MESH && p_node->has_mesh()) {
+        uint64_t id = p_node->get_instance_id();
+        MeshInstance3D** ptr = scene_visuals.getptr(id);
+        if (ptr) {
+            (*ptr)->set_transform(p_node->get_global_transform());
+        }
+    }
+
+    for (int i = 0; i < p_node->get_child_count(); ++i) {
+        _update_scene_visual_transforms_recursive(p_node->get_child(i));
+    }
+}
+
+
 void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used) {
     if (p_node.is_null() || !p_node->is_visible()) return;
 
