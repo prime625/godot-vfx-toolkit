@@ -72,7 +72,8 @@ void VFXSceneTreePanel::_notification(int p_what) {
         tree->connect("item_activated", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_activated));
         tree->connect("nothing_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_nothing_selected));
         tree->connect("item_mouse_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_mouse_selected));
-
+        // Fallback: cell_selected fires more reliably on mobile than item_selected
+        tree->connect("cell_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_cell_selected));
         // Load icons (fallback to empty if not found)
         ResourceLoader* rl = ResourceLoader::get_singleton();
         icon_mesh = rl->load("res://addons/vfx_toolkit/icons/mesh.svg");
@@ -117,6 +118,12 @@ void VFXSceneTreePanel::force_rebuild() {
 void VFXSceneTreePanel::_clear_tree_maps() {
     node_to_item.clear();
     item_to_node.clear();
+}
+
+
+void VFXSceneTreePanel::_on_tree_cell_selected(int column) {
+    if (syncing) return;
+    _sync_selection_to_scene();
 }
 
 Ref<Texture2D> VFXSceneTreePanel::_get_icon_for_type(int type) const {
@@ -353,13 +360,19 @@ void VFXSceneTreePanel::_on_add_pressed() {
 }
 
 void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx) {
+    TreeItem* item = tree->get_item_at_position(mouse_pos);
+    if (!item) return;
+    
     if (mouse_button_idx == MOUSE_BUTTON_RIGHT) {
-        TreeItem* item = tree->get_item_at_position(mouse_pos);
-        if (item) {
-            tree->deselect_all();
-            item->select(0);
-            _sync_selection_to_scene();
-        }
+        tree->deselect_all();
+        item->select(0);
+        _sync_selection_to_scene();
+    } else {
+        // LEFT click or touch — also trigger selection
+        // (item_selected signal is unreliable on some touch builds)
+        tree->deselect_all();
+        item->select(0);
+        _sync_selection_to_scene();
     }
 }
 
