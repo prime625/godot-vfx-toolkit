@@ -986,8 +986,12 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     clear_selection();
     _update_gizmo_visibility();
     _update_origin_indicator();
-    mark_scene_dirty();
+
+    // IMMEDIATE: update all scene visual transforms so children follow parent
+    _update_scene_visual_transforms();
+    mark_scene_dirty(); // full mesh data rebuild deferred to next process frame
 }
+
 
 
 Ref<VFXSceneNode> VFXEditorNode::get_active_scene_node() const { return active_scene_node; }
