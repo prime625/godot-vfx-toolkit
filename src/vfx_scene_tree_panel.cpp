@@ -20,7 +20,7 @@ void VFXSceneTreePanel::_bind_methods() {
     ADD_SIGNAL(MethodInfo("nodes_reparented"));
     ADD_SIGNAL(MethodInfo("node_visibility_changed",
     PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
-    
+
 }
 
 VFXSceneTreePanel::VFXSceneTreePanel() {}
@@ -207,7 +207,7 @@ void VFXSceneTreePanel::_build_tree_recursive(TreeItem* parent_item, const Ref<V
         TreeItem* item = tree->create_item(parent_item);
         item->set_text(0, child->get_node_name());
         item->set_icon(0, _get_icon_for_type(child->get_node_type()));
-       	item->set_metadata(0, child);  // Store the node object directly
+               item->set_metadata(0, child);  // Store the node object directly
         item->set_editable(0, true);
         item->set_selectable(0, true);
         item->set_collapsed(!child->get_expanded());
@@ -230,14 +230,14 @@ void VFXSceneTreePanel::_build_tree_recursive(TreeItem* parent_item, const Ref<V
 
 Ref<VFXSceneNode> VFXSceneTreePanel::_get_node_for_item(TreeItem* item) {
     if (!item) return Ref<VFXSceneNode>();
-    
+
     // Read node directly from metadata
     Variant meta = item->get_metadata(0);
     if (meta.get_type() == Variant::OBJECT) {
         Ref<VFXSceneNode> node = meta;
         if (node.is_valid()) return node;
     }
-    
+
     // Fallback to ID map
     if (!scene.is_valid()) return Ref<VFXSceneNode>();
     auto it = item_to_node.find(item);
@@ -257,7 +257,11 @@ TreeItem* VFXSceneTreePanel::_get_item_for_node(int node_id) const {
 // --- Signal handlers ---
 
 void VFXSceneTreePanel::_on_tree_item_selected() {
-    if (syncing) return;
+    WARN_PRINT("Tree item_selected fired");
+    if (syncing) {
+        WARN_PRINT("  -> blocked by syncing");
+        return;
+    }
     _sync_selection_to_scene();
 }
 
@@ -270,7 +274,7 @@ void VFXSceneTreePanel::_on_tree_nothing_selected() {
             if (n.is_valid()) n->set_selected(false);
         }
     }
-    emit_signal("node_selected", Variant());
+    emit_signal("node_selected", Variant((Object*)nullptr));
 }
 
 void VFXSceneTreePanel::_sync_selection_to_scene() {
@@ -288,7 +292,8 @@ void VFXSceneTreePanel::_sync_selection_to_scene() {
         Ref<VFXSceneNode> n = _get_node_for_item(sel);
         if (n.is_valid()) {
             n->set_selected(true);
-            emit_signal("node_selected", n);
+            WARN_PRINT("  -> emitting node_selected for: " + n->get_node_name());
+            emit_signal("node_selected", Variant(n.ptr()));
         }
         sel = tree->get_next_selected(sel);
     }
