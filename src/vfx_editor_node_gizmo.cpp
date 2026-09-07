@@ -558,16 +558,20 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             Vector3 rot_axis = gizmo_drag_initial_vector.cross(current_vec).normalized();
             if (rot_axis.length_squared() < 0.0001f) return;
 
-            Quaternion rot(rot_axis, angle);
             Basis new_basis;
             if (is_global_object) {
-                new_basis = Basis(rot) * gizmo_drag_start_transform.basis;   // world-space rotation
+                Quaternion rot_world(rot_axis, angle);
+                new_basis = Basis(rot_world) * gizmo_drag_start_transform.basis;
             } else {
-                new_basis = gizmo_drag_start_transform.basis * Basis(rot);   // local-space rotation
+                // Convert world-space rotation axis to gizmo-local space
+                Vector3 rot_axis_local = gizmo_drag_start_transform.basis.xform_inv(rot_axis).normalized();
+                Quaternion rot_local(rot_axis_local, angle);
+                new_basis = gizmo_drag_start_transform.basis * Basis(rot_local);
             }
             gizmo_transform.set_basis(new_basis);
             gizmo_rotation_angle = angle;
         }
+
         else {
             // === AXIS / VIEW ROTATION (tangent-space signed angle) ===
             Plane ring_plane(normal, origin);
@@ -578,8 +582,12 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             if (current_vec.length_squared() < 0.0001f) return;
             if (gizmo_drag_initial_vector.length_squared() < 0.0001f) return;
 
+            // Convert initial vector from gizmo-local (at drag start) to world space
+            Vector3 initial_vec_world = gizmo_drag_start_transform.basis.xform(gizmo_drag_initial_vector).normalized();
+
             // Project both vectors onto the ring plane
-            Vector3 v0 = gizmo_drag_initial_vector - normal * normal.dot(gizmo_drag_initial_vector);
+            Vector3 v0 = initial_vec_world - normal * normal.dot(initial_vec_world);
+
             Vector3 v1 = current_vec - normal * normal.dot(current_vec);
             if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
             v0.normalize();
@@ -855,7 +863,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
             }
 
             // Convert world-space initial vector to gizmo-local
-            Vector3 local_init = gizmo_drag_initial_vector;
+            Vector3 local_init = gizmo_transform.basis.xform_inv(gizmo_drag_initial_vector);
             if (local_init.length_squared() < 0.0001f) local_init = Vector3(1,0,0);
 
             // Build ring-plane basis
