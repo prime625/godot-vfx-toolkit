@@ -382,9 +382,6 @@ void VFXEditorNode::_ensure_scene_container() {
 
 void VFXEditorNode::mark_scene_dirty() {
     scene_visuals_dirty = true;
-    if (scene_tree_panel) {
-        scene_tree_panel->mark_dirty();
-    }
 }
 
 // ============================================================================
@@ -892,7 +889,7 @@ void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
     }
    // if (scene_tree_panel) {
        // scene_tree_panel->set_scene(scene);
-    
+
     mark_scene_dirty();
 }
 
