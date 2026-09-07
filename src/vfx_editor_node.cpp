@@ -250,6 +250,7 @@ void VFXEditorNode::_notification(int p_what) {
         _ensure_gizmo_node();
         _ensure_skeleton_visual();
         _ensure_selection_visual();
+        _ensure_origin_indicator();
         _ensure_scene_container();
 
         // Create scene tree panel (hidden by default, UI script toggles visibility)
@@ -266,6 +267,8 @@ void VFXEditorNode::_notification(int p_what) {
     }
     if (p_what == NOTIFICATION_PROCESS) {
         _update_gizmo_scale();
+        _update_origin_indicator();
+
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
         }
@@ -348,6 +351,55 @@ void VFXEditorNode::_ensure_gizmo_node() {
         gizmo_node->set_owner(this);
     }
 }
+
+void VFXEditorNode::_ensure_origin_indicator() {
+    if (!origin_indicator) {
+        origin_indicator = memnew(MeshInstance3D);
+        Ref<SphereMesh> sm;
+        sm.instantiate();
+        sm->set_radius(1.0f);
+        sm->set_height(2.0f);
+        origin_indicator->set_mesh(sm);
+
+        Ref<StandardMaterial3D> mat;
+        mat.instantiate();
+        mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
+        mat->set_albedo(Color(1.0f, 0.5f, 0.0f, 1.0f));
+        mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
+        origin_indicator->set_material_override(mat);
+        origin_indicator->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+        origin_indicator->set_visible(false);
+
+        add_child(origin_indicator);
+        origin_indicator->set_owner(this);
+    }
+}
+
+void VFXEditorNode::_update_origin_indicator() {
+    if (!origin_indicator) return;
+    if (active_scene_node.is_valid() && edit_mode == MODE_OBJECT) {
+        Vector3 pos = active_scene_node->get_global_transform().get_origin();
+        origin_indicator->set_position(pos);
+
+        if (camera) {
+            float dist = camera->get_global_transform().get_origin().distance_to(pos);
+            if (dist < 0.001f) dist = 0.001f;
+            float vp_h = 1080.0f;
+            if (get_viewport()) vp_h = get_viewport()->get_visible_rect().size.y;
+            if (vp_h < 1.0f) vp_h = 1.0f;
+            float fov = camera->get_fov();
+            float fov_rad = Math::deg_to_rad(fov);
+            float world_size = dist * tanf(fov_rad * 0.5f) * 2.0f * (6.0f / vp_h);
+            origin_indicator->set_scale(Vector3(world_size, world_size, world_size));
+        } else {
+            origin_indicator->set_scale(Vector3(0.03f, 0.03f, 0.03f));
+        }
+        origin_indicator->set_visible(true);
+    } else {
+        origin_indicator->set_visible(false);
+    }
+}
+
 
 void VFXEditorNode::_ensure_selection_visual() {
     if (!selection_visual) {
@@ -901,18 +953,29 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     if (active_scene_node.is_null()) {
         clear_selection();
         _update_gizmo_visibility();
+        _update_origin_indicator();
         mark_scene_dirty();
         emit_signal("mesh_changed", Ref<VFXMesh>());
-
         return;
     }
 
-    // Swap viewport content from the scene node (shared Refs, so edits propagate back)
-    set_vfx_mesh(active_scene_node->get_mesh());
-    set_vfx_skeleton(active_scene_node->get_skeleton());
-    set_vfx_skin(active_scene_node->get_skin());
-    set_vfx_animator(active_scene_node->get_animator());
-    emit_signal("mesh_changed", Ref<VFXMesh>());
+    // Only swap resources if the node actually has them.
+    // Prevents clearing mesh/skeleton when selecting empty/armature nodes.
+    if (active_scene_node->has_mesh()) {
+        set_vfx_mesh(active_scene_node->get_mesh());
+    }
+    if (active_scene_node->has_skeleton()) {
+        set_vfx_skeleton(active_scene_node->get_skeleton());
+    }
+    if (active_scene_node->has_skin()) {
+        set_vfx_skin(active_scene_node->get_skin());
+    }
+    if (active_scene_node->has_animator()) {
+        set_vfx_animator(active_scene_node->get_animator());
+    }
+
+    emit_signal("mesh_changed", active_scene_node->get_mesh());
+
     // Update transform gizmo to match node's world transform
     set_gizmo_transform(active_scene_node->get_global_transform());
 
@@ -922,8 +985,10 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     }
     clear_selection();
     _update_gizmo_visibility();
+    _update_origin_indicator();
     mark_scene_dirty();
 }
+
 
 Ref<VFXSceneNode> VFXEditorNode::get_active_scene_node() const { return active_scene_node; }
 
