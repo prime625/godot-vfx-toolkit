@@ -481,6 +481,27 @@ PackedInt32Array VFXEditorNode::screen_select_box(const Rect2& screen_rect) cons
     return result;
 }
 
+
+float VFXEditorNode::_bone_screen_distance(const Vector2& screen_pos, int bone_idx) const {
+    if (!camera || !skeleton.is_valid() || bone_idx < 0) return 1e10f;
+
+    // Bone position in world space
+    Vector3 bone_pos = skeleton->get_bone_model_transform(bone_idx).get_origin();
+    Vector2 bone_screen = camera->unproject_position(bone_pos);
+
+    // Bone parent position (for shaft center)
+    int parent = skeleton->get_bone_parent(bone_idx);
+    Vector3 parent_pos = bone_pos;
+    if (parent >= 0)
+        parent_pos = skeleton->get_bone_model_transform(parent).get_origin();
+    Vector2 parent_screen = camera->unproject_position(parent_pos);
+
+    // Distance to the bone shaft line segment
+    return Math::sqrt(_point_segment_dist_sq_2d(screen_pos, parent_screen, bone_screen));
+}
+
+
+
 void VFXEditorNode::box_select(const Rect2& screen_rect) {
     PackedInt32Array hits = screen_select_box(screen_rect);
     if (hits.size() == 0) {
