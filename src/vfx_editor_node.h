@@ -224,7 +224,8 @@ private:
     Ref<ArrayMesh> _build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone);
     void _sync_scene_visuals();
     void _sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used);
-
+    void _update_scene_visual_transforms();
+    void _update_scene_visual_transforms_recursive(const Ref<VFXSceneNode>& p_node);
     // Gizmo raycast / drag
     float _ray_plane_intersect(const Vector3& ro, const Vector3& rd, const Vector3& pn, float pd) const;
     float _ray_sphere_intersect(const Vector3& ro, const Vector3& rd, const Vector3& sc, float sr) const;
