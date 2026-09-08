@@ -704,7 +704,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         if (gizmo_mode == GIZMO_TRANSLATE) {
             // Move the bone's tail by the same delta the gizmo moved (in parent-local space)
             Vector3 delta_world = gizmo_transform.get_origin() - gizmo_drag_start_transform.get_origin();
-            Vector3 delta_local = parent_world.basis.inverse() * delta_world;
+            Vector3 delta_local = parent_world.basis.xform_inv(delta_world);
             new_local.set_origin(old_local.get_origin() + delta_local);
         }
         else {
@@ -728,7 +728,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         if (symmetry_enabled) {
             int sym_bone = skeleton->get_symmetric_bone(selected_bone);
             if (sym_bone >= 0) {
-                Transform3D mirrored_local = local;
+                Transform3D mirrored_local = new_local;
                 Vector3 pos = mirrored_local.get_origin();
                 if (symmetry_axis == 0) pos.x = -pos.x;
                 else if (symmetry_axis == 1) pos.y = -pos.y;
