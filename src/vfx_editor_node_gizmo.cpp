@@ -469,7 +469,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
                 gizmo_drag_start_point = hit;
                 gizmo_drag_initial_vector = (hit - origin).normalized();
                 if (gizmo_drag_initial_vector.length_squared() < 0.0001f) {
-                    // Fallback: pick a perpendicular vector
+                    // Fallback: pick a perpendicular vector in world space
                     Vector3 perp = (fabs(normal.dot(Vector3(0,1,0))) < 0.9f) ? Vector3(0,1,0) : Vector3(1,0,0);
                     gizmo_drag_initial_vector = normal.cross(perp).normalized();
                 }
@@ -483,6 +483,7 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
             if (vfx_editor::ray_vs_plane(ray_origin, ray_dir, gizmo_drag_plane, hit)) {
                 gizmo_drag_start_point = hit;
                 gizmo_drag_initial_vector = (hit - origin).normalized();
+            }
             gizmo_is_trackball = true;
         }
 
@@ -571,7 +572,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             gizmo_transform.set_basis(new_basis);
             gizmo_rotation_angle = angle;
         }
-
         else {
             // === AXIS / VIEW ROTATION (tangent-space signed angle) ===
             Plane ring_plane(normal, origin);
@@ -587,7 +587,6 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
             // Project both vectors onto the ring plane
             Vector3 v0 = initial_vec_world - normal * normal.dot(initial_vec_world);
-
             Vector3 v1 = current_vec - normal * normal.dot(current_vec);
             if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
             v0.normalize();
