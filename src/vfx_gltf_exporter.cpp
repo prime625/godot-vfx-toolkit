@@ -984,7 +984,37 @@ bool VFXGLTFExporter::export_glb_animated(const Ref<VFXMesh>& mesh, const Ref<VF
             PackedInt32Array packed_children = skeleton->get_bone_children(i);
             std::vector<int> ch;
             for (int j = 0; j < packed_children.size(); j++) ch.push_back(packed_children[j]);
-            nodes.append(_build_node_bone(i, ch));
+
+            Dictionary bone_node;
+            bone_node["name"] = skeleton->get_bone_name(i);
+            if (!ch.empty()) {
+                Array children_arr;
+                for (int c : ch) children_arr.append(c);
+                bone_node["children"] = children_arr;
+            }
+
+            Vector3 pos = skeleton->get_bone_local_position(i);
+            Quaternion rot = skeleton->get_bone_local_rotation(i);
+            Vector3 scale = skeleton->get_bone_local_scale(i);
+
+            if (!pos.is_zero_approx()) {
+                Array t;
+                t.append(pos.x); t.append(pos.y); t.append(pos.z);
+                bone_node["translation"] = t;
+            }
+            if (!Math::is_zero_approx(rot.x) || !Math::is_zero_approx(rot.y) ||
+                !Math::is_zero_approx(rot.z) || !Math::is_equal_approx(rot.w, 1.0f)) {
+                Array r;
+                r.append(rot.x); r.append(rot.y); r.append(rot.z); r.append(rot.w);
+                bone_node["rotation"] = r;
+            }
+            if (!Math::is_equal_approx(scale.x, 1.0f) || !Math::is_equal_approx(scale.y, 1.0f) || !Math::is_equal_approx(scale.z, 1.0f)) {
+                Array s;
+                s.append(scale.x); s.append(scale.y); s.append(scale.z);
+                bone_node["scale"] = s;
+            }
+
+            nodes.append(bone_node);
         }
 
         // Inverse bind matrices
