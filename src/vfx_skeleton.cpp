@@ -427,31 +427,30 @@ void VFXSkeleton::from_godot_skeleton(const Object* skeleton_obj) {
         add_bone(name, parent);
     }
 
-    // Second pass: set local transforms and bind poses
+    // Second pass: set local transforms and bind poses.
+    // In Godot 4, bone_global = parent_global * rest * pose, i.e. get_bone_pose()
+    // is RELATIVE to the bone's rest. The actual current local transform is
+    // rest * pose — using pose alone puts bones at wrong (usually near-origin)
+    // positions whenever the skeleton is posed.
     for (int i = 0; i < bone_count; i++) {
-        // Local rest pose (bind pose)
         Transform3D rest = skel->get_bone_rest(i);
         set_bone_bind_pose(i, rest);
 
-        // Local transform (current pose, defaults to rest)
-        Transform3D pose = skel->get_bone_pose(i);
-        if (pose == Transform3D()) {
-            pose = rest; // fallback to rest if pose is identity (unposed)
-        }
+        Transform3D local = rest * skel->get_bone_pose(i);
 
-        set_bone_local_position(i, pose.get_origin());
-        set_bone_local_rotation(i, pose.get_basis().get_rotation_quaternion());
-        set_bone_local_scale(i, pose.get_basis().get_scale());
+        set_bone_local_position(i, local.get_origin());
+        set_bone_local_rotation(i, local.get_basis().get_rotation_quaternion());
+        set_bone_local_scale(i, local.get_basis().get_scale());
     }
 
-    // Build name map and compute model transforms
     update_transforms();
 
-    // Verify: if any bone has invalid model transform, fall back to rest
+    // Verify: if any bone has an invalid model transform, fall back to rest
     for (int i = 0; i < bone_count; i++) {
         Transform3D model = get_bone_model_transform(i);
-        if (model == Transform3D() || !Math::is_finite(model.get_origin().x)) {
-            // Reset to bind pose if corrupted
+        if (!Math::is_finite(model.get_origin().x) ||
+            !Math::is_finite(model.get_origin().y) ||
+            !Math::is_finite(model.get_origin().z)) {
             Transform3D rest = skel->get_bone_rest(i);
             set_bone_local_position(i, rest.get_origin());
             set_bone_local_rotation(i, rest.get_basis().get_rotation_quaternion());
