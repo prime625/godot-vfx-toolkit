@@ -321,6 +321,7 @@ public:
     int get_gizmo_mode() const;
     void set_gizmo_transform(const Transform3D& t);
     Transform3D get_gizmo_transform() const;
+    Transform3D _get_armature_transform() const;
     int raycast_gizmo(const Vector3& ray_origin, const Vector3& ray_dir);
     void gizmo_begin_drag(int axis, const Vector3& ray_origin, const Vector3& ray_dir);
     void gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir);
