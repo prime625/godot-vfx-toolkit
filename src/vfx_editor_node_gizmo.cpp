@@ -559,15 +559,12 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             Vector3 rot_axis = gizmo_drag_initial_vector.cross(current_vec).normalized();
             if (rot_axis.length_squared() < 0.0001f) return;
 
+            Quaternion rot(rot_axis, angle);
             Basis new_basis;
             if (is_global_object) {
-                Quaternion rot_world(rot_axis, angle);
-                new_basis = Basis(rot_world) * gizmo_drag_start_transform.basis;
+                new_basis = Basis(rot) * gizmo_drag_start_transform.basis;   // world-space rotation
             } else {
-                // Convert world-space rotation axis to gizmo-local space
-                Vector3 rot_axis_local = gizmo_drag_start_transform.basis.xform_inv(rot_axis).normalized();
-                Quaternion rot_local(rot_axis_local, angle);
-                new_basis = gizmo_drag_start_transform.basis * Basis(rot_local);
+                new_basis = gizmo_drag_start_transform.basis * Basis(rot);   // local-space rotation
             }
             gizmo_transform.set_basis(new_basis);
             gizmo_rotation_angle = angle;
@@ -582,13 +579,8 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             if (current_vec.length_squared() < 0.0001f) return;
             if (gizmo_drag_initial_vector.length_squared() < 0.0001f) return;
 
- 
-            // gizmo_drag_initial_vector is already stored in world space
-            Vector3 initial_vec_world = gizmo_drag_initial_vector;
-
-
             // Project both vectors onto the ring plane
-            Vector3 v0 = initial_vec_world - normal * normal.dot(initial_vec_world);
+            Vector3 v0 = gizmo_drag_initial_vector - normal * normal.dot(gizmo_drag_initial_vector);
             Vector3 v1 = current_vec - normal * normal.dot(current_vec);
             if (v0.length_squared() < 0.0001f || v1.length_squared() < 0.0001f) return;
             v0.normalize();
@@ -689,18 +681,48 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
     }
 
     if (selected_bone >= 0 && skeleton.is_valid()) {
+        skeleton->update_transforms();
+
         int parent = skeleton->get_bone_parent(selected_bone);
         Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
-        Transform3D local = parent_world.affine_inverse() * gizmo_transform;
 
-        // FIX: gizmo is at bone head (parent joint). For rotation/scale,
-        // gizmo_transform.origin equals parent_world.origin, which converts
-        // to local zero and collapses the bone. Preserve original local position.
-        if (gizmo_mode != GIZMO_TRANSLATE) {
-            local.set_origin(skeleton->get_bone_local_position(selected_bone));
+        // Old local transform of the selected bone
+        Transform3D old_local;
+        {
+            Basis rot_basis(skeleton->get_bone_local_rotation(selected_bone));
+            rot_basis = rot_basis.scaled(skeleton->get_bone_local_scale(selected_bone));
+            old_local.set_basis(rot_basis);
+            old_local.set_origin(skeleton->get_bone_local_position(selected_bone));
         }
 
-        skeleton->set_bone_pose(selected_bone, local);
+        // New basis from gizmo (in parent-local space)
+        Basis new_basis = (parent_world.affine_inverse() * gizmo_transform).get_basis();
+
+        Transform3D new_local;
+        new_local.set_basis(new_basis);
+
+        if (gizmo_mode == GIZMO_TRANSLATE) {
+            // Move the bone's tail by the same delta the gizmo moved (in parent-local space)
+            Vector3 delta_world = gizmo_transform.get_origin() - gizmo_drag_start_transform.get_origin();
+            Vector3 delta_local = parent_world.basis.inverse() * delta_world;
+            new_local.set_origin(old_local.get_origin() + delta_local);
+        }
+        else {
+            // For rotation/scale: pivot around bone head.
+            // The bone's local position must rotate/scale with the bone.
+            // new_tail - head = delta_basis * (old_tail - head)
+            // In parent-local space: new_local.origin = delta_basis * old_local.origin
+            Basis old_basis = old_local.get_basis();
+            float det = old_basis.determinant();
+            if (fabs(det) > 0.0001f) {
+                Basis delta_basis = new_basis * old_basis.inverse();
+                new_local.set_origin(delta_basis.xform(old_local.get_origin()));
+            } else {
+                new_local.set_origin(old_local.get_origin());
+            }
+        }
+
+        skeleton->set_bone_pose(selected_bone, new_local);
 
 
         if (symmetry_enabled) {
@@ -864,7 +886,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
             }
 
             // Convert world-space initial vector to gizmo-local
-            Vector3 local_init = gizmo_transform.basis.xform_inv(gizmo_drag_initial_vector);
+            Vector3 local_init = gizmo_drag_initial_vector;
             if (local_init.length_squared() < 0.0001f) local_init = Vector3(1,0,0);
 
             // Build ring-plane basis
