@@ -246,7 +246,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
             : pos;
 
         bool is_selected = false;
-        Color tint = Color(1.0f, 1.0f, 1.0f);
+        Color tint = Color(0.55f, 0.62f, 0.72f);
 
         if (use_custom) {
             // --- CUSTOM MESH MODE ---
@@ -282,8 +282,8 @@ void VFXEditorNode::_build_skeleton_mesh() {
             float bone_r = bone_shaft_radius;
             float joint_r = bone_joint_radius;
 
-            Color bone_col = Color(1.0f, 1.0f, 1.0f);
-            Color joint_col = Color(1.0f, 1.0f, 1.0f);
+            Color bone_col = Color(0.55f, 0.62f, 0.72f);
+            Color joint_col = Color(0.55f, 0.62f, 0.72f);
 
             // Tapered pyramid shaft: wide base at parent, sharp apex at child
             if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
@@ -338,7 +338,8 @@ void VFXEditorNode::_build_skeleton_mesh() {
             ? skeleton->get_bone_model_transform(parent).get_origin()
             : pos;
 
-        Color tint = Color(1.0f, 0.92f, 0.35f);
+        // DEEP ORANGE — saturated, dark, impossible to miss
+        Color tint = Color(0.95f, 0.35f, 0.02f);
 
         if (use_custom) {
             if (parent >= 0) {
@@ -372,8 +373,9 @@ void VFXEditorNode::_build_skeleton_mesh() {
             float bone_r = bone_shaft_radius;
             float joint_r = bone_joint_radius;
 
-            Color bone_col = Color(1.0f, 0.95f, 0.5f);
-            Color joint_col = Color(1.0f, 0.92f, 0.35f);
+            // DEEP ORANGE — shaft slightly darker than joint for depth
+            Color bone_col = Color(0.95f, 0.35f, 0.02f);
+            Color joint_col = Color(1.0f, 0.42f, 0.05f);
 
             if (parent >= 0 && (pos - parent_pos).length() > 0.0001f) {
                 Vector3 dir = pos - parent_pos;
@@ -429,7 +431,7 @@ void VFXEditorNode::_build_skeleton_mesh() {
     Ref<StandardMaterial3D> mat;
     mat.instantiate();
     mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
-    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    mat->set_shading_mode(StandardMaterial3D::SHADING_MODE_UNSHADED);
     mat->set_transparency(StandardMaterial3D::TRANSPARENCY_ALPHA);
     mat->set_flag(StandardMaterial3D::FLAG_DISABLE_DEPTH_TEST, true);
     skel_visual->set_material_override(mat);
