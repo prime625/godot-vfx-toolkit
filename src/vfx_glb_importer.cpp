@@ -258,7 +258,7 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
                 int skin_idx = nodes[i].skin;
 
                 if (!built_skeletons[skin_idx].is_valid()) {
-                    built_skeletons[skin_idx] = _build_skeleton(skins[skin_idx], error);
+                    built_skeletons[skin_idx] = _build_skeleton(skins[skin_idx], i, error);
                 }
 
                 if (built_skeletons[skin_idx].is_valid()) {
@@ -984,7 +984,7 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
     return mesh;
 }
 
-Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String& out_error) {
+Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int owner_node_idx, String& out_error) {
     Ref<VFXSkeleton> skeleton;
     skeleton.instantiate();
 
@@ -1021,10 +1021,34 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String
         skeleton->add_bone(name, parent_bone);
     }
 
+    // Bind poses must be expressed relative to the node that will OWN the
+    // skeleton in the VFX scene — the mesh node carrying the skin (import_glb
+    // attaches the skeleton to that same node, and the exporter parents the
+    // bone roots under it and computes IBMs as inverse(owner_global * bind)).
+    // Using any other node here (e.g. the armature) offsets the exported
+    // skeleton by (mesh_global * owner_global^-1).
+    Transform3D owner_global;
+    {
+        int n = owner_node_idx;
+        if (n < 0) {
+            // Fallback: nearest non-joint ancestor of the skeleton root
+            if (glb_skin.skeleton_root >= 0 && glb_skin.skeleton_root < (int)nodes.size()) {
+                n = nodes[glb_skin.skeleton_root].parent;
+            } else if (joint_count > 0) {
+                n = nodes[glb_skin.joints[0]].parent;
+            }
+        }
+        while (n >= 0 && n < (int)nodes.size()) {
+            owner_global = owner_global * _get_node_local_transform(nodes[n]);
+            n = nodes[n].parent;
+        }
+    }
+    Transform3D owner_inv = owner_global.affine_inverse();
+
     std::vector<Transform3D> bind_poses(joint_count);
     for (int i = 0; i < joint_count; i++) {
         Transform3D ibm = _gltf_to_godot_t(ibms[i]);
-        bind_poses[i] = ibm.affine_inverse();
+        bind_poses[i] = owner_inv * ibm.affine_inverse();
     }
 
     for (int i = 0; i < joint_count; i++) {
@@ -1047,6 +1071,7 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, String
     skeleton->update_transforms();
     return skeleton;
 }
+
 
 void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone) {
     for (const GLBAnimation& anim : animations) {
