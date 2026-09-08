@@ -1430,14 +1430,18 @@ Transform3D VFXEditorNode::_get_active_mesh_transform() const {
 
 Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
     if (skeleton.is_null() || bone_idx < 0) return Transform3D();
-    Transform3D bone_world = skeleton->get_bone_model_transform(bone_idx);
+
+    Transform3D armature = _get_armature_transform();
+    Transform3D bone_local = skeleton->get_bone_model_transform(bone_idx);
     int parent = skeleton->get_bone_parent(bone_idx);
+
     Vector3 gizmo_origin = (parent >= 0)
-        ? skeleton->get_bone_model_transform(parent).get_origin()
-        : bone_world.get_origin();
+        ? armature.xform(skeleton->get_bone_model_transform(parent).get_origin())
+        : armature.xform(bone_local.get_origin());
+
     Transform3D result;
     result.set_origin(gizmo_origin);
-    result.basis = bone_world.basis;
+    result.basis = armature.basis * bone_local.basis;
     return result;
 }
 
