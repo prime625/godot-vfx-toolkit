@@ -240,9 +240,10 @@ void VFXEditorNode::_build_skeleton_mesh() {
         if (i == selected_bone) continue; // skip selected, draw it last
 
         int parent = skeleton->get_bone_parent(i);
-        Vector3 pos = skeleton->get_bone_model_transform(i).get_origin();
+        Transform3D armature = _get_armature_transform();
+        Vector3 pos = armature.xform(skeleton->get_bone_model_transform(i).get_origin());
         Vector3 parent_pos = (parent >= 0)
-            ? skeleton->get_bone_model_transform(parent).get_origin()
+            ? armature.xform(skeleton->get_bone_model_transform(parent).get_origin())
             : pos;
 
         bool is_selected = false;
@@ -333,10 +334,12 @@ void VFXEditorNode::_build_skeleton_mesh() {
     if (selected_bone >= 0 && selected_bone < skeleton->get_bone_count()) {
         int i = selected_bone;
         int parent = skeleton->get_bone_parent(i);
-        Vector3 pos = skeleton->get_bone_model_transform(i).get_origin();
+        Transform3D armature = _get_armature_transform();
+        Vector3 pos = armature.xform(skeleton->get_bone_model_transform(i).get_origin());
         Vector3 parent_pos = (parent >= 0)
-            ? skeleton->get_bone_model_transform(parent).get_origin()
+            ? armature.xform(skeleton->get_bone_model_transform(parent).get_origin())
             : pos;
+
 
         // DEEP ORANGE — saturated, dark, impossible to miss
         Color tint = Color(0.95f, 0.35f, 0.02f);
