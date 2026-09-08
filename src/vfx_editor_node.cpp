@@ -1440,3 +1440,10 @@ Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
     result.basis = bone_world.basis;
     return result;
 }
+
+Transform3D VFXEditorNode::_get_armature_transform() const {
+    if (active_scene_node.is_valid() && active_scene_node->has_skeleton()) {
+        return active_scene_node->get_global_transform();
+    }
+    return Transform3D();
+}
