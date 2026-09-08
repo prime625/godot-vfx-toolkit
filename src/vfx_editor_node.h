@@ -148,7 +148,7 @@ private:
     float select_pixel_tolerance = 8.0f;
     float gizmo_screen_scale = 1.0f;
     float gizmo_select_pixel_tolerance = 12.0f;
-    float gizmo_priority = 0.6f;          // 0 = mesh always wins, 1 = gizmo always wins
+    float gizmo_priority = 0.35f;          // 0 = mesh always wins, 1 = gizmo always wins
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
     int gizmo_drag_axis = GIZMO_NONE;
