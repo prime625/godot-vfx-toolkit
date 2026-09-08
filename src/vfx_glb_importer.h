@@ -128,7 +128,7 @@ private:
     Transform3D _get_node_local_transform(const GLBNode& node) const;
 
     Ref<VFXMesh> _build_mesh(const GLBMesh& glb_mesh, String& out_error);
-    Ref<VFXSkeleton> _build_skeleton(const GLBSkin& glb_skin, String& out_error);
+    Ref<VFXSkeleton> _build_skeleton(const GLBSkin& glb_skin, int owner_node_idx, String& out_error);
     void _build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone);
     void _clear_document();
 
