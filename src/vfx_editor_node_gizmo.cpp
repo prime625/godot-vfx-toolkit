@@ -582,8 +582,10 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             if (current_vec.length_squared() < 0.0001f) return;
             if (gizmo_drag_initial_vector.length_squared() < 0.0001f) return;
 
-            // Convert initial vector from gizmo-local (at drag start) to world space
-            Vector3 initial_vec_world = gizmo_drag_start_transform.basis.xform(gizmo_drag_initial_vector).normalized();
+ 
+            // gizmo_drag_initial_vector is already stored in world space
+            Vector3 initial_vec_world = gizmo_drag_initial_vector;
+
 
             // Project both vectors onto the ring plane
             Vector3 v0 = initial_vec_world - normal * normal.dot(initial_vec_world);
