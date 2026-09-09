@@ -482,12 +482,13 @@ bool VFXGLBImporter::_parse_nodes(const Array& nodes_arr) {
         if (n.has("matrix")) {
             Array m = n["matrix"];
             Basis b;
-            b[0] = Vector3(m[0], m[1], m[2]);
-            b[1] = Vector3(m[4], m[5], m[6]);
-            b[2] = Vector3(m[8], m[9], m[10]);
+            b[0] = Vector3(m[0], m[4], m[8]);
+            b[1] = Vector3(m[1], m[5], m[9]);
+            b[2] = Vector3(m[2], m[6], m[10]);
             node.matrix = Transform3D(b, Vector3(m[12], m[13], m[14]));
             node.has_matrix = true;
         }
+
         nodes.push_back(node);
     }
     for (int i = 0; i < (int)nodes.size(); i++) {
@@ -864,10 +865,11 @@ bool VFXGLBImporter::_read_accessor_mat4(int accessor_idx, std::vector<Transform
     out.resize(acc.count);
     for (int i = 0; i < acc.count; i++) {
         int b = i * 16;
+        // glTF MAT4 is COLUMN-major; Godot Basis stores ROWs.
         Basis basis;
-        basis[0] = Vector3(floats[b+0], floats[b+1], floats[b+2]);
-        basis[1] = Vector3(floats[b+4], floats[b+5], floats[b+6]);
-        basis[2] = Vector3(floats[b+8], floats[b+9], floats[b+10]);
+        basis[0] = Vector3(floats[b+0], floats[b+4], floats[b+8]);
+        basis[1] = Vector3(floats[b+1], floats[b+5], floats[b+9]);
+        basis[2] = Vector3(floats[b+2], floats[b+6], floats[b+10]);
         Vector3 origin(floats[b+12], floats[b+13], floats[b+14]);
         out[i] = Transform3D(basis, origin);
     }
