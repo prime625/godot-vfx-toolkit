@@ -58,4 +58,4 @@ GDExtensionBool GDE_EXPORT vfx_toolkit_library_init(
 	init_obj.set_minimum_library_initialization_level(MODULE_INITIALIZATION_LEVEL_SCENE);
 	return init_obj.init();
 }
-}
+} 
