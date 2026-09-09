@@ -456,11 +456,13 @@ int VFXGLTFExporter::_export_skeleton_to_gltf(const Ref<VFXSkeleton>& skeleton, 
         Basis b = ibm_t.get_basis();
         Vector3 t = ibm_t.get_origin();
         int base = i * 16;
-        ibm[base + 0] = b[0][0]; ibm[base + 1] = b[0][1]; ibm[base + 2] = b[0][2]; ibm[base + 3] = 0;
-        ibm[base + 4] = b[1][0]; ibm[base + 5] = b[1][1]; ibm[base + 6] = b[1][2]; ibm[base + 7] = 0;
-        ibm[base + 8] = b[2][0]; ibm[base + 9] = b[2][1]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
-        ibm[base + 12] = t.x;    ibm[base + 13] = t.y;    ibm[base + 14] = t.z;    ibm[base + 15] = 1;
+        // Column-major, as required by glTF:
+        ibm[base + 0]  = b[0][0]; ibm[base + 1]  = b[1][0]; ibm[base + 2]  = b[2][0]; ibm[base + 3]  = 0;
+        ibm[base + 4]  = b[0][1]; ibm[base + 5]  = b[1][1]; ibm[base + 6]  = b[2][1]; ibm[base + 7]  = 0;
+        ibm[base + 8]  = b[0][2]; ibm[base + 9]  = b[1][2]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
+        ibm[base + 12] = t.x;     ibm[base + 13] = t.y;     ibm[base + 14] = t.z;     ibm[base + 15] = 1;
     }
+
     int ibm_offset = _write_mat4_array(ibm);
     int ibm_bv = state.bufferViews.size();
     state.bufferViews.append(_build_buffer_view(0, ibm_offset, bone_count * 64, GL_ARRAY_BUFFER));
@@ -820,10 +822,11 @@ bool VFXGLTFExporter::export_glb(const Ref<VFXMesh>& mesh, const Ref<VFXSkeleton
             Basis b = ibm_t.get_basis();
             Vector3 t = ibm_t.get_origin();
             int base = i * 16;
-            ibm[base + 0] = b[0][0]; ibm[base + 1] = b[0][1]; ibm[base + 2] = b[0][2]; ibm[base + 3] = 0;
-            ibm[base + 4] = b[1][0]; ibm[base + 5] = b[1][1]; ibm[base + 6] = b[1][2]; ibm[base + 7] = 0;
-            ibm[base + 8] = b[2][0]; ibm[base + 9] = b[2][1]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
-            ibm[base + 12] = t.x;    ibm[base + 13] = t.y;    ibm[base + 14] = t.z;    ibm[base + 15] = 1;
+            // Column-major, as required by glTF:
+            ibm[base + 0]  = b[0][0]; ibm[base + 1]  = b[1][0]; ibm[base + 2]  = b[2][0]; ibm[base + 3]  = 0;
+            ibm[base + 4]  = b[0][1]; ibm[base + 5]  = b[1][1]; ibm[base + 6]  = b[2][1]; ibm[base + 7]  = 0;
+            ibm[base + 8]  = b[0][2]; ibm[base + 9]  = b[1][2]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
+            ibm[base + 12] = t.x;     ibm[base + 13] = t.y;     ibm[base + 14] = t.z;     ibm[base + 15] = 1;
         }
         int ibm_offset = _write_mat4_array(ibm);
         int ibm_bv = bufferViews.size();
@@ -1025,10 +1028,11 @@ bool VFXGLTFExporter::export_glb_animated(const Ref<VFXMesh>& mesh, const Ref<VF
             Basis b = ibm_t.get_basis();
             Vector3 t = ibm_t.get_origin();
             int base = i * 16;
-            ibm[base + 0] = b[0][0]; ibm[base + 1] = b[0][1]; ibm[base + 2] = b[0][2]; ibm[base + 3] = 0;
-            ibm[base + 4] = b[1][0]; ibm[base + 5] = b[1][1]; ibm[base + 6] = b[1][2]; ibm[base + 7] = 0;
-            ibm[base + 8] = b[2][0]; ibm[base + 9] = b[2][1]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
-            ibm[base + 12] = t.x;    ibm[base + 13] = t.y;    ibm[base + 14] = t.z;    ibm[base + 15] = 1;
+            // Column-major, as required by glTF:
+            ibm[base + 0]  = b[0][0]; ibm[base + 1]  = b[1][0]; ibm[base + 2]  = b[2][0]; ibm[base + 3]  = 0;
+            ibm[base + 4]  = b[0][1]; ibm[base + 5]  = b[1][1]; ibm[base + 6]  = b[2][1]; ibm[base + 7]  = 0;
+            ibm[base + 8]  = b[0][2]; ibm[base + 9]  = b[1][2]; ibm[base + 10] = b[2][2]; ibm[base + 11] = 0;
+            ibm[base + 12] = t.x;     ibm[base + 13] = t.y;     ibm[base + 14] = t.z;     ibm[base + 15] = 1;
         }
         int ibm_offset = _write_mat4_array(ibm);
         int ibm_bv = bufferViews.size();
