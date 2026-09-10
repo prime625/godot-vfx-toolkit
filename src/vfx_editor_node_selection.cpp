@@ -299,13 +299,14 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
 
     skeleton->update_transforms();
 
+    // Transform the world-space ray into skeleton model space,
+    // matching how _build_skeleton_mesh() draws the bones
     Transform3D inv = _get_armature_transform().affine_inverse();
     Vector3 ro = inv.xform(ray_origin);
     Vector3 rd = inv.basis.xform(ray_dir).normalized();
 
     int best = -1;
     float best_t = 1e20f;
-    Vector3 rd = ray_dir.normalized();
 
     for (int i = 0; i < skeleton->get_bone_count(); i++) {
         int parent = skeleton->get_bone_parent(i);
@@ -317,8 +318,8 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
         float t;
         float radius = bone_selection_radius;
 
-
-        if (vfx_editor::ray_vs_segment(ray_origin, rd, head, tail, radius, t)) {
+        if (vfx_editor::ray_vs_segment(ro, rd, head, tail, radius, t)) {
+            //                                        ^^ was ray_origin
             if (t < best_t) {
                 best_t = t;
                 best = i;
