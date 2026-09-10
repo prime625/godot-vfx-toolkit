@@ -299,6 +299,10 @@ int VFXEditorNode::raycast_bone(const Vector3& ray_origin, const Vector3& ray_di
 
     skeleton->update_transforms();
 
+    Transform3D inv = _get_armature_transform().affine_inverse();
+    Vector3 ro = inv.xform(ray_origin);
+    Vector3 rd = inv.basis.xform(ray_dir).normalized();
+
     int best = -1;
     float best_t = 1e20f;
     Vector3 rd = ray_dir.normalized();
