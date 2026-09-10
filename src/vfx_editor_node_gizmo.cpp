@@ -752,9 +752,12 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
         _build_skeleton_mesh();
 
-        Vector3 bone_pos = skeleton->get_bone_model_transform(selected_bone).get_origin();
-        UtilityFunctions::print("Bone ", selected_bone, " pos: ", bone_pos);
-        _update_godot_mesh();
+        // Reskin: scene-mode visuals are only rebuilt via _sync_scene_visuals()
+        if (scene.is_valid()) {
+            mark_scene_dirty();
+        } else if (auto_update) {
+            _update_godot_mesh();
+        }
     }
 }
 
