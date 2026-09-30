@@ -285,9 +285,10 @@ void VFXEditorNode::_notification(int p_what) {
                 scene_visuals_dirty = false;
                 _sync_scene_visuals();
             }
-        } else if (mesh.is_valid() && skeleton.is_valid() && skeleton->get_bone_count() > 0 && !show_weights) {
+        } else if (mesh.is_valid() && auto_update) {
             _update_godot_mesh();
         }
+
 
         if (show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
             _build_skeleton_mesh();
@@ -970,35 +971,30 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
         return;
     }
 
-    // Only swap resources if the node actually has them.
-    // Prevents clearing mesh/skeleton when selecting empty/armature nodes.
-    if (active_scene_node->has_mesh()) {
-        set_vfx_mesh(active_scene_node->get_mesh());
-    }
-    if (active_scene_node->has_skeleton()) {
-        set_vfx_skeleton(active_scene_node->get_skeleton());
-    }
-    if (active_scene_node->has_skin()) {
-        set_vfx_skin(active_scene_node->get_skin());
-    }
-    if (active_scene_node->has_animator()) {
-        set_vfx_animator(active_scene_node->get_animator());
+    // NEW: armature/empty parents inherit from their subtree
+    Ref<VFXSceneNode> src = active_scene_node;
+    if (!src->has_mesh() && !src->has_skeleton()) {
+        Array desc = src->get_all_descendants();
+        for (int i = 0; i < desc.size(); i++) {
+            Ref<VFXSceneNode> d = desc[i];
+            if (d.is_valid() && (d->has_mesh() || d->has_skeleton())) {
+                src = d;
+                break;
+            }
+        }
     }
 
-    emit_signal("mesh_changed", active_scene_node->get_mesh());
+    if (src->has_mesh())      set_vfx_mesh(src->get_mesh());         else set_vfx_mesh(Ref<VFXMesh>());
+    if (src->has_skeleton())  set_vfx_skeleton(src->get_skeleton()); else set_vfx_skeleton(Ref<VFXSkeleton>());
+    if (src->has_skin())      set_vfx_skin(src->get_skin());         else set_vfx_skin(Ref<VFXSkin>());
+    if (src->has_animator())  set_vfx_animator(src->get_animator()); else set_vfx_animator(Ref<VFXAnimator>());
 
-    // Update transform gizmo to match node's world transform
+    emit_signal("mesh_changed", src->get_mesh());
     set_gizmo_transform(active_scene_node->get_global_transform());
-
-    // Rebuild gizmo and clear mesh selection
-    if (gizmo_node) {
-        _build_gizmo_mesh();
-    }
+    if (gizmo_node) _build_gizmo_mesh();
     clear_selection();
     _update_gizmo_visibility();
     _update_origin_indicator();
-
-    // IMMEDIATE: update all scene visual transforms so children follow parent
     _update_scene_visual_transforms();
     mark_scene_dirty();
 }
@@ -1146,6 +1142,8 @@ void VFXEditorNode::_sync_scene_visuals() {
     for (const auto& pair : scene_visuals) {
         if (used.find(pair.key) == used.end()) {
             pair.value->set_visible(false);
+            // in _sync_scene_visuals, in the hiding loop:
+            WARN_PRINT("HIDING visual id=" + String::num_int64(pair.key));
         }
     }
 }
