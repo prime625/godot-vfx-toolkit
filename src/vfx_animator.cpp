@@ -100,40 +100,61 @@ void AnimationCurve::auto_compute_tangents() {
     for (size_t i = 0; i < keys.size(); i++) {
         if (keys[i].tangent_mode != VFXAnimator::TANGENT_AUTO) continue;
 
-        Vector3 prev_val = (i > 0) ? keys[i-1].vec_value : keys[0].vec_value;
-        Vector3 next_val = (i + 1 < keys.size()) ? keys[i+1].vec_value : keys.back().vec_value;
         float prev_t = (i > 0) ? keys[i-1].time : keys[0].time;
         float next_t = (i + 1 < keys.size()) ? keys[i+1].time : keys.back().time;
-
         float dt = next_t - prev_t;
         if (dt < 0.0001f) dt = 1.0f;
-
-        Vector3 slope = (next_val - prev_val) / dt;
         float dt_out = next_t - keys[i].time;
         float dt_in = keys[i].time - prev_t;
 
-        keys[i].vec_out_tangent = slope * dt_out * 0.3333f;
-        keys[i].vec_in_tangent = slope * dt_in * 0.3333f;
+        if (is_scalar) {
+            float prev_val = (i > 0) ? keys[i-1].value : keys[0].value;
+            float next_val = (i + 1 < keys.size()) ? keys[i+1].value : keys.back().value;
+            float slope = (next_val - prev_val) / dt;
+            keys[i].out_tangent = slope * dt_out * 0.3333f;
+            keys[i].in_tangent = slope * dt_in * 0.3333f;
+        } else {
+            Vector3 prev_val = (i > 0) ? keys[i-1].vec_value : keys[0].vec_value;
+            Vector3 next_val = (i + 1 < keys.size()) ? keys[i+1].vec_value : keys.back().vec_value;
+            Vector3 slope = (next_val - prev_val) / dt;
+            keys[i].vec_out_tangent = slope * dt_out * 0.3333f;
+            keys[i].vec_in_tangent = slope * dt_in * 0.3333f;
+        }
     }
 }
 
+// ------------------------------------------------------------------
+// Bindings
+// ------------------------------------------------------------------
 void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("create_clip", "name", "duration", "fps"), &VFXAnimator::create_clip);
     ClassDB::bind_method(D_METHOD("delete_clip", "idx"), &VFXAnimator::delete_clip);
     ClassDB::bind_method(D_METHOD("get_clip_count"), &VFXAnimator::get_clip_count);
     ClassDB::bind_method(D_METHOD("get_clip_name", "idx"), &VFXAnimator::get_clip_name);
+    ClassDB::bind_method(D_METHOD("set_clip_name", "idx", "name"), &VFXAnimator::set_clip_name);
     ClassDB::bind_method(D_METHOD("get_clip_duration", "idx"), &VFXAnimator::get_clip_duration);
+    ClassDB::bind_method(D_METHOD("set_clip_duration", "idx", "duration"), &VFXAnimator::set_clip_duration);
+    ClassDB::bind_method(D_METHOD("get_clip_fps", "idx"), &VFXAnimator::get_clip_fps);
+    ClassDB::bind_method(D_METHOD("set_clip_fps", "idx", "fps"), &VFXAnimator::set_clip_fps);
     ClassDB::bind_method(D_METHOD("set_clip_loop", "idx", "loop"), &VFXAnimator::set_clip_loop);
     ClassDB::bind_method(D_METHOD("get_clip_loop", "idx"), &VFXAnimator::get_clip_loop);
     ClassDB::bind_method(D_METHOD("set_clip_loop_mode", "idx", "mode"), &VFXAnimator::set_clip_loop_mode);
     ClassDB::bind_method(D_METHOD("get_clip_loop_mode", "idx"), &VFXAnimator::get_clip_loop_mode);
 
     ClassDB::bind_method(D_METHOD("add_curve", "clip_idx", "name", "bone_id", "is_rotation", "is_scale"), &VFXAnimator::add_curve);
+    ClassDB::bind_method(D_METHOD("add_node_curve", "clip_idx", "name", "node_id", "kind"), &VFXAnimator::add_node_curve);
     ClassDB::bind_method(D_METHOD("delete_curve", "clip_idx", "curve_idx"), &VFXAnimator::delete_curve);
     ClassDB::bind_method(D_METHOD("get_curve_count", "clip_idx"), &VFXAnimator::get_curve_count);
     ClassDB::bind_method(D_METHOD("get_curve_name", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_name);
     ClassDB::bind_method(D_METHOD("get_curve_bone_id", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_bone_id);
+    ClassDB::bind_method(D_METHOD("get_curve_node_id", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_node_id);
+    ClassDB::bind_method(D_METHOD("get_curve_kind", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_kind);
     ClassDB::bind_method(D_METHOD("get_curve_is_rotation", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_is_rotation);
+    ClassDB::bind_method(D_METHOD("get_curve_is_scale", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_is_scale);
+    ClassDB::bind_method(D_METHOD("get_curve_is_scalar", "clip_idx", "curve_idx"), &VFXAnimator::get_curve_is_scalar);
+    ClassDB::bind_method(D_METHOD("curve_is_bone", "clip_idx", "curve_idx"), &VFXAnimator::curve_is_bone);
+    ClassDB::bind_method(D_METHOD("curve_is_node", "clip_idx", "curve_idx"), &VFXAnimator::curve_is_node);
+    ClassDB::bind_method(D_METHOD("find_curve", "clip_idx", "bone_id", "node_id", "kind"), &VFXAnimator::find_curve);
 
     ClassDB::bind_method(D_METHOD("add_keyframe_scalar", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_scalar);
     ClassDB::bind_method(D_METHOD("add_keyframe_vector", "clip_idx", "curve_idx", "time", "value", "interp"), &VFXAnimator::add_keyframe_vector);
@@ -145,13 +166,23 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_keyframe_scalar_value", "clip_idx", "curve_idx", "key_idx", "value"), &VFXAnimator::set_keyframe_scalar_value);
     ClassDB::bind_method(D_METHOD("set_keyframe_vector_value", "clip_idx", "curve_idx", "key_idx", "value"), &VFXAnimator::set_keyframe_vector_value);
     ClassDB::bind_method(D_METHOD("set_keyframe_quaternion_value", "clip_idx", "curve_idx", "key_idx", "value"), &VFXAnimator::set_keyframe_quaternion_value);
+    ClassDB::bind_method(D_METHOD("get_keyframe_scalar_value", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_scalar_value);
+    ClassDB::bind_method(D_METHOD("get_keyframe_vector_value", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_vector_value);
+    ClassDB::bind_method(D_METHOD("get_keyframe_quaternion_value", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_quaternion_value);
     ClassDB::bind_method(D_METHOD("set_keyframe_time", "clip_idx", "curve_idx", "key_idx", "time"), &VFXAnimator::set_keyframe_time);
+
+    ClassDB::bind_method(D_METHOD("set_keyframe_interp", "clip_idx", "curve_idx", "key_idx", "interp"), &VFXAnimator::set_keyframe_interp);
+    ClassDB::bind_method(D_METHOD("get_keyframe_interp", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_interp);
 
     ClassDB::bind_method(D_METHOD("set_keyframe_tangent_mode", "clip_idx", "curve_idx", "key_idx", "mode"), &VFXAnimator::set_keyframe_tangent_mode);
     ClassDB::bind_method(D_METHOD("get_keyframe_tangent_mode", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_tangent_mode);
     ClassDB::bind_method(D_METHOD("set_keyframe_scalar_tangents", "clip_idx", "curve_idx", "key_idx", "in_tan", "out_tan"), &VFXAnimator::set_keyframe_scalar_tangents);
     ClassDB::bind_method(D_METHOD("set_keyframe_vector_tangents", "clip_idx", "curve_idx", "key_idx", "in_tan", "out_tan"), &VFXAnimator::set_keyframe_vector_tangents);
+    ClassDB::bind_method(D_METHOD("get_keyframe_scalar_tangents", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_scalar_tangents);
+    ClassDB::bind_method(D_METHOD("get_keyframe_vector_in_tangent", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_vector_in_tangent);
+    ClassDB::bind_method(D_METHOD("get_keyframe_vector_out_tangent", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_vector_out_tangent);
     ClassDB::bind_method(D_METHOD("auto_compute_tangents", "clip_idx", "curve_idx"), &VFXAnimator::auto_compute_tangents);
+    ClassDB::bind_method(D_METHOD("flatten_keyframe", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::flatten_keyframe);
 
     ClassDB::bind_method(D_METHOD("play", "clip_idx"), &VFXAnimator::play);
     ClassDB::bind_method(D_METHOD("pause"), &VFXAnimator::pause);
@@ -160,11 +191,15 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("advance", "delta"), &VFXAnimator::advance);
     ClassDB::bind_method(D_METHOD("is_clip_playing"), &VFXAnimator::is_clip_playing);
     ClassDB::bind_method(D_METHOD("get_playback_time"), &VFXAnimator::get_playback_time);
+    ClassDB::bind_method(D_METHOD("get_current_clip"), &VFXAnimator::get_current_clip);
+    ClassDB::bind_method(D_METHOD("set_current_clip", "idx"), &VFXAnimator::set_current_clip);
 
     ClassDB::bind_method(D_METHOD("sample_scalar", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_scalar);
     ClassDB::bind_method(D_METHOD("sample_vector", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_vector);
     ClassDB::bind_method(D_METHOD("sample_quaternion", "clip_idx", "curve_idx", "time"), &VFXAnimator::sample_quaternion);
     ClassDB::bind_method(D_METHOD("sample_pose", "clip_idx", "time", "bone_count"), &VFXAnimator::sample_pose);
+    ClassDB::bind_method(D_METHOD("sample_node_transform", "clip_idx", "node_id", "time"), &VFXAnimator::sample_node_transform);
+    ClassDB::bind_method(D_METHOD("get_animated_node_ids", "clip_idx"), &VFXAnimator::get_animated_node_ids);
 
     ClassDB::bind_method(D_METHOD("get_curve_samples", "clip_idx", "curve_idx", "component", "resolution"), &VFXAnimator::get_curve_samples);
 
@@ -187,6 +222,11 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_integer_constant(get_class_static(), "", "LOOP_LOOP", LOOP_LOOP);
     ClassDB::bind_integer_constant(get_class_static(), "", "LOOP_CLAMP", LOOP_CLAMP);
     ClassDB::bind_integer_constant(get_class_static(), "", "LOOP_PING_PONG", LOOP_PING_PONG);
+
+    ClassDB::bind_integer_constant(get_class_static(), "", "CURVE_POSITION", CURVE_POSITION);
+    ClassDB::bind_integer_constant(get_class_static(), "", "CURVE_ROTATION", CURVE_ROTATION);
+    ClassDB::bind_integer_constant(get_class_static(), "", "CURVE_SCALE", CURVE_SCALE);
+    ClassDB::bind_integer_constant(get_class_static(), "", "CURVE_SCALAR", CURVE_SCALAR);
 }
 
 VFXAnimator::VFXAnimator() {}
@@ -214,9 +254,22 @@ String VFXAnimator::get_clip_name(int idx) const {
     if (idx >= 0 && idx < (int)clips.size()) return clips[idx].name;
     return "";
 }
+void VFXAnimator::set_clip_name(int idx, const String& name) {
+    if (idx >= 0 && idx < (int)clips.size()) clips[idx].name = name;
+}
 float VFXAnimator::get_clip_duration(int idx) const {
     if (idx >= 0 && idx < (int)clips.size()) return clips[idx].duration;
     return 0.0f;
+}
+void VFXAnimator::set_clip_duration(int idx, float duration) {
+    if (idx >= 0 && idx < (int)clips.size()) clips[idx].duration = MAX(duration, 0.001f);
+}
+float VFXAnimator::get_clip_fps(int idx) const {
+    if (idx >= 0 && idx < (int)clips.size()) return clips[idx].fps;
+    return 30.0f;
+}
+void VFXAnimator::set_clip_fps(int idx, float fps) {
+    if (idx >= 0 && idx < (int)clips.size()) clips[idx].fps = MAX(fps, 1.0f);
 }
 void VFXAnimator::set_clip_loop(int idx, bool loop) {
     if (idx >= 0 && idx < (int)clips.size()) clips[idx].loop = loop;
@@ -240,6 +293,21 @@ int VFXAnimator::add_curve(int clip_idx, const String& name, int bone_id, bool i
     curve.bone_id = bone_id;
     curve.is_rotation = is_rotation;
     curve.is_scale = is_scale;
+    clips[clip_idx].curves.push_back(curve);
+    return clips[clip_idx].curves.size() - 1;
+}
+
+int VFXAnimator::add_node_curve(int clip_idx, const String& name, int node_id, int kind) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return -1;
+    AnimationCurve curve;
+    curve.name = name;
+    curve.node_id = node_id;
+    switch (kind) {
+        case CURVE_ROTATION: curve.is_rotation = true; break;
+        case CURVE_SCALE: curve.is_scale = true; break;
+        case CURVE_SCALAR: curve.is_scalar = true; break;
+        default: break; // CURVE_POSITION
+    }
     clips[clip_idx].curves.push_back(curve);
     return clips[clip_idx].curves.size() - 1;
 }
@@ -269,48 +337,111 @@ int VFXAnimator::get_curve_bone_id(int clip_idx, int curve_idx) const {
     return clips[clip_idx].curves[curve_idx].bone_id;
 }
 
-bool VFXAnimator::get_curve_is_rotation(int clip_idx, int curve_idx) const {
-    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return false;
-    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return false;
-    return clips[clip_idx].curves[curve_idx].is_rotation;
+int VFXAnimator::get_curve_node_id(int clip_idx, int curve_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return -1;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return -1;
+    return clips[clip_idx].curves[curve_idx].node_id;
 }
 
+int VFXAnimator::get_curve_kind(int clip_idx, int curve_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return CURVE_POSITION;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return CURVE_POSITION;
+    const AnimationCurve& c = clips[clip_idx].curves[curve_idx];
+    if (c.is_rotation) return CURVE_ROTATION;
+    if (c.is_scale) return CURVE_SCALE;
+    if (c.is_scalar) return CURVE_SCALAR;
+    return CURVE_POSITION;
+}
+
+bool VFXAnimator::get_curve_is_rotation(int clip_idx, int curve_idx) const {
+    return get_curve_kind(clip_idx, curve_idx) == CURVE_ROTATION;
+}
+bool VFXAnimator::get_curve_is_scale(int clip_idx, int curve_idx) const {
+    return get_curve_kind(clip_idx, curve_idx) == CURVE_SCALE;
+}
+bool VFXAnimator::get_curve_is_scalar(int clip_idx, int curve_idx) const {
+    return get_curve_kind(clip_idx, curve_idx) == CURVE_SCALAR;
+}
+bool VFXAnimator::curve_is_bone(int clip_idx, int curve_idx) const {
+    return get_curve_bone_id(clip_idx, curve_idx) >= 0;
+}
+bool VFXAnimator::curve_is_node(int clip_idx, int curve_idx) const {
+    return get_curve_node_id(clip_idx, curve_idx) >= 0;
+}
+
+int VFXAnimator::find_curve(int clip_idx, int bone_id, int node_id, int kind) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return -1;
+    const auto& curves = clips[clip_idx].curves;
+    for (int i = 0; i < (int)curves.size(); i++) {
+        if (curves[i].bone_id == bone_id && curves[i].node_id == node_id &&
+            get_curve_kind(clip_idx, i) == kind) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// ------------------------------------------------------------------
+// Keys — add_* now REPLACES an existing key at the same time
+// ------------------------------------------------------------------
 void VFXAnimator::add_keyframe_scalar(int clip_idx, int curve_idx, float time, float value, int interp) {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
-    if (clips[clip_idx].curves[curve_idx].keys.empty()) {
-        clips[clip_idx].curves[curve_idx].is_scalar = true;
+    auto& curve = clips[clip_idx].curves[curve_idx];
+    if (curve.keys.empty()) curve.is_scalar = true;
+    for (auto& k : curve.keys) {
+        if (fabsf(k.time - time) < 0.0005f) {
+            k.value = value;
+            k.interp = interp;
+            return;
+        }
     }
     Keyframe k;
     k.time = time;
     k.value = value;
     k.interp = interp;
-    clips[clip_idx].curves[curve_idx].keys.push_back(k);
-    clips[clip_idx].curves[curve_idx].sort_keys();
+    curve.keys.push_back(k);
+    curve.sort_keys();
 }
 
 void VFXAnimator::add_keyframe_vector(int clip_idx, int curve_idx, float time, const Vector3& value, int interp) {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
-    clips[clip_idx].curves[curve_idx].is_scalar = false;
+    auto& curve = clips[clip_idx].curves[curve_idx];
+    curve.is_scalar = false;
+    for (auto& k : curve.keys) {
+        if (fabsf(k.time - time) < 0.0005f) {
+            k.vec_value = value;
+            k.interp = interp;
+            return;
+        }
+    }
     Keyframe k;
     k.time = time;
     k.vec_value = value;
     k.interp = interp;
-    clips[clip_idx].curves[curve_idx].keys.push_back(k);
-    clips[clip_idx].curves[curve_idx].sort_keys();
+    curve.keys.push_back(k);
+    curve.sort_keys();
 }
 
 void VFXAnimator::add_keyframe_quaternion(int clip_idx, int curve_idx, float time, const Quaternion& value, int interp) {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
-    clips[clip_idx].curves[curve_idx].is_scalar = false;
+    auto& curve = clips[clip_idx].curves[curve_idx];
+    curve.is_scalar = false;
+    for (auto& k : curve.keys) {
+        if (fabsf(k.time - time) < 0.0005f) {
+            k.quat_value = value;
+            k.interp = interp;
+            return;
+        }
+    }
     Keyframe k;
     k.time = time;
     k.quat_value = value;
     k.interp = interp;
-    clips[clip_idx].curves[curve_idx].keys.push_back(k);
-    clips[clip_idx].curves[curve_idx].sort_keys();
+    curve.keys.push_back(k);
+    curve.sort_keys();
 }
 
 void VFXAnimator::delete_keyframe(int clip_idx, int curve_idx, int key_idx) {
@@ -358,13 +489,49 @@ void VFXAnimator::set_keyframe_quaternion_value(int clip_idx, int curve_idx, int
     keys[key_idx].quat_value = value;
 }
 
+float VFXAnimator::get_keyframe_scalar_value(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return 0.0f;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return 0.0f;
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return 0.0f;
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].value;
+}
+
+Vector3 VFXAnimator::get_keyframe_vector_value(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector3();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector3();
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return Vector3();
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].vec_value;
+}
+
+Quaternion VFXAnimator::get_keyframe_quaternion_value(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Quaternion();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Quaternion();
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return Quaternion();
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].quat_value;
+}
+
 void VFXAnimator::set_keyframe_time(int clip_idx, int curve_idx, int key_idx, float time) {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
     auto& keys = clips[clip_idx].curves[curve_idx].keys;
     if (key_idx < 0 || key_idx >= (int)keys.size()) return;
-    keys[key_idx].time = time;
+    keys[key_idx].time = MAX(time, 0.0f);
     clips[clip_idx].curves[curve_idx].sort_keys();
+}
+
+void VFXAnimator::set_keyframe_interp(int clip_idx, int curve_idx, int key_idx, int interp) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
+    auto& keys = clips[clip_idx].curves[curve_idx].keys;
+    if (key_idx < 0 || key_idx >= (int)keys.size()) return;
+    keys[key_idx].interp = interp;
+}
+
+int VFXAnimator::get_keyframe_interp(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return INTERP_LINEAR;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return INTERP_LINEAR;
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return INTERP_LINEAR;
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].interp;
 }
 
 void VFXAnimator::set_keyframe_tangent_mode(int clip_idx, int curve_idx, int key_idx, int mode) {
@@ -375,6 +542,14 @@ void VFXAnimator::set_keyframe_tangent_mode(int clip_idx, int curve_idx, int key
     keys[key_idx].tangent_mode = mode;
     if (mode == TANGENT_AUTO) {
         clips[clip_idx].curves[curve_idx].auto_compute_tangents();
+    } else if (mode == TANGENT_ALIGNED || mode == TANGENT_MIRRORED) {
+        // mirror the two handle heights (continuity): in = -out
+        if (clips[clip_idx].curves[curve_idx].is_scalar) {
+            float out = keys[key_idx].out_tangent;
+            keys[key_idx].in_tangent = -out;
+        } else {
+            keys[key_idx].vec_in_tangent = keys[key_idx].vec_out_tangent * -1.0f;
+        }
     }
 }
 
@@ -405,12 +580,48 @@ void VFXAnimator::set_keyframe_vector_tangents(int clip_idx, int curve_idx, int 
     keys[key_idx].tangent_mode = TANGENT_FREE;
 }
 
+Vector2 VFXAnimator::get_keyframe_scalar_tangents(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector2();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector2();
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return Vector2();
+    const Keyframe& k = clips[clip_idx].curves[curve_idx].keys[key_idx];
+    return Vector2(k.in_tangent, k.out_tangent);
+}
+
+Vector3 VFXAnimator::get_keyframe_vector_in_tangent(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector3();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector3();
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return Vector3();
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].vec_in_tangent;
+}
+
+Vector3 VFXAnimator::get_keyframe_vector_out_tangent(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector3();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector3();
+    if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return Vector3();
+    return clips[clip_idx].curves[curve_idx].keys[key_idx].vec_out_tangent;
+}
+
 void VFXAnimator::auto_compute_tangents(int clip_idx, int curve_idx) {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
     clips[clip_idx].curves[curve_idx].auto_compute_tangents();
 }
 
+void VFXAnimator::flatten_keyframe(int clip_idx, int curve_idx, int key_idx) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
+    auto& keys = clips[clip_idx].curves[curve_idx].keys;
+    if (key_idx < 0 || key_idx >= (int)keys.size()) return;
+    keys[key_idx].in_tangent = 0.0f;
+    keys[key_idx].out_tangent = 0.0f;
+    keys[key_idx].vec_in_tangent = Vector3();
+    keys[key_idx].vec_out_tangent = Vector3();
+}
+
+// ------------------------------------------------------------------
+// Playback
+// ------------------------------------------------------------------
 void VFXAnimator::play(int clip_idx) {
     if (clip_idx >= 0 && clip_idx < (int)clips.size()) {
         current_clip = clip_idx;
@@ -451,6 +662,15 @@ void VFXAnimator::advance(float delta) {
 
 bool VFXAnimator::is_clip_playing() const { return is_playing; }
 float VFXAnimator::get_playback_time() const { return current_time; }
+int VFXAnimator::get_current_clip() const { return current_clip; }
+
+void VFXAnimator::set_current_clip(int idx) {
+    if (idx >= 0 && idx < (int)clips.size()) {
+        current_clip = idx;
+        is_playing = false;
+        current_time = 0.0f;
+    }
+}
 
 float VFXAnimator::sample_scalar(int clip_idx, int curve_idx, float time) const {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return 0.0f;
@@ -491,7 +711,7 @@ PackedFloat32Array VFXAnimator::sample_pose(int clip_idx, float time, int bone_c
             pose[base + 7] = s.x;
             pose[base + 8] = s.y;
             pose[base + 9] = s.z;
-        } else {
+        } else if (!curve.is_scalar) {
             Vector3 p = curve.sample_vector(time);
             pose[base + 0] = p.x;
             pose[base + 1] = p.y;
@@ -499,6 +719,43 @@ PackedFloat32Array VFXAnimator::sample_pose(int clip_idx, float time, int bone_c
         }
     }
     return pose;
+}
+
+Array VFXAnimator::sample_node_transform(int clip_idx, int node_id, float time) const {
+    Array result;
+    result.resize(6);
+    result[0] = false; result[1] = Vector3();
+    result[2] = false; result[3] = Quaternion();
+    result[4] = false; result[5] = Vector3(1, 1, 1);
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return result;
+
+    for (const auto& curve : clips[clip_idx].curves) {
+        if (curve.node_id != node_id) continue;
+        if (curve.is_rotation) {
+            result[2] = true;
+            result[3] = curve.sample_quaternion(time);
+        } else if (curve.is_scale) {
+            result[4] = true;
+            result[5] = curve.sample_vector(time);
+        } else if (!curve.is_scalar) {
+            result[0] = true;
+            result[1] = curve.sample_vector(time);
+        }
+    }
+    return result;
+}
+
+PackedInt32Array VFXAnimator::get_animated_node_ids(int clip_idx) const {
+    PackedInt32Array ids;
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return ids;
+    std::set<int> seen;
+    for (const auto& curve : clips[clip_idx].curves) {
+        if (curve.node_id >= 0 && !seen.count(curve.node_id)) {
+            seen.insert(curve.node_id);
+            ids.push_back(curve.node_id);
+        }
+    }
+    return ids;
 }
 
 PackedVector2Array VFXAnimator::get_curve_samples(int clip_idx, int curve_idx, int component, int resolution) const {
@@ -561,7 +818,7 @@ void VFXAnimator::mirror_bone_curves(int clip_idx, int source_bone, int target_b
                 euler.x = -euler.x;
                 euler.z = -euler.z;
                 key.quat_value = Basis::from_euler(euler).get_rotation_quaternion();
-            } else if (!new_curve.is_scale) {
+            } else if (!new_curve.is_scale && !new_curve.is_scalar) {
                 key.vec_value.x = -key.vec_value.x;
                 key.vec_in_tangent.x = -key.vec_in_tangent.x;
                 key.vec_out_tangent.x = -key.vec_out_tangent.x;
@@ -585,15 +842,18 @@ void VFXAnimator::apply_symmetry(int clip_idx, const Ref<VFXSkeleton>& skeleton)
     }
 }
 
+// ------------------------------------------------------------------
+// Serialization — format v2 (adds node_id + explicit kind per curve)
+// ------------------------------------------------------------------
 PackedByteArray VFXAnimator::serialize_clip(int idx) const {
     PackedByteArray data;
     if (idx < 0 || idx >= (int)clips.size()) return data;
 
     const AnimationClip& clip = clips[idx];
 
-    // Magic "VFXA" + version 1
+    // Magic "VFXA" + version 2
     data.append('V'); data.append('F'); data.append('X'); data.append('A');
-    data.append(1);
+    data.append(2);
 
     auto append_u16 = [&](uint16_t v) {
         data.append(v & 0xFF);
@@ -629,8 +889,14 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
         for (int i = 0; i < cname_utf8.size(); i++) data.append(cname_utf8.ptr()[i]);
 
         append_i32(curve.bone_id);
+        append_i32(curve.node_id); // v2
         uint8_t flags = (curve.is_rotation ? 1 : 0) | (curve.is_scale ? 2 : 0) | (curve.is_scalar ? 4 : 0);
         data.append(flags);
+        uint8_t kind = curve.is_rotation ? (uint8_t)CURVE_ROTATION
+                       : curve.is_scale ? (uint8_t)CURVE_SCALE
+                       : curve.is_scalar ? (uint8_t)CURVE_SCALAR
+                       : (uint8_t)CURVE_POSITION;
+        data.append(kind); // v2 (redundant, for forward compat)
 
         append_u32((uint32_t)curve.keys.size());
 
@@ -675,7 +941,8 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
 void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
     if (data.size() < 5) return;
     if (data[0] != 'V' || data[1] != 'F' || data[2] != 'X' || data[3] != 'A') return;
-    if (data[4] != 1) return;
+    uint8_t version = data[4];
+    if (version != 1 && version != 2) return;
 
     int p = 5;
     auto read_u16 = [&]() -> uint16_t {
@@ -718,11 +985,20 @@ void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
         AnimationCurve curve;
         curve.name = read_string();
         curve.bone_id = read_i32();
+        if (version >= 2) {
+            curve.node_id = read_i32();
+        } else {
+            curve.node_id = -1;
+        }
         if (p >= data.size()) return;
         uint8_t flags = data[p++];
         curve.is_rotation = (flags & 1) != 0;
         curve.is_scale = (flags & 2) != 0;
         curve.is_scalar = (flags & 4) != 0;
+        if (version >= 2) {
+            if (p >= data.size()) return;
+            p++; // kind byte (derived from flags anyway)
+        }
 
         uint32_t key_count = read_u32();
         for (uint32_t k = 0; k < key_count; k++) {
@@ -780,7 +1056,6 @@ void VFXAnimator::from_godot_animation(const Object* anim_obj, int bone_count) {
         Animation::TrackType type = anim->track_get_type(t);
         NodePath path = anim->track_get_path(t);
 
-        // Extract bone name from NodePath subnames (e.g. Skeleton3D:bone_name/property)
         String bone_name;
         if (path.get_subname_count() > 0) {
             bone_name = path.get_subname(0);
@@ -788,12 +1063,10 @@ void VFXAnimator::from_godot_animation(const Object* anim_obj, int bone_count) {
             bone_name = path.get_name(path.get_name_count() - 1);
         }
 
-        // Try to parse bone index directly from subname (e.g. "bones/0/position")
         int bone_id = -1;
         if (bone_name.is_valid_int()) {
             bone_id = bone_name.to_int();
         } else {
-            // Strip common property suffixes and try integer fallback
             String cleaned = bone_name.replace("position", "").replace("rotation", "").replace("scale", "").strip_edges();
             if (cleaned.is_valid_int()) {
                 bone_id = cleaned.to_int();
@@ -814,7 +1087,6 @@ void VFXAnimator::from_godot_animation(const Object* anim_obj, int bone_count) {
         } else if (type == Animation::TYPE_SCALE_3D) {
             is_scale = true;
         } else if (type == Animation::TYPE_VALUE) {
-            // Infer from last subname or path string
             String last_sub = path.get_subname_count() > 0 ? path.get_subname(path.get_subname_count() - 1) : "";
             last_sub = last_sub.to_lower();
             if (last_sub.contains("rot") || last_sub.contains("quat")) {
@@ -825,7 +1097,7 @@ void VFXAnimator::from_godot_animation(const Object* anim_obj, int bone_count) {
                 is_position = true;
             }
         } else {
-            continue; // skip other track types
+            continue;
         }
 
         String curve_name = bone_name + (is_rotation ? "_rot" : (is_scale ? "_scale" : "_pos"));
