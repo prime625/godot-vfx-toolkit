@@ -94,6 +94,7 @@ private:
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
     Ref<VFXAnimator> animator;
+    bool animator_auto_apply = true;
     Ref<VFXCurve> active_curve;
     Ref<VFXTexturePainter> painter;
     Ref<VFXScene> scene;
@@ -269,6 +270,12 @@ public:
     // === ANIMATOR ===
     void set_vfx_animator(const Ref<VFXAnimator>& p_anim);
     Ref<VFXAnimator> get_vfx_animator() const;
+    // Applies the current clip at the current playback time to the
+    // skeleton (bone curves) and scene nodes (node curves). Call after
+    // seek()/advance() or let auto-apply handle it during playback.
+    void apply_animation_frame();
+    void set_animator_auto_apply(bool p_enable);
+    bool get_animator_auto_apply() const;
 
     // === VISIBILITY ===
     void set_show_skeleton(bool show);
