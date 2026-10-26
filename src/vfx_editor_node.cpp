@@ -42,6 +42,9 @@ void VFXEditorNode::_bind_methods() {
 
     ClassDB::bind_method(D_METHOD("set_vfx_animator", "anim"), &VFXEditorNode::set_vfx_animator);
     ClassDB::bind_method(D_METHOD("get_vfx_animator"), &VFXEditorNode::get_vfx_animator);
+    ClassDB::bind_method(D_METHOD("apply_animation_frame"), &VFXEditorNode::apply_animation_frame);
+    ClassDB::bind_method(D_METHOD("set_animator_auto_apply", "enabled"), &VFXEditorNode::set_animator_auto_apply);
+    ClassDB::bind_method(D_METHOD("get_animator_auto_apply"), &VFXEditorNode::get_animator_auto_apply);
 
     ClassDB::bind_method(D_METHOD("set_show_skeleton", "show"), &VFXEditorNode::set_show_skeleton);
     ClassDB::bind_method(D_METHOD("get_show_skeleton"), &VFXEditorNode::get_show_skeleton);
@@ -276,6 +279,9 @@ void VFXEditorNode::_notification(int p_what) {
 
         if (animator.is_valid() && animator->is_clip_playing()) {
             animator->advance(get_process_delta_time());
+            if (animator_auto_apply) {
+                apply_animation_frame();
+            }
         }
 
         // Scene visuals: update transforms every frame (cheap), full rebuild only when dirty
@@ -573,6 +579,56 @@ void VFXEditorNode::set_vfx_animator(const Ref<VFXAnimator>& p_anim) {
 }
 
 Ref<VFXAnimator> VFXEditorNode::get_vfx_animator() const { return animator; }
+
+void VFXEditorNode::set_animator_auto_apply(bool p_enable) { animator_auto_apply = p_enable; }
+bool VFXEditorNode::get_animator_auto_apply() const { return animator_auto_apply; }
+
+void VFXEditorNode::apply_animation_frame() {
+    if (animator.is_null()) return;
+    int clip = animator->get_current_clip();
+    if (clip < 0) return;
+    float t = animator->get_playback_time();
+    int curve_count = animator->get_curve_count(clip);
+    bool skel_changed = false;
+
+    for (int c = 0; c < curve_count; c++) {
+        int kind = animator->get_curve_kind(clip, c);
+        if (kind == VFXAnimator::CURVE_SCALAR) continue;
+
+        int bone = animator->get_curve_bone_id(clip, c);
+        int node_id = animator->get_curve_node_id(clip, c);
+
+        if (bone >= 0) {
+            if (skeleton.is_null() || bone >= skeleton->get_bone_count()) continue;
+            if (kind == VFXAnimator::CURVE_ROTATION) {
+                skeleton->set_bone_local_rotation(bone, animator->sample_quaternion(clip, c, t));
+            } else if (kind == VFXAnimator::CURVE_SCALE) {
+                skeleton->set_bone_local_scale(bone, animator->sample_vector(clip, c, t));
+            } else {
+                skeleton->set_bone_local_position(bone, animator->sample_vector(clip, c, t));
+            }
+            skel_changed = true;
+        } else if (node_id >= 0) {
+            if (scene.is_null() || scene->get_root().is_null()) continue;
+            Ref<VFXSceneNode> node = scene->get_root()->find_node_by_id(node_id);
+            if (node.is_null()) continue;
+            if (kind == VFXAnimator::CURVE_ROTATION) {
+                node->set_local_rotation(animator->sample_quaternion(clip, c, t));
+            } else if (kind == VFXAnimator::CURVE_SCALE) {
+                node->set_local_scale(animator->sample_vector(clip, c, t));
+            } else {
+                node->set_local_position(animator->sample_vector(clip, c, t));
+            }
+            mark_scene_dirty();
+        }
+    }
+
+    if (skel_changed) {
+        skeleton->update_transforms();
+        refresh_mesh();
+        if (show_skeleton) _build_skeleton_mesh();
+    }
+}
 
 // ============================================================================
 // VISIBILITY / STATE
