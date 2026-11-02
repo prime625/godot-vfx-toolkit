@@ -82,6 +82,13 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("create_demo_cube"), &VFXEditorNode::create_demo_cube);
     ClassDB::bind_method(D_METHOD("create_demo_character"), &VFXEditorNode::create_demo_character);
 
+    ClassDB::bind_method(D_METHOD("create_primitive", "primitive_type", "params"), &VFXEditorNode::create_primitive);
+    ClassDB::bind_method(D_METHOD("add_primitive_to_scene", "primitive_type", "params", "parent"), &VFXEditorNode::add_primitive_to_scene, DEFVAL(Ref<VFXSceneNode>()));
+    ClassDB::bind_method(D_METHOD("update_last_primitive", "params"), &VFXEditorNode::update_last_primitive);
+    ClassDB::bind_method(D_METHOD("has_last_primitive"), &VFXEditorNode::has_last_primitive);
+    ClassDB::bind_method(D_METHOD("get_last_primitive_type"), &VFXEditorNode::get_last_primitive_type);
+    ClassDB::bind_method(D_METHOD("get_last_primitive_params"), &VFXEditorNode::get_last_primitive_params);
+
     // === MODELING ===
     ClassDB::bind_method(D_METHOD("extrude_selected_face", "distance"), &VFXEditorNode::extrude_selected_face);
     ClassDB::bind_method(D_METHOD("inset_selected_face", "amount"), &VFXEditorNode::inset_selected_face);
