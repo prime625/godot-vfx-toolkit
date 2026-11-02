@@ -17,7 +17,8 @@
 #include "vfx_particles.h"
 #include "vfx_glb_importer.h"
 #include "vfx_fbx_importer.h"
-	
+#include "vfx_primitives.h"
+
 
 void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
@@ -38,6 +39,7 @@ void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
 		ClassDB::register_class<VFXParticles3D>();
 		ClassDB::register_class<VFXGLBImporter>();
 		ClassDB::register_class<VFXFBXImporter>();
+		ClassDB::register_class<VFXPrimitives>();
 		
 	}
 }
