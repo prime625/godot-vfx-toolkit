@@ -1,6 +1,7 @@
 #include "vfx_editor_node.h"
 #include "vfx_gltf_exporter.h"
 #include "vfx_texture_painter.h"
+#include "vfx_primitives.h"
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
@@ -98,6 +99,76 @@ void VFXEditorNode::create_demo_character() {
     anim->add_keyframe_vector(clip, hips_curve, 2.0f, Vector3(0, 1.0f, 0), VFXAnimator::INTERP_LINEAR);
 
     set_vfx_animator(anim);
+}
+
+// ============================================================================
+// PRIMITIVES (Blender-style "Add > Mesh")
+// ============================================================================
+void VFXEditorNode::create_primitive(int primitive_type, const Dictionary& params) {
+    Ref<VFXMesh> m = VFXPrimitives::create(primitive_type, params);
+    if (m.is_null()) return;
+
+    last_primitive_type = primitive_type;
+    last_primitive_params = params;
+    last_primitive_node = Ref<VFXSceneNode>();
+    last_primitive_target_scene = false;
+
+    set_vfx_mesh(m);
+}
+
+Ref<VFXSceneNode> VFXEditorNode::add_primitive_to_scene(int primitive_type, const Dictionary& params,
+                                                        const Ref<VFXSceneNode>& parent) {
+    // No scene yet -> fall back to creating on the editor's own mesh.
+    if (scene.is_null()) {
+        create_primitive(primitive_type, params);
+        return Ref<VFXSceneNode>();
+    }
+
+    Ref<VFXSceneNode> node = scene->add_primitive(primitive_type, params, parent);
+    if (node.is_null()) return Ref<VFXSceneNode>();
+
+    last_primitive_type = primitive_type;
+    last_primitive_params = params;
+    last_primitive_node = node;
+    last_primitive_target_scene = true;
+
+    set_active_scene_node(node);
+    mark_scene_dirty();
+    return node;
+}
+
+void VFXEditorNode::update_last_primitive(const Dictionary& params) {
+    if (last_primitive_type < 0) return;
+
+    // Merge the overrides over the parameters the primitive was created with.
+    Dictionary merged = last_primitive_params;
+    Array keys = params.keys();
+    for (int i = 0; i < keys.size(); i++) {
+        merged[keys[i]] = params[keys[i]];
+    }
+    last_primitive_params = merged;
+
+    Ref<VFXMesh> m = VFXPrimitives::create(last_primitive_type, merged);
+    if (m.is_null()) return;
+
+    if (last_primitive_target_scene && last_primitive_node.is_valid()) {
+        last_primitive_node->set_mesh(m);
+        mark_scene_dirty();
+    } else {
+        set_vfx_mesh(m);
+    }
+}
+
+bool VFXEditorNode::has_last_primitive() const {
+    return last_primitive_type >= 0;
+}
+
+int VFXEditorNode::get_last_primitive_type() const {
+    return last_primitive_type;
+}
+
+Dictionary VFXEditorNode::get_last_primitive_params() const {
+    return last_primitive_params;
 }
 
 // ============================================================================
