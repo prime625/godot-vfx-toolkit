@@ -89,6 +89,7 @@ private:
     std::vector<AnimationClip> clips;
     int current_clip = -1;
     float current_time = 0.0f;
+    float pingpong_time = 0.0f;  // unfolded playback position for ping-pong mode
     bool is_playing = false;
     int selected_curve = -1;
     int selected_key = -1;
