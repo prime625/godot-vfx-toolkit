@@ -28,6 +28,7 @@ void VFXScene::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_all_mesh_nodes"), &VFXScene::get_all_mesh_nodes);
     ClassDB::bind_method(D_METHOD("flatten_tree"), &VFXScene::flatten_tree);
     ClassDB::bind_method(D_METHOD("get_unique_id"), &VFXScene::get_unique_id);
+    ClassDB::bind_method(D_METHOD("reassign_ids", "node"), &VFXScene::reassign_ids);
 }
 
 VFXScene::VFXScene() {}
@@ -383,3 +384,4 @@ PackedByteArray VFXScene::serialize() const {
 }
 
 void VFXScene::deserialize(const PackedByteArray& data) {}
+void VFXScene::reassign_ids(const Ref<VFXSceneNode>& node) { _reassign_ids_recursive(node); }
