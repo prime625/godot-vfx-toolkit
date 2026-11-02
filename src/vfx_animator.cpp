@@ -626,12 +626,13 @@ void VFXAnimator::play(int clip_idx) {
     if (clip_idx >= 0 && clip_idx < (int)clips.size()) {
         current_clip = clip_idx;
         current_time = 0.0f;
+        pingpong_time = 0.0f;
         is_playing = true;
     }
 }
 
 void VFXAnimator::pause() { is_playing = false; }
-void VFXAnimator::stop() { is_playing = false; current_time = 0.0f; }
+void VFXAnimator::stop() { is_playing = false; current_time = 0.0f; pingpong_time = 0.0f; }
 
 void VFXAnimator::seek(float time) {
     if (current_clip < 0 || current_clip >= (int)clips.size()) return;
@@ -642,6 +643,7 @@ void VFXAnimator::seek(float time) {
             break;
         case LOOP_PING_PONG: {
             float d = clip.duration * 2.0f;
+            pingpong_time = time;  // keep playback continuous after a scrub
             float t = fmod(time, d);
             if (t < 0) t += d;
             current_time = (t > clip.duration) ? d - t : t;
@@ -657,7 +659,19 @@ void VFXAnimator::seek(float time) {
 
 void VFXAnimator::advance(float delta) {
     if (!is_playing || current_clip < 0) return;
-    seek(current_time + delta);
+    const AnimationClip& clip = clips[current_clip];
+    if (clip.loop_mode == LOOP_PING_PONG) {
+        // Advance an UNFOLDED accumulator; folding each frame from the folded
+        // time makes it oscillate in place at the boundary (endless jitter).
+        float d = clip.duration * 2.0f;
+        if (d <= 0.0f) { current_time = 0.0f; return; }
+        pingpong_time += delta;
+        float t = fmod(pingpong_time, d);
+        if (t < 0) t += d;
+        current_time = (t > clip.duration) ? d - t : t;
+    } else {
+        seek(current_time + delta);
+    }
 }
 
 bool VFXAnimator::is_clip_playing() const { return is_playing; }
@@ -669,6 +683,7 @@ void VFXAnimator::set_current_clip(int idx) {
         current_clip = idx;
         is_playing = false;
         current_time = 0.0f;
+        pingpong_time = 0.0f;
     }
 }
 
