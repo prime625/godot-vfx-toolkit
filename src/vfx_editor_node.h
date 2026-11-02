@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/classes/v_box_container.hpp>
@@ -99,6 +100,12 @@ private:
     Ref<VFXTexturePainter> painter;
     Ref<VFXScene> scene;
     Ref<VFXSceneNode> active_scene_node;
+
+    // === LAST PRIMITIVE (Blender F9-style "adjust last operation") ===
+    int last_primitive_type = -1;
+    Dictionary last_primitive_params;
+    Ref<VFXSceneNode> last_primitive_node;   // scene node if the op went to the scene
+    bool last_primitive_target_scene = false;
 
     // === GODOT NODES ===
     MeshInstance3D* mesh_instance = nullptr;
@@ -300,6 +307,22 @@ public:
     // === DEMO ===
     void create_demo_cube();
     void create_demo_character();
+
+    // === PRIMITIVES (Blender-style "Add > Mesh") ===
+    // primitive_type: VFXPrimitives::PrimitiveType (Plane, Cube, UV Sphere,
+    // Ico Sphere, Cylinder, Cone, Torus, Circle). `params` uses Blender-like
+    // keys ("size", "segments", "rings", "subdivisions", "sides", ...).
+    void create_primitive(int primitive_type, const Dictionary& params);
+    Ref<VFXSceneNode> add_primitive_to_scene(int primitive_type, const Dictionary& params,
+                                             const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
+
+    // Blender F9-style "adjust last operation": regenerates the most recent
+    // primitive with the given parameters merged over the ones it was
+    // created with. No-op if no primitive was created yet.
+    void update_last_primitive(const Dictionary& params);
+    bool has_last_primitive() const;
+    int get_last_primitive_type() const;
+    Dictionary get_last_primitive_params() const;
 
     // === MODELING ===
     void extrude_selected_face(float distance);
