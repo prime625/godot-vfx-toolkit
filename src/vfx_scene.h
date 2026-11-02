@@ -37,6 +37,8 @@ public:
     void clear();
 
     bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
+    // vfx_scene.h (public section)
+    void reassign_ids(const Ref<VFXSceneNode>& node);
 
     // Blender-style "Add > Mesh" primitives. `primitive_type` is a
     // VFXPrimitives::PrimitiveType; `params` uses Blender-like keys
