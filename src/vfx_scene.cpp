@@ -1,5 +1,6 @@
 #include "vfx_scene.h"
 #include "vfx_glb_importer.h"
+#include "vfx_primitives.h"
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/packed_scene.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -18,6 +19,7 @@ void VFXScene::_bind_methods() {
     ClassDB::bind_method(D_METHOD("delete_node", "node"), &VFXScene::delete_node);
     ClassDB::bind_method(D_METHOD("clear"), &VFXScene::clear);
     ClassDB::bind_method(D_METHOD("import_model", "filepath", "parent"), &VFXScene::import_model, DEFVAL(Ref<VFXSceneNode>()));
+    ClassDB::bind_method(D_METHOD("add_primitive", "primitive_type", "params", "parent", "transform"), &VFXScene::add_primitive, DEFVAL(Ref<VFXSceneNode>()), DEFVAL(Transform3D()));
     ClassDB::bind_method(D_METHOD("import_glb_model", "filepath", "parent", "transform"), &VFXScene::import_glb_model, DEFVAL(Ref<VFXSceneNode>()), DEFVAL(Transform3D()));
     ClassDB::bind_method(D_METHOD("merge_scene", "other", "parent", "transform"), &VFXScene::merge_scene, DEFVAL(Ref<VFXSceneNode>()), DEFVAL(Transform3D()));
     ClassDB::bind_method(D_METHOD("ensure_unique_name", "name"), &VFXScene::ensure_unique_name);
@@ -167,6 +169,29 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
     for (int i = 0; i < godot_node->get_child_count(); i++) {
         _import_godot_node(godot_node->get_child(i), vfx_node.ptr());
     }
+}
+
+// ============================================================================
+// PRIMITIVES (Blender-style "Add > Mesh")
+// ============================================================================
+Ref<VFXSceneNode> VFXScene::add_primitive(int primitive_type, const Dictionary& params,
+                                          const Ref<VFXSceneNode>& parent,
+                                          const Transform3D& transform) {
+    if (root.is_null()) create_default_root();
+
+    Ref<VFXMesh> vmesh = VFXPrimitives::create(primitive_type, params);
+    if (vmesh.is_null()) return Ref<VFXSceneNode>();
+
+    String base_name = VFXPrimitives::get_primitive_name(primitive_type);
+    Ref<VFXSceneNode> node = create_node(ensure_unique_name(base_name),
+                                         VFXSceneNode::NODE_MESH, parent);
+    if (node.is_null()) return Ref<VFXSceneNode>();
+
+    node->set_mesh(vmesh);
+    if (transform != Transform3D()) {
+        node->set_local_transform(transform);
+    }
+    return node;
 }
 
 // ============================================================================
