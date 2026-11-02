@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include "vfx_scene_node.h"
 
@@ -36,6 +37,13 @@ public:
     void clear();
 
     bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>());
+
+    // Blender-style "Add > Mesh" primitives. `primitive_type` is a
+    // VFXPrimitives::PrimitiveType; `params` uses Blender-like keys
+    // (see vfx_primitives.h). Returns the new mesh node, or null on failure.
+    Ref<VFXSceneNode> add_primitive(int primitive_type, const Dictionary& params,
+                                    const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>(),
+                                    const Transform3D& transform = Transform3D());
 
     bool import_glb_model(const String& filepath,
                           const Ref<VFXSceneNode>& parent = Ref<VFXSceneNode>(),
