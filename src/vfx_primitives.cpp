@@ -271,7 +271,10 @@ Ref<VFXMesh> VFXPrimitives::create_cube(float size, int subdivisions) {
 }
 
 // ============================================================================
-// UV SPHERE  (pole-to-pole rings; seam/pole vertices duplicated for clean UVs)
+// UV SPHERE
+// Single welded pole vertices with triangle fans; latitude rings carry one
+// duplicated seam vertex (i == segments) so UVs stay clean — same trade-off
+// as Blender's own UV sphere.
 // ============================================================================
 Ref<VFXMesh> VFXPrimitives::create_uv_sphere(float radius, int segments, int rings) {
     radius = MAX(radius, 0.0001f);
@@ -281,8 +284,15 @@ Ref<VFXMesh> VFXPrimitives::create_uv_sphere(float radius, int segments, int rin
     Ref<VFXMesh> m;
     m.instantiate();
 
-    std::vector<int> grid((rings + 1) * (segments + 1));
-    for (int j = 0; j <= rings; j++) {
+    // Poles
+    int top = m->add_vertex(Vector3(0, radius, 0), Vector2(0.5f, 0.0f));
+    m->set_vertex_normal(top, Vector3(0, 1, 0));
+    int bottom = m->add_vertex(Vector3(0, -radius, 0), Vector2(0.5f, 1.0f));
+    m->set_vertex_normal(bottom, Vector3(0, -1, 0));
+
+    // Latitude rings 1 .. rings-1 (skip the poles)
+    std::vector<std::vector<int>> grid(rings - 1, std::vector<int>(segments + 1));
+    for (int j = 1; j < rings; j++) {
         float phi = Math_PI * (float)j / rings; // 0 = top pole
         float y = radius * cosf(phi);
         float rr = radius * sinf(phi);
@@ -291,20 +301,29 @@ Ref<VFXMesh> VFXPrimitives::create_uv_sphere(float radius, int segments, int rin
             Vector3 pos(rr * cosf(th), y, rr * sinf(th));
             Vector2 uv((float)i / segments, (float)j / rings);
             int id = m->add_vertex(pos, uv);
-            Vector3 nrm = pos.normalized();
-            if (nrm.length_squared() < 0.5f) nrm = (j == 0) ? Vector3(0, 1, 0) : Vector3(0, -1, 0);
-            m->set_vertex_normal(id, nrm);
-            grid[j * (segments + 1) + i] = id;
+            m->set_vertex_normal(id, pos.normalized());
+            grid[j - 1][i] = id;
         }
     }
-    for (int j = 0; j < rings; j++) {
+
+    // Top fan: pole -> first ring
+    for (int i = 0; i < segments; i++) {
+        Vector3 outward = m->get_vertex_normal(grid[0][i]);
+        _tri_out(m.ptr(), top, grid[0][i], grid[0][i + 1], outward);
+    }
+    // Bottom fan: last ring -> pole
+    for (int i = 0; i < segments; i++) {
+        Vector3 outward = m->get_vertex_normal(grid[rings - 2][i]);
+        _tri_out(m.ptr(), bottom, grid[rings - 2][i + 1], grid[rings - 2][i], outward);
+    }
+    // Quads between consecutive rings
+    for (int j = 0; j < rings - 2; j++) {
         for (int i = 0; i < segments; i++) {
-            int a = grid[j * (segments + 1) + i];
-            int b = grid[j * (segments + 1) + i + 1];
-            int c = grid[(j + 1) * (segments + 1) + i + 1];
-            int d = grid[(j + 1) * (segments + 1) + i];
-            Vector3 center = (m->get_vertex_position(a) + m->get_vertex_position(c)) * 0.5f;
-            Vector3 outward = center.normalized();
+            int a = grid[j][i];
+            int b = grid[j][i + 1];
+            int c = grid[j + 1][i + 1];
+            int d = grid[j + 1][i];
+            Vector3 outward = (m->get_vertex_normal(a) + m->get_vertex_normal(c)) * 0.5f;
             _quad_out(m.ptr(), a, b, c, d, outward);
         }
     }
@@ -408,24 +427,45 @@ Ref<VFXMesh> VFXPrimitives::create_cylinder(float radius_top, float radius_botto
     const float yt =  depth * 0.5f;
     const float slope = (radius_bottom - radius_top) / depth; // for frustum normals
 
-    // --- Side wall: two rings, seam-duplicated for clean UVs ---
+    // --- Side wall: two rings (single welded apex vertex when a radius is 0),
+    // seam-duplicated column for clean UVs ---
     std::vector<int> ring_b(sides + 1), ring_t(sides + 1);
+    int apex_t = -1, apex_b = -1;
+    if (radius_top <= 0.0f) {
+        apex_t = m->add_vertex(Vector3(0, yt, 0), Vector2(0.5f, 1.0f));
+        m->set_vertex_normal(apex_t, Vector3(0, 1, 0));
+    }
+    if (radius_bottom <= 0.0f) {
+        apex_b = m->add_vertex(Vector3(0, yb, 0), Vector2(0.5f, 0.0f));
+        m->set_vertex_normal(apex_b, Vector3(0, -1, 0));
+    }
     for (int i = 0; i <= sides; i++) {
         float th = Math_TAU * (float)i / sides;
         float c = cosf(th), s = sinf(th);
-        Vector2 uv((float)i / sides, 0.0f);
-        ring_b[i] = m->add_vertex(Vector3(radius_bottom * c, yb, radius_bottom * s), uv);
-        Vector3 nb(c, slope, s);
-        m->set_vertex_normal(ring_b[i], nb.normalized());
-
-        uv.y = 1.0f;
-        ring_t[i] = m->add_vertex(Vector3(radius_top * c, yt, radius_top * s), uv);
-        Vector3 nt(c, slope, s);
-        m->set_vertex_normal(ring_t[i], nt.normalized());
+        if (radius_bottom > 0.0f) {
+            ring_b[i] = m->add_vertex(Vector3(radius_bottom * c, yb, radius_bottom * s),
+                                      Vector2((float)i / sides, 0.0f));
+            m->set_vertex_normal(ring_b[i], Vector3(c, slope, s).normalized());
+        } else {
+            ring_b[i] = apex_b;
+        }
+        if (radius_top > 0.0f) {
+            ring_t[i] = m->add_vertex(Vector3(radius_top * c, yt, radius_top * s),
+                                      Vector2((float)i / sides, 1.0f));
+            m->set_vertex_normal(ring_t[i], Vector3(c, slope, s).normalized());
+        } else {
+            ring_t[i] = apex_t;
+        }
     }
     for (int i = 0; i < sides; i++) {
         Vector3 outward = (m->get_vertex_normal(ring_b[i]) + m->get_vertex_normal(ring_t[i])) * 0.5f;
-        _quad_out(m.ptr(), ring_b[i], ring_b[i + 1], ring_t[i + 1], ring_t[i], outward);
+        if (apex_t >= 0) {
+            _tri_out(m.ptr(), ring_b[i], ring_b[i + 1], apex_t, outward);
+        } else if (apex_b >= 0) {
+            _tri_out(m.ptr(), ring_t[i + 1], ring_t[i], apex_b, outward);
+        } else {
+            _quad_out(m.ptr(), ring_b[i], ring_b[i + 1], ring_t[i + 1], ring_t[i], outward);
+        }
     }
 
     // --- Caps: separate center + ring (flat shading, own UVs) ---
