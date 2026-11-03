@@ -286,7 +286,7 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
                         }
                         _build_animations(animator, node_to_bone);
                         built_animators[skin_idx] = animator;
-                        
+
                     }
                     if (built_animators[skin_idx].is_valid()) {
                         vfx_nodes[i]->set_animator(built_animators[skin_idx]);
@@ -1041,7 +1041,7 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
             }
         }
         while (n >= 0 && n < (int)nodes.size()) {
-            owner_global = owner_global * _get_node_local_transform(nodes[n]);
+            owner_global = _get_node_local_transform(nodes[n]) * owner_global;
             n = nodes[n].parent;
         }
     }
