@@ -683,9 +683,16 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
     if (selected_bone >= 0 && skeleton.is_valid()) {
         skeleton->update_transforms();
 
+        // Bone model transforms live in SKELETON space (rooted at the armature
+        // node), but gizmo_transform is WORLD space (see _get_bone_gizmo_transform).
+        // Convert parent_world through the armature transform — otherwise a
+        // rotated armature root (e.g. 180° Y, very common) flips drag deltas
+        // (move right -> bone moves left) and deforms the skinned mesh.
+        Transform3D armature = _get_armature_transform();
         int parent = skeleton->get_bone_parent(selected_bone);
-        Transform3D parent_world = (parent >= 0) ? skeleton->get_bone_model_transform(parent) : Transform3D();
-
+        Transform3D parent_world = (parent >= 0)
+            ? armature * skeleton->get_bone_model_transform(parent)
+            : armature;
         // Old local transform of the selected bone
         Transform3D old_local;
         {
