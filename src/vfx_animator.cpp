@@ -9,6 +9,31 @@
 
 using namespace godot;
 
+// Rotation curves are euler-backed (radians in vec_value) so bezier handles
+// work per component. Unwrap keeps each component within ±PI of a reference
+// so keys never spin the long way between poses.
+static Vector3 _unwrap_euler_near(Vector3 euler, const Vector3& ref) {
+    const float TAU = 6.283185307179586f;
+    const float PI  = 3.141592653589793f;
+    for (int i = 0; i < 3; i++) {
+        float d = fmodf(euler[i] - ref[i] + PI, TAU);
+        if (d < 0.0f) d += TAU;
+        euler[i] = ref[i] + d - PI;
+    }
+    return euler;
+}
+
+// Euler reference for a new key: the last key at or before `time`
+// (or the first key if `time` is before everything).
+static Vector3 _nearest_euler_ref(const AnimationCurve& curve, float time) {
+    Vector3 ref = curve.keys.empty() ? Vector3() : curve.keys.front().vec_value;
+    for (size_t i = 0; i < curve.keys.size(); i++) {
+        if (curve.keys[i].time <= time + 0.0005f) ref = curve.keys[i].vec_value;
+        else break;
+    }
+    return ref;
+}
+
 void AnimationCurve::sort_keys() {
     std::sort(keys.begin(), keys.end(), [](const Keyframe& a, const Keyframe& b) {
         return a.time < b.time;
@@ -79,20 +104,9 @@ Vector3 AnimationCurve::sample_vector(float time) const {
 
 Quaternion AnimationCurve::sample_quaternion(float time) const {
     if (keys.empty()) return Quaternion();
-    if (keys.size() == 1) return keys[0].quat_value;
-
-    size_t i = 0;
-    for (; i < keys.size() - 1; i++) {
-        if (time >= keys[i].time && time <= keys[i+1].time) break;
-    }
-    if (i >= keys.size() - 1) return keys.back().quat_value;
-
-    const Keyframe& k0 = keys[i];
-    const Keyframe& k1 = keys[i+1];
-    float t = (k1.time - k0.time < 0.0001f) ? 0.0f : (time - k0.time) / (k1.time - k0.time);
-
-    if (k0.interp == VFXAnimator::INTERP_STEP) return k0.quat_value;
-    return k0.quat_value.slerp(k1.quat_value, t);
+    // Euler-backed: sample the euler components with the bezier-aware vector
+    // path, then convert. Rotation curves now honor interp + handles.
+    return Basis::from_euler(sample_vector(time)).get_rotation_quaternion();
 }
 
 void AnimationCurve::auto_compute_tangents() {
@@ -409,6 +423,25 @@ void VFXAnimator::add_keyframe_vector(int clip_idx, int curve_idx, float time, c
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
     auto& curve = clips[clip_idx].curves[curve_idx];
     curve.is_scalar = false;
+
+    if (curve.is_rotation) {
+        // Euler-backed rotation curve: store angles, unwrapped vs the
+        // nearest key in time for continuity.
+        for (auto& k : curve.keys) {
+            if (fabsf(k.time - time) < 0.0005f) {
+                k.vec_value = _unwrap_euler_near(value, k.vec_value);
+                k.interp = interp;
+                return;
+            }
+        }
+        Keyframe k;
+        k.time = time;
+        k.vec_value = _unwrap_euler_near(value, _nearest_euler_ref(curve, time));
+        k.interp = interp;
+        curve.keys.push_back(k);
+        curve.sort_keys();
+        return;
+    }
     for (auto& k : curve.keys) {
         if (fabsf(k.time - time) < 0.0005f) {
             k.vec_value = value;
@@ -429,6 +462,13 @@ void VFXAnimator::add_keyframe_quaternion(int clip_idx, int curve_idx, float tim
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
     auto& curve = clips[clip_idx].curves[curve_idx];
     curve.is_scalar = false;
+
+    if (curve.is_rotation) {
+        // Rotation curves store euler angles; conversion + unwrap live in
+        // add_keyframe_vector.
+        add_keyframe_vector(clip_idx, curve_idx, time, Basis(value).get_euler(), interp);
+        return;
+    }
     for (auto& k : curve.keys) {
         if (fabsf(k.time - time) < 0.0005f) {
             k.quat_value = value;
@@ -486,6 +526,11 @@ void VFXAnimator::set_keyframe_quaternion_value(int clip_idx, int curve_idx, int
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
     auto& keys = clips[clip_idx].curves[curve_idx].keys;
     if (key_idx < 0 || key_idx >= (int)keys.size()) return;
+    auto& curve = clips[clip_idx].curves[curve_idx];
+    if (curve.is_rotation) {
+        keys[key_idx].vec_value = Basis(value).get_euler();
+        return;
+    }
     keys[key_idx].quat_value = value;
 }
 
@@ -507,7 +552,11 @@ Quaternion VFXAnimator::get_keyframe_quaternion_value(int clip_idx, int curve_id
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Quaternion();
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Quaternion();
     if (key_idx < 0 || key_idx >= (int)clips[clip_idx].curves[curve_idx].keys.size()) return Quaternion();
-    return clips[clip_idx].curves[curve_idx].keys[key_idx].quat_value;
+    const auto& curve = clips[clip_idx].curves[curve_idx];
+    if (curve.is_rotation) {
+        return Basis::from_euler(curve.keys[key_idx].vec_value).get_rotation_quaternion();
+    }
+    return curve.keys[key_idx].quat_value;
 }
 
 void VFXAnimator::set_keyframe_time(int clip_idx, int curve_idx, int key_idx, float time) {
@@ -791,9 +840,7 @@ PackedVector2Array VFXAnimator::get_curve_samples(int clip_idx, int curve_idx, i
         float v = 0.0f;
 
         if (curve.is_rotation) {
-            Quaternion q = curve.sample_quaternion(t);
-            Basis b(q);
-            Vector3 euler = b.get_euler();
+            Vector3 euler = curve.sample_vector(t);
             v = (component == 0) ? euler.x : (component == 1) ? euler.y : euler.z;
         } else if (curve.is_scalar) {
             v = curve.sample_scalar(t);
@@ -828,11 +875,12 @@ void VFXAnimator::mirror_bone_curves(int clip_idx, int source_bone, int target_b
 
         for (auto& key : new_curve.keys) {
             if (new_curve.is_rotation) {
-                Basis b(key.quat_value);
-                Vector3 euler = b.get_euler();
-                euler.x = -euler.x;
-                euler.z = -euler.z;
-                key.quat_value = Basis::from_euler(euler).get_rotation_quaternion();
+                key.vec_value.x = -key.vec_value.x;
+                key.vec_value.z = -key.vec_value.z;
+                key.vec_in_tangent.x = -key.vec_in_tangent.x;
+                key.vec_in_tangent.z = -key.vec_in_tangent.z;
+                key.vec_out_tangent.x = -key.vec_out_tangent.x;
+                key.vec_out_tangent.z = -key.vec_out_tangent.z;
             } else if (!new_curve.is_scale && !new_curve.is_scalar) {
                 key.vec_value.x = -key.vec_value.x;
                 key.vec_in_tangent.x = -key.vec_in_tangent.x;
@@ -858,7 +906,8 @@ void VFXAnimator::apply_symmetry(int clip_idx, const Ref<VFXSkeleton>& skeleton)
 }
 
 // ------------------------------------------------------------------
-// Serialization — format v2 (adds node_id + explicit kind per curve)
+// Serialization — format v3 (rotation curves store euler angles;
+// v1/v2 quaternion keys are converted on load)
 // ------------------------------------------------------------------
 PackedByteArray VFXAnimator::serialize_clip(int idx) const {
     PackedByteArray data;
@@ -866,9 +915,9 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
 
     const AnimationClip& clip = clips[idx];
 
-    // Magic "VFXA" + version 2
+    // Magic "VFXA" + version 3 (rotation curves store euler angles)
     data.append('V'); data.append('F'); data.append('X'); data.append('A');
-    data.append(2);
+    data.append(3);
 
     auto append_u16 = [&](uint16_t v) {
         data.append(v & 0xFF);
@@ -919,22 +968,15 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
             append_f32(key.time);
 
             uint8_t val_type = 0; // scalar
-            if (!curve.is_scalar) {
-                val_type = curve.is_rotation ? 2 : 1; // quaternion : vector
-            }
+            if (!curve.is_scalar) val_type = 1; // vector (rotation curves store euler angles)
             data.append(val_type);
 
             if (val_type == 0) {
                 append_f32(key.value);
-            } else if (val_type == 1) {
+            } else {
                 append_f32(key.vec_value.x);
                 append_f32(key.vec_value.y);
                 append_f32(key.vec_value.z);
-            } else {
-                append_f32(key.quat_value.x);
-                append_f32(key.quat_value.y);
-                append_f32(key.quat_value.z);
-                append_f32(key.quat_value.w);
             }
 
             append_f32(key.in_tangent);
@@ -957,7 +999,7 @@ void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
     if (data.size() < 5) return;
     if (data[0] != 'V' || data[1] != 'F' || data[2] != 'X' || data[3] != 'A') return;
     uint8_t version = data[4];
-    if (version != 1 && version != 2) return;
+    if (version < 1 || version > 3) return;
 
     int p = 5;
     auto read_u16 = [&]() -> uint16_t {
@@ -1029,10 +1071,12 @@ void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
                 key.vec_value.y = read_f32();
                 key.vec_value.z = read_f32();
             } else {
-                key.quat_value.x = read_f32();
-                key.quat_value.y = read_f32();
-                key.quat_value.z = read_f32();
-                key.quat_value.w = read_f32();
+                // v1/v2: rotation was stored as a quaternion — convert to euler
+                Quaternion q;
+                q.x = read_f32(); q.y = read_f32(); q.z = read_f32(); q.w = read_f32();
+                Vector3 euler = Basis(q).get_euler();
+                if (!curve.keys.empty()) euler = _unwrap_euler_near(euler, curve.keys.back().vec_value);
+                key.vec_value = euler;
             }
 
             key.in_tangent = read_f32();
