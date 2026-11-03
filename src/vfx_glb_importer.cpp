@@ -161,9 +161,8 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     // Create a VFXSceneNode for every NON-SKELETON glTF node only
     std::vector<Ref<VFXSceneNode>> vfx_nodes(nodes.size());
     for (int i = 0; i < (int)nodes.size(); i++) {
-        if (skeleton_node_set.count(i)) continue; // skip bones & bone descendant
+        if (skeleton_node_set.count(i)) continue; // skip bones & bone descendants
         vfx_nodes[i].instantiate();
-        vfx_nodes[i]->set_node_id(scene->get_unique_id());
         vfx_nodes[i]->set_node_name(nodes[i].name);
         vfx_nodes[i]->set_local_transform(_get_node_local_transform(nodes[i]));
         vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_EMPTY);
@@ -285,8 +284,9 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
                             }
                         }
                         _build_animations(animator, node_to_bone);
-                        built_animators[skin_idx] = animator;
-
+                        if (animator->get_clip_count() > 0) {
+                            built_animators[skin_idx] = animator;
+                        }
                     }
                     if (built_animators[skin_idx].is_valid()) {
                         vfx_nodes[i]->set_animator(built_animators[skin_idx]);
@@ -1041,7 +1041,7 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
             }
         }
         while (n >= 0 && n < (int)nodes.size()) {
-            owner_global = _get_node_local_transform(nodes[n]) * owner_global;
+            owner_global = owner_global * _get_node_local_transform(nodes[n]);
             n = nodes[n].parent;
         }
     }
