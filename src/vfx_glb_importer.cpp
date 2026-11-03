@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/vector4i.hpp>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <unordered_set>
 
 using namespace godot;
@@ -161,8 +162,9 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     // Create a VFXSceneNode for every NON-SKELETON glTF node only
     std::vector<Ref<VFXSceneNode>> vfx_nodes(nodes.size());
     for (int i = 0; i < (int)nodes.size(); i++) {
-        if (skeleton_node_set.count(i)) continue; // skip bones & bone descendants
+        if (skeleton_node_set.count(i)) continue; // skip bones & bone descendant
         vfx_nodes[i].instantiate();
+        vfx_nodes[i]->set_node_id(scene->get_unique_id());
         vfx_nodes[i]->set_node_name(nodes[i].name);
         vfx_nodes[i]->set_local_transform(_get_node_local_transform(nodes[i]));
         vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_EMPTY);
@@ -244,7 +246,27 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
         if (!vfx_nodes[i].is_valid()) continue; // skeleton node, no scene representation
         if (nodes[i].mesh >= 0 && nodes[i].mesh < (int)meshes.size()) {
             const GLBMesh& glb_mesh = meshes[nodes[i].mesh];
-            Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error);
+
+            // Some exporters store skinned vertices in SCENE space and write
+            // IBMs as pure inverse joint globals (inverseBindMatrix = inv(G_joint),
+            // without the mesh node transform). Per glTF spec the skinned mesh
+            // node's own transform is then ignored. Our pipeline renders the
+            // mesh under its node and skins in mesh-node space, so for those
+            // files we must bake the inverse of the mesh node's global into
+            // the vertices to bring them into mesh-node space.
+            Transform3D vertex_space; // identity
+            if (nodes[i].skin >= 0 && nodes[i].skin < (int)skins.size()
+                    && _skin_uses_scene_space_ibms(skins[nodes[i].skin], i)) {
+                int n = i;
+                Transform3D owner_global;
+                while (n >= 0 && n < (int)nodes.size()) {
+                    owner_global = _get_node_local_transform(nodes[n]) * owner_global;
+                    n = nodes[n].parent;
+                }
+                vertex_space = owner_global.affine_inverse();
+            }
+
+            Ref<VFXMesh> mesh = _build_mesh(glb_mesh, error, vertex_space);
             if (mesh.is_null()) continue;
 
             vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_MESH);
@@ -284,9 +306,8 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
                             }
                         }
                         _build_animations(animator, node_to_bone);
-                        if (animator->get_clip_count() > 0) {
-                            built_animators[skin_idx] = animator;
-                        }
+                        built_animators[skin_idx] = animator;
+
                     }
                     if (built_animators[skin_idx].is_valid()) {
                         vfx_nodes[i]->set_animator(built_animators[skin_idx]);
@@ -876,7 +897,7 @@ bool VFXGLBImporter::_read_accessor_mat4(int accessor_idx, std::vector<Transform
     return true;
 }
 
-Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_error) {
+Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_error, const Transform3D& vertex_space) {
     Ref<VFXMesh> mesh;
     mesh.instantiate();
 
@@ -942,6 +963,13 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
         for (int i = 0; i < positions.size(); i++) {
             positions[i] = _gltf_to_godot_v3(positions[i]);
         }
+        // Bake scene-space skinned vertices into mesh-node space when the
+        // file uses IBM = inverse(joint global) convention (see import_glb).
+        if (vertex_space != Transform3D()) {
+            for (int i = 0; i < positions.size(); i++) {
+                positions[i] = vertex_space.xform(positions[i]);
+            }
+        }
         for (int i = 0; i < normals.size(); i++) {
             normals[i] = _gltf_to_godot_n(normals[i]);
         }
@@ -986,6 +1014,65 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
     return mesh;
 }
 
+// Max abs difference between two transforms (basis rows + origin).
+static float _transform_diff(const Transform3D& a, const Transform3D& b) {
+    float d = 0.0f;
+    for (int i = 0; i < 3; i++) {
+        d = MAX(d, (a.basis[i] - b.basis[i]).length());
+    }
+    d = MAX(d, (a.get_origin() - b.get_origin()).length());
+    return d;
+}
+
+// Two IBM conventions exist in the wild:
+//   standard    : IBM_j = inverse(G_joint) * G_meshNode  (vertices in mesh-node space)
+//   scene-space : IBM_j = inverse(G_joint)               (vertices in scene space,
+//                                                         mesh node transform ignored)
+// Decide by comparing inverse(IBM) against joint globals derived from the node
+// TRS hierarchy, with and without the mesh node's global transform applied.
+bool VFXGLBImporter::_skin_uses_scene_space_ibms(const GLBSkin& glb_skin, int owner_node_idx) {
+    int joint_count = glb_skin.joints.size();
+    if (joint_count == 0 || glb_skin.inverse_bind_matrices < 0) return false;
+
+    std::vector<Transform3D> ibms;
+    String err;
+    if (!_read_accessor_mat4(glb_skin.inverse_bind_matrices, ibms, err)) return false;
+    if ((int)ibms.size() < joint_count) return false;
+
+    // Godot-space globals for all nodes (memoized, cycle-guarded)
+    std::vector<Transform3D> node_global(nodes.size());
+    std::vector<int> global_state(nodes.size(), 0);
+    std::function<Transform3D(int)> global_of = [&](int idx) -> Transform3D {
+        if (idx < 0 || idx >= (int)nodes.size()) return Transform3D();
+        if (global_state[idx] == 2) return node_global[idx];
+        if (global_state[idx] == 1) return Transform3D(); // cycle guard
+        global_state[idx] = 1;
+        Transform3D local = _get_node_local_transform(nodes[idx]);
+        Transform3D g = (nodes[idx].parent >= 0) ? global_of(nodes[idx].parent) * local : local;
+        node_global[idx] = g;
+        global_state[idx] = 2;
+        return g;
+    };
+
+    // The mesh node may be a SIBLING of the joints (not an ancestor), so it
+    // cannot be discovered from the joint list — the caller must pass it.
+    Transform3D g_mesh_inv = global_of(owner_node_idx).affine_inverse();
+
+    double err_standard = 0.0, err_scene = 0.0;
+    int checked = 0;
+    int step = MAX(1, joint_count / 8);
+    for (int i = 0; i < joint_count && checked < 8; i += step, checked++) {
+        int ni = glb_skin.joints[i];
+        if (ni < 0 || ni >= (int)nodes.size()) continue;
+        Transform3D inv_ibm = _gltf_to_godot_t(ibms[i]).affine_inverse();
+        Transform3D g_joint = global_of(ni);
+        err_scene    += _transform_diff(inv_ibm, g_joint);
+        err_standard += _transform_diff(inv_ibm, g_mesh_inv * g_joint);
+    }
+    if (checked == 0) return false;
+    return err_scene < err_standard;
+}
+
 Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int owner_node_idx, String& out_error) {
     Ref<VFXSkeleton> skeleton;
     skeleton.instantiate();
@@ -1026,9 +1113,18 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
     // Bind poses must be expressed relative to the node that will OWN the
     // skeleton in the VFX scene — the mesh node carrying the skin (import_glb
     // attaches the skeleton to that same node, and the exporter parents the
-    // bone roots under it and computes IBMs as inverse(owner_global * bind)).
-    // Using any other node here (e.g. the armature) offsets the exported
-    // skeleton by (mesh_global * owner_global^-1).
+    // bone roots under it).
+    //
+    // Two IBM conventions exist in the wild (see _skin_uses_scene_space_ibms):
+    //   standard    : IBM_j = inverse(G_joint) * G_meshNode
+    //                 -> bind (mesh-node-relative) = inverse(IBM_j)
+    //   scene-space : IBM_j = inverse(G_joint), vertices in scene space
+    //                 -> bind = inverse(G_meshNode) * inverse(IBM_j)
+    // Applying the owner inverse unconditionally double-transforms one of the
+    // two conventions, which showed up as the mesh floating ~0.6 above the
+    // skeleton (pure Y offset) or bones rotating mirrored.
+    bool scene_space_ibms = _skin_uses_scene_space_ibms(glb_skin, owner_node_idx);
+
     Transform3D owner_global;
     {
         int n = owner_node_idx;
@@ -1041,7 +1137,8 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
             }
         }
         while (n >= 0 && n < (int)nodes.size()) {
-            owner_global = owner_global * _get_node_local_transform(nodes[n]);
+            // Parent-first accumulation: global = L(root) * ... * L(node)
+            owner_global = _get_node_local_transform(nodes[n]) * owner_global;
             n = nodes[n].parent;
         }
     }
@@ -1050,7 +1147,9 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
     std::vector<Transform3D> bind_poses(joint_count);
     for (int i = 0; i < joint_count; i++) {
         Transform3D ibm = _gltf_to_godot_t(ibms[i]);
-        bind_poses[i] = owner_inv * ibm.affine_inverse();
+        bind_poses[i] = scene_space_ibms
+            ? owner_inv * ibm.affine_inverse()
+            : ibm.affine_inverse();
     }
 
     for (int i = 0; i < joint_count; i++) {
