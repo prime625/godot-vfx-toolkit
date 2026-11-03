@@ -127,8 +127,9 @@ private:
     static Basis _gltf_to_godot_b(const Basis& b);
     Transform3D _get_node_local_transform(const GLBNode& node) const;
 
-    Ref<VFXMesh> _build_mesh(const GLBMesh& glb_mesh, String& out_error);
+    Ref<VFXMesh> _build_mesh(const GLBMesh& glb_mesh, String& out_error, const Transform3D& vertex_space = Transform3D());
     Ref<VFXSkeleton> _build_skeleton(const GLBSkin& glb_skin, int owner_node_idx, String& out_error);
+    bool _skin_uses_scene_space_ibms(const GLBSkin& glb_skin, int owner_node_idx);
     void _build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone);
     void _clear_document();
 
