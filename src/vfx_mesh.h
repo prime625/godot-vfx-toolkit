@@ -3,6 +3,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/mesh.hpp>
+#include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -89,6 +90,9 @@ public:
     mutable std::vector<int> face_remap;
 
     std::vector<VFXUVLayer> uv_layers;
+
+    // Imported render material (GLB/FBX). Plain field, not serialized yet.
+    Ref<Material> material;
 
     void _rebuild_remap() const;
     void _clear_mesh();
