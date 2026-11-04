@@ -32,6 +32,9 @@ void VFXTexturePainter::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_top_threshold", "threshold"), &VFXTexturePainter::set_top_threshold);
     ClassDB::bind_method(D_METHOD("get_top_threshold"), &VFXTexturePainter::get_top_threshold);
 
+    ClassDB::bind_method(D_METHOD("set_mesh_transform", "transform"), &VFXTexturePainter::set_mesh_transform);
+    ClassDB::bind_method(D_METHOD("get_mesh_transform"), &VFXTexturePainter::get_mesh_transform);
+
     ClassDB::bind_method(D_METHOD("stroke_begin"), &VFXTexturePainter::stroke_begin);
     ClassDB::bind_method(D_METHOD("paint_at", "ray_origin", "ray_dir"), &VFXTexturePainter::paint_at);
     ClassDB::bind_method(D_METHOD("stroke_end"), &VFXTexturePainter::stroke_end);
