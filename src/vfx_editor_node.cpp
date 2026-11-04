@@ -213,6 +213,9 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_texture_painter", "p"), &VFXEditorNode::set_texture_painter);
     ClassDB::bind_method(D_METHOD("get_texture_painter"), &VFXEditorNode::get_texture_painter);
     ClassDB::bind_method(D_METHOD("paint_at", "ray_origin", "ray_dir"), &VFXEditorNode::paint_at);
+    ClassDB::bind_method(D_METHOD("set_paint_material", "mat"), &VFXEditorNode::set_paint_material);
+    ClassDB::bind_method(D_METHOD("get_paint_material"), &VFXEditorNode::get_paint_material);
+
 
     // === SYMMETRY ===
     ClassDB::bind_method(D_METHOD("set_symmetry_enabled", "enabled"), &VFXEditorNode::set_symmetry_enabled);
@@ -1530,3 +1533,10 @@ Transform3D VFXEditorNode::_get_armature_transform() const {
     }
     return Transform3D();
 }
+
+void VFXEditorNode::set_paint_material(const Ref<Material>& p_mat) {
+    paint_material = p_mat;
+    _update_godot_mesh();
+}
+
+Ref<Material> VFXEditorNode::get_paint_material() const { return paint_material; }
