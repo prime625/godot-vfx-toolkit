@@ -98,6 +98,8 @@ private:
     bool animator_auto_apply = true;
     Ref<VFXCurve> active_curve;
     Ref<VFXTexturePainter> painter;
+    Ref<Material> paint_material;   // shown on the mesh while texture painting
+
     Ref<VFXScene> scene;
     Ref<VFXSceneNode> active_scene_node;
 
@@ -436,6 +438,8 @@ public:
     float get_proportional_radius() const;
     void set_falloff_mode(int mode);
     int get_falloff_mode() const;
+    void set_paint_material(const Ref<Material>& p_mat);
+    Ref<Material> get_paint_material() const;
 
     // === TEXTURE PAINTER ===
     void set_texture_painter(const Ref<VFXTexturePainter>& p);
