@@ -2,6 +2,9 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/json.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/variant/vector4i.hpp>
 #include <cmath>
@@ -78,6 +81,12 @@ void VFXGLBImporter::_clear_document() {
     meshes.clear();
     skins.clear();
     animations.clear();
+    images.clear();
+    samplers.clear();
+    textures.clear();
+    materials.clear();
+    godot_materials.clear();
+    decoded_textures.clear();
     scene_nodes.clear();
 }
 
@@ -92,6 +101,7 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     result[KEY_SKIN] = Variant();
     result[KEY_ANIMATOR] = Variant();
     result[KEY_MATERIAL_COUNT] = 0;
+    result[KEY_MATERIALS] = Array();
     result[KEY_ANIMATION_COUNT] = 0;
     result[KEY_NODE_COUNT] = 0;
     result[KEY_MESH_COUNT] = 0;
@@ -114,6 +124,16 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
     result[KEY_NODE_COUNT] = (int)nodes.size();
     result[KEY_MESH_COUNT] = (int)meshes.size();
     result[KEY_ANIMATION_COUNT] = (int)animations.size();
+
+    // Build Godot materials (and decode embedded textures) up front so
+    // _build_mesh can attach them. Texture problems are non-fatal.
+    _build_materials();
+    result[KEY_MATERIAL_COUNT] = (int)godot_materials.size();
+    Array materials_array;
+    for (const Ref<StandardMaterial3D>& m : godot_materials) {
+        if (m.is_valid()) materials_array.append(m);
+    }
+    result[KEY_MATERIALS] = materials_array;
 
     // Create VFXScene and build node hierarchy
     Ref<VFXScene> scene;
@@ -441,6 +461,30 @@ bool VFXGLBImporter::_parse_json(const String& json_text, const PackedByteArray&
             return false;
         }
     }
+    if (doc.has("images")) {
+        if (!_parse_images(doc["images"])) {
+            out_error = "Failed to parse images";
+            return false;
+        }
+    }
+    if (doc.has("samplers")) {
+        if (!_parse_samplers(doc["samplers"])) {
+            out_error = "Failed to parse samplers";
+            return false;
+        }
+    }
+    if (doc.has("textures")) {
+        if (!_parse_textures(doc["textures"])) {
+            out_error = "Failed to parse textures";
+            return false;
+        }
+    }
+    if (doc.has("materials")) {
+        if (!_parse_materials(doc["materials"])) {
+            out_error = "Failed to parse materials";
+            return false;
+        }
+    }
     if (doc.has("skins")) {
         if (!_parse_skins(doc["skins"])) {
             out_error = "Failed to parse skins";
@@ -645,6 +689,204 @@ bool VFXGLBImporter::_parse_buffers(const Array& buf_arr, const PackedByteArray&
     return true;
 }
 
+
+
+bool VFXGLBImporter::_parse_images(const Array& img_arr) {
+    for (int i = 0; i < img_arr.size(); i++) {
+        Dictionary d = img_arr[i];
+        GLBImage img;
+        img.name = d.get("name", "image_" + String::num_int64(i));
+        img.mime_type = d.get("mimeType", "");
+        if (d.has("bufferView")) img.buffer_view = d["bufferView"];
+        // External URI images are not supported (same policy as buffers).
+        images.push_back(img);
+    }
+    return true;
+}
+
+bool VFXGLBImporter::_parse_samplers(const Array& samp_arr) {
+    for (int i = 0; i < samp_arr.size(); i++) {
+        Dictionary d = samp_arr[i];
+        GLBSampler s;
+        s.mag_filter = d.get("magFilter", -1);
+        s.min_filter = d.get("minFilter", -1);
+        s.wrap_s = d.get("wrapS", 10497);
+        s.wrap_t = d.get("wrapT", 10497);
+        samplers.push_back(s);
+    }
+    return true;
+}
+
+bool VFXGLBImporter::_parse_textures(const Array& tex_arr) {
+    for (int i = 0; i < tex_arr.size(); i++) {
+        Dictionary d = tex_arr[i];
+        GLBTexture t;
+        t.sampler = d.get("sampler", -1);
+        t.source = d.get("source", -1);
+        textures.push_back(t);
+    }
+    return true;
+}
+
+VFXGLBImporter::GLBTextureInfo VFXGLBImporter::_parse_texture_info(const Dictionary& d) {
+    GLBTextureInfo info;
+    if (d.has("index")) info.index = d["index"];
+    if (d.has("texCoord")) info.tex_coord = d["texCoord"];
+    return info;
+}
+
+bool VFXGLBImporter::_parse_materials(const Array& mat_arr) {
+    for (int i = 0; i < mat_arr.size(); i++) {
+        Dictionary d = mat_arr[i];
+        GLBMaterial m;
+        m.name = d.get("name", "material_" + String::num_int64(i));
+
+        if (d.has("pbrMetallicRoughness")) {
+            Dictionary pbr = d["pbrMetallicRoughness"];
+            if (pbr.has("baseColorFactor")) {
+                Array c = pbr["baseColorFactor"];
+                if (c.size() >= 4) {
+                    m.pbr.base_color_factor = Color(c[0], c[1], c[2], c[3]);
+                }
+            }
+            if (pbr.has("baseColorTexture")) {
+                m.pbr.base_color_texture = _parse_texture_info(pbr["baseColorTexture"]);
+            }
+            m.pbr.metallic_factor = pbr.get("metallicFactor", 1.0);
+            m.pbr.roughness_factor = pbr.get("roughnessFactor", 1.0);
+            if (pbr.has("metallicRoughnessTexture")) {
+                m.pbr.metallic_roughness_texture = _parse_texture_info(pbr["metallicRoughnessTexture"]);
+            }
+        }
+
+        if (d.has("normalTexture")) m.normal_texture = _parse_texture_info(d["normalTexture"]);
+        if (d.has("emissiveTexture")) m.emissive_texture = _parse_texture_info(d["emissiveTexture"]);
+        if (d.has("occlusionTexture")) m.occlusion_texture = _parse_texture_info(d["occlusionTexture"]);
+        if (d.has("emissiveFactor")) {
+            Array e = d["emissiveFactor"];
+            if (e.size() >= 3) m.emissive_factor = Color(e[0], e[1], e[2], 1.0);
+        }
+        m.alpha_mode = d.get("alphaMode", "OPAQUE");
+        m.alpha_cutoff = d.get("alphaCutoff", 0.5);
+        m.double_sided = d.get("doubleSided", false);
+
+        if (d.has("extensions")) {
+            Dictionary ext = d["extensions"];
+            if (ext.has("KHR_materials_unlit")) m.unlit = true;
+        }
+
+        materials.push_back(m);
+    }
+    return true;
+}
+
+Ref<Image> VFXGLBImporter::_decode_image(int image_idx) {
+    if (image_idx < 0 || image_idx >= (int)images.size()) return Ref<Image>();
+    const GLBImage& img = images[image_idx];
+
+    if (img.buffer_view < 0 || img.buffer_view >= (int)buffer_views.size()) {
+        UtilityFunctions::push_warning("VFXGLBImporter: image '" + img.name + "' has no embedded bufferView (external URI unsupported), skipping");
+        return Ref<Image>();
+    }
+    const GLBBufferView& bv = buffer_views[img.buffer_view];
+    if (bv.buffer < 0 || bv.buffer >= (int)buffers.size()) return Ref<Image>();
+    const GLBBuffer& buf = buffers[bv.buffer];
+    if (bv.byte_offset + bv.byte_length > buf.data.size()) return Ref<Image>();
+
+    PackedByteArray bytes;
+    bytes.resize(bv.byte_length);
+    memcpy(bytes.ptrw(), buf.data.ptr() + bv.byte_offset, bv.byte_length);
+
+    Ref<Image> image;
+    image.instantiate();
+    Error err = FAILED;
+    if (img.mime_type == "image/png") {
+        err = image->load_png_from_buffer(bytes);
+    } else if (img.mime_type == "image/jpeg" || img.mime_type == "image/jpg") {
+        err = image->load_jpg_from_buffer(bytes);
+    } else {
+        // Unknown/missing mimeType: sniff PNG first, then JPEG.
+        err = image->load_png_from_buffer(bytes);
+        if (err != OK) err = image->load_jpg_from_buffer(bytes);
+    }
+    if (err != OK || image->is_empty()) {
+        UtilityFunctions::push_warning("VFXGLBImporter: failed to decode image '" + img.name + "'");
+        return Ref<Image>();
+    }
+    return image;
+}
+
+Ref<ImageTexture> VFXGLBImporter::_get_texture(int texture_idx) {
+    if (texture_idx < 0 || texture_idx >= (int)textures.size()) return Ref<ImageTexture>();
+    if (decoded_textures[texture_idx].is_valid()) return decoded_textures[texture_idx];
+
+    Ref<ImageTexture> tex;
+    Ref<Image> img = _decode_image(textures[texture_idx].source);
+    if (img.is_valid()) {
+        tex.instantiate();
+        tex->set_image(img);
+    }
+    decoded_textures[texture_idx] = tex;
+    return tex;
+}
+
+void VFXGLBImporter::_build_materials() {
+    godot_materials.clear();
+    godot_materials.resize(materials.size());
+    decoded_textures.clear();
+    decoded_textures.resize(textures.size());
+
+    for (int i = 0; i < (int)materials.size(); i++) {
+        const GLBMaterial& m = materials[i];
+        Ref<StandardMaterial3D> mat;
+        mat.instantiate();
+        mat->set_resource_name(m.name);
+
+        // Base color: factor x texture (vertex COLOR_0 multiplies in too).
+        mat->set_albedo(m.pbr.base_color_factor);
+        if (m.pbr.base_color_texture.index >= 0) {
+            Ref<ImageTexture> tex = _get_texture(m.pbr.base_color_texture.index);
+            if (tex.is_valid()) {
+                mat->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, tex);
+                mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+            }
+        }
+
+        mat->set_metallic(m.pbr.metallic_factor);
+        mat->set_roughness(m.pbr.roughness_factor);
+
+        if (m.normal_texture.index >= 0) {
+            Ref<ImageTexture> tex = _get_texture(m.normal_texture.index);
+            if (tex.is_valid()) mat->set_texture(BaseMaterial3D::TEXTURE_NORMAL, tex);
+        }
+
+        bool has_emissive_tex = false;
+        if (m.emissive_texture.index >= 0) {
+            Ref<ImageTexture> tex = _get_texture(m.emissive_texture.index);
+            if (tex.is_valid()) {
+                mat->set_texture(BaseMaterial3D::TEXTURE_EMISSION, tex);
+                has_emissive_tex = true;
+            }
+        }
+        if (has_emissive_tex || m.emissive_factor.r > 0.0f || m.emissive_factor.g > 0.0f || m.emissive_factor.b > 0.0f) {
+            // With an emissive texture the factor is baked into the texture;
+            // without one it is the plain emissive color.
+            mat->set_emission(has_emissive_tex ? Color(1, 1, 1) : m.emissive_factor);
+        }
+
+        if (m.alpha_mode == "BLEND") {
+            mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA);
+        } else if (m.alpha_mode == "MASK") {
+            mat->set_transparency(BaseMaterial3D::TRANSPARENCY_ALPHA_SCISSOR);
+            mat->set_alpha_scissor_threshold(m.alpha_cutoff);
+        }
+
+        mat->set_cull_mode(m.double_sided ? BaseMaterial3D::CULL_DISABLED : BaseMaterial3D::CULL_BACK);
+        if (m.unlit) mat->set_shading_mode(BaseMaterial3D::SHADING_MODE_UNSHADED);
+
+        godot_materials[i] = mat;
+    }
+}
 
 int VFXGLBImporter::_accessor_component_count(const String& type) const {
     if (type == "SCALAR") return 1;
@@ -922,6 +1164,13 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
         if (pos_acc < 0) {
             out_error = "Primitive missing POSITION attribute";
             return Ref<VFXMesh>();
+        }
+
+        // Material: VFXMesh is a single soup, so the first primitive that
+        // references a valid material wins. Multi-material meshes would
+        // need per-primitive surface splitting (TODO).
+        if (mesh->material.is_null() && prim.material >= 0 && prim.material < (int)godot_materials.size()) {
+            mesh->material = godot_materials[prim.material];
         }
 
         PackedVector3Array positions;
