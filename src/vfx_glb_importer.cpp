@@ -840,7 +840,7 @@ void VFXGLBImporter::_build_materials() {
         const GLBMaterial& m = materials[i];
         Ref<StandardMaterial3D> mat;
         mat.instantiate();
-        mat->set_resource_name(m.name);
+        mat->set_name(m.name);
 
         // Base color: factor x texture (vertex COLOR_0 multiplies in too).
         mat->set_albedo(m.pbr.base_color_factor);
