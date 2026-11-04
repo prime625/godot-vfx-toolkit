@@ -1251,6 +1251,8 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
             visual->set_mesh(am);
             if (show_weights && p_node->get_skin().is_valid()) {
                 visual->set_surface_override_material(0, weight_material);
+            } else if (vmesh->material.is_valid()) {
+                visual->set_surface_override_material(0, vmesh->material);
             } else {
                 visual->set_surface_override_material(0, base_material);
             }
