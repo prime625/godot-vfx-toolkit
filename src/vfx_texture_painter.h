@@ -77,6 +77,11 @@ public:
     bool get_paint_top_only() const;
     void set_top_threshold(float t);
     float get_top_threshold() const;
+    // vfx_texture_painter.h
+    Transform3D mesh_node_transform;
+    void set_mesh_transform(const Transform3D& t) { mesh_node_transform = t; }
+    Transform3D get_mesh_transform() const { return mesh_node_transform; }
+
 
     void stroke_begin();
     void paint_at(const Vector3& ray_origin, const Vector3& ray_dir);
