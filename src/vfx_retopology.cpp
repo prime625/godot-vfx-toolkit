@@ -335,6 +335,7 @@ void VFXRetopology::_mark_protected() {
 
 bool VFXRetopology::_can_collapse_edge(int edge_id) const {
     if (edge_id < 0 || edge_id >= mesh->get_edge_count()) return false;
+    if (!mesh->is_edge_valid(edge_id)) return false;
     if (protected_edges.find(edge_id) != protected_edges.end()) return false;
     if (mesh->is_edge_boundary(edge_id) && preserve_boundary) return false;
 
@@ -354,6 +355,7 @@ bool VFXRetopology::_can_collapse_edge(int edge_id) const {
 
 bool VFXRetopology::_can_flip_edge(int edge_id) const {
     if (edge_id < 0 || edge_id >= mesh->get_edge_count()) return false;
+    if (!mesh->is_edge_valid(edge_id)) return false;
     if (mesh->is_edge_boundary(edge_id)) return false;
     if (protected_edges.find(edge_id) != protected_edges.end()) return false;
     return true;
@@ -451,6 +453,9 @@ void VFXRetopology::_relax_vertices(int iterations) {
     if (vc == 0) return;
 
     std::vector<Vector3> new_positions(vc);
+    for (int i = 0; i < vc; i++) {
+        new_positions[i] = mesh->get_vertex_position(i);
+    }
 
     for (int iter = 0; iter < iterations; iter++) {
         for (int i = 0; i < vc; i++) {
@@ -484,6 +489,7 @@ void VFXRetopology::_relax_vertices(int iterations) {
 
 float VFXRetopology::_edge_length(int edge_id) const {
     int v0, v1;
+    if (!mesh->is_edge_valid(edge_id)) return 0.0f;
     if (!mesh->get_edge_vertices(edge_id, v0, v1)) return 0.0f;
     return mesh->get_vertex_position(v0).distance_to(mesh->get_vertex_position(v1));
 }
@@ -499,17 +505,10 @@ float VFXRetopology::_dihedral_angle(int edge_id) const {
 }
 
 Vector3 VFXRetopology::_face_normal(int face_id) const {
-    // Extract face vertices and compute normal
-    // Since we don't have direct face vertex access, approximate from mesh data
-    // In practice, you'd walk the half-edge loop
-    PackedInt32Array indices = mesh->get_indices();
-    if (indices.size() < 3) return Vector3(0, 1, 0);
-
-    // Use first triangle as approximation
-    Vector3 p0 = mesh->get_vertex_position(indices[0]);
-    Vector3 p1 = mesh->get_vertex_position(indices[1]);
-    Vector3 p2 = mesh->get_vertex_position(indices[2]);
-    return (p1 - p0).cross(p2 - p0).normalized();
+    if (mesh.is_null() || face_id < 0 || face_id >= mesh->get_face_count()) {
+        return Vector3(0, 1, 0);
+    }
+    return mesh->get_face_normal(face_id);
 }
 
 bool VFXRetopology::_is_boundary_vertex(int vidx) const {
