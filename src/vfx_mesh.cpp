@@ -1718,8 +1718,18 @@ Ref<VFXMesh> VFXMesh::create_from_curve(const PackedVector3Array& points,
 // TOPOLOGY EDITING (for retopology)
 // ============================================================================
 
-bool VFXMesh::get_edge_vertices(int edge_id, int& out_v0, int& out_v1) const {
+bool VFXMesh::is_edge_valid(int edge_id) const {
     if (edge_id < 0 || edge_id >= (int)edges.size()) return false;
+    vfx::HEEdge* e = edges[edge_id];
+    if (!e || e->deleted || !e->vertex || e->vertex->deleted || !e->next ||
+        !e->next->vertex || e->next->vertex->deleted || !e->face || e->face->deleted) {
+        return false;
+    }
+    return true;
+}
+
+bool VFXMesh::get_edge_vertices(int edge_id, int& out_v0, int& out_v1) const {
+    if (!is_edge_valid(edge_id)) return false;
     vfx::HEEdge* e = edges[edge_id];
     if (!e || !e->vertex) return false;
 
