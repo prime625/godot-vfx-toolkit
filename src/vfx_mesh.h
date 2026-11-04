@@ -173,6 +173,7 @@ public:
     int split_edge(int edge_id);
     bool get_edge_vertices(int edge_id, int& out_v0, int& out_v1) const;
     int get_edge_faces(int edge_id, int out_faces[2]) const;
+    bool is_edge_valid(int edge_id) const;
     bool is_edge_boundary(int edge_id) const;
     void remove_face(int face_id);
 
