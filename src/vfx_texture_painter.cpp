@@ -253,6 +253,12 @@ void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
     }
 }
 
+
+Transform3D inv = mesh_node_transform.affine_inverse();
+Vector3 local_origin = inv.xform(ray_origin);
+Vector3 local_dir    = inv.basis.xform(ray_dir);   // direction: no translation, no normalize needed
+if (!_raycast_mesh_uv(local_origin, local_dir, hit_uv, hit_normal)) return;
+
 void VFXTexturePainter::paint_at(const Vector3& ray_origin, const Vector3& ray_dir) {
     Vector2 hit_uv;
     Vector3 hit_normal;
