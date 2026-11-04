@@ -26,8 +26,10 @@ void VFXEditorNode::_update_godot_mesh() {
 
     mesh_instance->set_mesh(am);
 
-    if (show_weights && skin.is_valid()) {
+    if (show_weights && weight_material.is_valid()) {
         mesh_instance->set_surface_override_material(0, weight_material);
+    } else if (paint_material.is_valid()) {
+        mesh_instance->set_surface_override_material(0, paint_material);
     } else if (mesh->material.is_valid()) {
         mesh_instance->set_surface_override_material(0, mesh->material);
     } else {
