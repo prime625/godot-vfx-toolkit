@@ -9,11 +9,15 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <vector>
 #include <unordered_map>
 
@@ -39,6 +43,7 @@ public:
     static inline const char* KEY_SKIN = "skin";
     static inline const char* KEY_ANIMATOR = "animator";
     static inline const char* KEY_MATERIAL_COUNT = "material_count";
+    static inline const char* KEY_MATERIALS = "materials";
     static inline const char* KEY_ANIMATION_COUNT = "animation_count";
     static inline const char* KEY_NODE_COUNT = "node_count";
     static inline const char* KEY_MESH_COUNT = "mesh_count";
@@ -88,6 +93,41 @@ private:
         std::vector<GLBAnimationSampler> samplers;
         std::vector<GLBAnimationChannel> channels;
     };
+    struct GLBImage {
+        String name;
+        String mime_type;
+        int buffer_view = -1;
+    };
+    struct GLBSampler {
+        int mag_filter = -1, min_filter = -1;
+        int wrap_s = 10497, wrap_t = 10497; // glTF default: REPEAT
+    };
+    struct GLBTexture {
+        int sampler = -1, source = -1;
+    };
+    struct GLBTextureInfo {
+        int index = -1;
+        int tex_coord = 0;
+    };
+    struct GLBPBRMetallicRoughness {
+        Color base_color_factor = Color(1, 1, 1, 1);
+        GLBTextureInfo base_color_texture;
+        float metallic_factor = 1.0f;
+        float roughness_factor = 1.0f;
+        GLBTextureInfo metallic_roughness_texture;
+    };
+    struct GLBMaterial {
+        String name;
+        GLBPBRMetallicRoughness pbr;
+        GLBTextureInfo normal_texture;
+        GLBTextureInfo emissive_texture;
+        GLBTextureInfo occlusion_texture;
+        Color emissive_factor = Color(0, 0, 0, 1);
+        String alpha_mode = "OPAQUE";
+        float alpha_cutoff = 0.5f;
+        bool double_sided = false;
+        bool unlit = false;
+    };
 
     std::vector<GLBBuffer> buffers;
     std::vector<GLBBufferView> buffer_views;
@@ -96,6 +136,12 @@ private:
     std::vector<GLBMesh> meshes;
     std::vector<GLBSkin> skins;
     std::vector<GLBAnimation> animations;
+    std::vector<GLBImage> images;
+    std::vector<GLBSampler> samplers;
+    std::vector<GLBTexture> textures;
+    std::vector<GLBMaterial> materials;
+    std::vector<Ref<StandardMaterial3D>> godot_materials;
+    std::vector<Ref<ImageTexture>> decoded_textures;
     std::vector<int> scene_nodes;
     Transform3D _get_node_world_transform(int node_idx, const std::vector<Ref<VFXSceneNode>>& vfx_nodes) const;
 
@@ -108,6 +154,14 @@ private:
     bool _parse_accessors(const Array& acc_arr);
     bool _parse_buffer_views(const Array& bv_arr);
     bool _parse_buffers(const Array& buf_arr, const PackedByteArray& bin_chunk);
+    bool _parse_images(const Array& img_arr);
+    bool _parse_samplers(const Array& samp_arr);
+    bool _parse_textures(const Array& tex_arr);
+    bool _parse_materials(const Array& mat_arr);
+    static GLBTextureInfo _parse_texture_info(const Dictionary& d);
+    void _build_materials();
+    Ref<Image> _decode_image(int image_idx);
+    Ref<ImageTexture> _get_texture(int texture_idx);
 
     int _accessor_component_count(const String& type) const;
     int _accessor_component_size(int component_type) const;
