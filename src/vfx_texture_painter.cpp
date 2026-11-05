@@ -250,15 +250,18 @@ void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
     int th = texture->get_height();
     if (tw <= 0 || th <= 0) return;
 
+    // shortest path on the UV torus — prevents streaks across the wrap seam
     Vector2 diff = to - from;
+    diff.x -= Math::round(diff.x);
+    diff.y -= Math::round(diff.y);
+
     float pixel_dist = diff.length() * (float)std::max(tw, th);
     int steps = (int)(pixel_dist * 0.5f) + 1;
-    if (steps > 256) steps = 256; // safety cap for huge UV jumps
+    if (steps > 256) steps = 256;
 
     for (int i = 0; i <= steps; ++i) {
         float t = (steps > 0) ? (float)i / (float)steps : 0.0f;
-        Vector2 uv = from.lerp(to, t);
-        _paint_splat(uv);
+        _paint_splat(from + diff * t);   // _paint_splat still wraps each splat
     }
 }
 
