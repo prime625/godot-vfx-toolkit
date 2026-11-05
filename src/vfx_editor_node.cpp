@@ -1254,11 +1254,14 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
             visual->set_mesh(am);
             if (show_weights && p_node->get_skin().is_valid()) {
                 visual->set_surface_override_material(0, weight_material);
+            } else if (paint_material.is_valid()) {                          // ADD
+                visual->set_surface_override_material(0, paint_material);    // ADD
             } else if (vmesh->material.is_valid()) {
                 visual->set_surface_override_material(0, vmesh->material);
             } else {
                 visual->set_surface_override_material(0, base_material);
             }
+
         } else if (am.is_valid()) {
             visual->set_mesh(am);  // empty mesh, don't touch materials
         }
@@ -1537,6 +1540,7 @@ Transform3D VFXEditorNode::_get_armature_transform() const {
 void VFXEditorNode::set_paint_material(const Ref<Material>& p_mat) {
     paint_material = p_mat;
     _update_godot_mesh();
+    mark_scene_dirty();   // ADD: scene visuals pick up / drop paint material
 }
 
 Ref<Material> VFXEditorNode::get_paint_material() const { return paint_material; }
