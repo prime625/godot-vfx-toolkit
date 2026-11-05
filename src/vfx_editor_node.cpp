@@ -1079,30 +1079,57 @@ bool VFXEditorNode::import_model(const String& filepath, const Ref<VFXSceneNode>
 }
 
 Ref<VFXSceneNode> VFXEditorNode::raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir) {
-    if (scene.is_null()) return Ref<VFXSceneNode>();
     float closest = 1e20f;
     Ref<VFXSceneNode> best;
 
-    Array nodes = scene->flatten_tree();
-    for (int i = 0; i < nodes.size(); i++) {
-        Ref<VFXSceneNode> sn = nodes[i];
-        if (sn.is_null() || sn->get_node_type() != VFXSceneNode::NODE_MESH) continue;
-        if (!sn->is_visible()) continue;
+    if (scene.is_valid()) {
+        Array nodes = scene->flatten_tree();
+        for (int i = 0; i < nodes.size(); i++) {
+            Ref<VFXSceneNode> sn = nodes[i];
+            if (sn.is_null() || sn->get_node_type() != VFXSceneNode::NODE_MESH) continue;
+            if (!sn->is_visible()) continue;
 
-        Ref<VFXMesh> vmesh = sn->get_mesh();
-        if (vmesh.is_null()) continue;
+            Ref<VFXMesh> vmesh = sn->get_mesh();
+            if (vmesh.is_null()) continue;
 
-        Transform3D global = sn->get_global_transform();
-        Transform3D inv = global.affine_inverse();
-        Vector3 local_origin = inv.xform(ray_origin);
-        Vector3 local_dir = inv.basis.xform(ray_dir).normalized();
+            Transform3D global = sn->get_global_transform();
+            Transform3D inv = global.affine_inverse();
+            Vector3 local_origin = inv.xform(ray_origin);
+            Vector3 local_dir = inv.basis.xform(ray_dir).normalized();
 
+            Vector3 hit;
+            if (vmesh->raycast(local_origin, local_dir, hit, closest)) {
+                float dist = global.xform(hit).distance_to(ray_origin);
+                if (dist < closest) {
+                    closest = dist;
+                    best = sn;
+                }
+            }
+        }
+    }
+
+    // Direct-mode fallback: the active mesh may not be wrapped in any
+    // scene node (e.g. create_demo_character() works in direct mode).
+    // Still report a hit so texture painting / selection keep working.
+    if (best.is_null() && mesh.is_valid()) {
+        Transform3D gt = active_scene_node.is_valid()
+            ? active_scene_node->get_global_transform()
+            : get_global_transform();
+        Transform3D inv = gt.affine_inverse();
         Vector3 hit;
-        if (vmesh->raycast(local_origin, local_dir, hit, closest)) {
-            float dist = global.xform(hit).distance_to(ray_origin);
-            if (dist < closest) {
-                closest = dist;
-                best = sn;
+        if (mesh->raycast(inv.xform(ray_origin),
+                          inv.basis.xform(ray_dir).normalized(), hit)) {
+            if (active_scene_node.is_valid()) {
+                best = active_scene_node;
+            } else {
+                // Fabricate a lightweight wrapper so script callers get a
+                // non-null node with the right mesh and transform.
+                // Parentless node: local transform == global transform.
+                best.instantiate();
+                best->set_node_name("__direct_mesh__");
+                best->set_node_type(VFXSceneNode::NODE_MESH);
+                best->set_mesh(mesh);
+                best->set_transform(gt);
             }
         }
     }
