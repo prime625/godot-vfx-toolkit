@@ -182,8 +182,14 @@ void VFXTexturePainter::_paint_splat(const Vector2& uv) {
     int th = texture->get_height();
     if (tw <= 0 || th <= 0) return;
 
-    float fx = uv.x * (float)tw;
-    float fy = uv.y * (float)th;
+    // Some meshes (e.g. GLTF exports) carry out-of-range UVs (negative V, V > 1).
+    // Wrap into [0,1) before mapping to pixels, otherwise set_pixel/get_pixel
+    // silently fail out of bounds and nothing is painted.
+    float u = uv.x - floorf(uv.x);
+    float v = uv.y - floorf(uv.y);
+
+    float fx = u * (float)tw;
+    float fy = v * (float)th;
 
     int x0 = (int)floorf(fx - brush_radius);
     int x1 = (int)ceilf(fx + brush_radius);
