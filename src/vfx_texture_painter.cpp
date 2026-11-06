@@ -67,6 +67,7 @@ void VFXTexturePainter::create_texture(int width, int height, const Color& fill_
     if (texture.is_valid()) {
         texture->fill(fill_color);
     }
+    background_color = fill_color;
 }
 
 void VFXTexturePainter::set_texture(const Ref<Image>& p_texture) {
@@ -89,6 +90,7 @@ void VFXTexturePainter::apply_to_image_texture(const Ref<ImageTexture>& p_tex) c
 void VFXTexturePainter::clear_texture(const Color& color) {
     if (texture.is_null()) return;
     texture->fill(color);
+    background_color = color;
 }
 
 void VFXTexturePainter::set_brush_color(const Color& c) { brush_color = c; }
@@ -209,7 +211,10 @@ void VFXTexturePainter::_blend_pixel(int x, int y, float falloff) {
     Color result;
     switch (brush_mode) {
         case BRUSH_ERASE:
-            result = Color(base.r, base.g, base.b, vfx::clampf(base.a - alpha, 0.0f, 1.0f));
+            // Blend back toward the canvas background (e.g. white). The old
+            // code only lowered alpha, but the paint material is opaque, so
+            // alpha is ignored by the renderer and erase looked broken.
+            result = base.lerp(background_color, alpha);
             break;
         case BRUSH_SMUDGE:
             result = base.lerp(stamp, alpha * 0.3f);
@@ -311,7 +316,7 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
     if (bw <= 0 || bh <= 0) return;
     size_t cell_count = (size_t)bw * (size_t)bh;
 
-    // Per-texel: best (closest-to-camera) candidate only — this is what
+    // Per-texel: best (closest-to-camera) candidate only â€” this is what
     // stops back-facing parts of the SAME island from painting through.
     std::vector<float> best_z(cell_count, -1e30f);
     std::vector<float> best_t(cell_count, 1.0f);
@@ -485,7 +490,7 @@ void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
     int th = texture->get_height();
     if (tw <= 0 || th <= 0) return;
 
-    // shortest path on the UV torus — prevents streaks across the wrap seam
+    // shortest path on the UV torus â€” prevents streaks across the wrap seam
     Vector2 diff = to - from;
     diff.x -= Math::round(diff.x);
     diff.y -= Math::round(diff.y);
