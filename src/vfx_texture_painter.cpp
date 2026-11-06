@@ -2,6 +2,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
 #include <algorithm>
+#include <vector>
 
 using namespace godot;
 
@@ -32,11 +33,20 @@ void VFXTexturePainter::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_top_threshold", "threshold"), &VFXTexturePainter::set_top_threshold);
     ClassDB::bind_method(D_METHOD("get_top_threshold"), &VFXTexturePainter::get_top_threshold);
 
+    ClassDB::bind_method(D_METHOD("set_camera_transform", "transform"), &VFXTexturePainter::set_camera_transform);
+    ClassDB::bind_method(D_METHOD("get_camera_transform"), &VFXTexturePainter::get_camera_transform);
+    ClassDB::bind_method(D_METHOD("set_viewport_size", "size"), &VFXTexturePainter::set_viewport_size);
+    ClassDB::bind_method(D_METHOD("get_viewport_size"), &VFXTexturePainter::get_viewport_size);
+    ClassDB::bind_method(D_METHOD("set_camera_fov", "fov_deg"), &VFXTexturePainter::set_camera_fov);
+    ClassDB::bind_method(D_METHOD("get_camera_fov"), &VFXTexturePainter::get_camera_fov);
+    ClassDB::bind_method(D_METHOD("set_brush_screen_radius", "radius"), &VFXTexturePainter::set_brush_screen_radius);
+    ClassDB::bind_method(D_METHOD("get_brush_screen_radius"), &VFXTexturePainter::get_brush_screen_radius);
+
     ClassDB::bind_method(D_METHOD("set_mesh_transform", "transform"), &VFXTexturePainter::set_mesh_transform);
     ClassDB::bind_method(D_METHOD("get_mesh_transform"), &VFXTexturePainter::get_mesh_transform);
 
     ClassDB::bind_method(D_METHOD("stroke_begin"), &VFXTexturePainter::stroke_begin);
-    ClassDB::bind_method(D_METHOD("paint_at", "ray_origin", "ray_dir"), &VFXTexturePainter::paint_at);
+    ClassDB::bind_method(D_METHOD("paint_at", "ray_origin", "ray_dir", "screen_center"), &VFXTexturePainter::paint_at, DEFVAL(Vector2(-1, -1)));
     ClassDB::bind_method(D_METHOD("stroke_end"), &VFXTexturePainter::stroke_end);
 
     ClassDB::bind_method(D_METHOD("export_jpg", "filepath", "quality"), &VFXTexturePainter::export_jpg, DEFVAL(0.92f));
@@ -102,18 +112,32 @@ bool VFXTexturePainter::get_paint_top_only() const { return paint_top_only; }
 void VFXTexturePainter::set_top_threshold(float t) { top_threshold = t; }
 float VFXTexturePainter::get_top_threshold() const { return top_threshold; }
 
+void VFXTexturePainter::set_camera_transform(const Transform3D& t) { camera_transform = t; }
+Transform3D VFXTexturePainter::get_camera_transform() const { return camera_transform; }
+
+void VFXTexturePainter::set_viewport_size(const Vector2& s) { viewport_size = s; }
+Vector2 VFXTexturePainter::get_viewport_size() const { return viewport_size; }
+
+void VFXTexturePainter::set_camera_fov(float fov_deg) { camera_fov_deg = fov_deg; }
+float VFXTexturePainter::get_camera_fov() const { return camera_fov_deg; }
+
+void VFXTexturePainter::set_brush_screen_radius(float r) { brush_screen_radius = r < 1.0f ? 1.0f : r; }
+float VFXTexturePainter::get_brush_screen_radius() const { return brush_screen_radius; }
+
 void VFXTexturePainter::stroke_begin() {
     is_stroking = true;
     has_last_uv = false;
+    has_last_anchor = false;
 }
 
 void VFXTexturePainter::stroke_end() {
     is_stroking = false;
     has_last_uv = false;
+    has_last_anchor = false;
 }
 
 bool VFXTexturePainter::_raycast_mesh_uv(const Vector3& ray_origin, const Vector3& ray_dir,
-                                         Vector2& out_uv, Vector3& out_normal) const {
+                                         Vector2& out_uv, Vector3& out_normal, Vector3& out_pos) const {
     if (mesh.is_null()) return false;
 
     Vector3 dir = ray_dir.normalized();
@@ -164,6 +188,7 @@ bool VFXTexturePainter::_raycast_mesh_uv(const Vector3& ray_origin, const Vector
                 const Vector2& uv1 = verts[i]->uv;
                 const Vector2& uv2 = verts[i + 1]->uv;
                 out_uv = uv0 * w + uv1 * u + uv2 * v;
+                out_pos = ray_origin + dir * t;
 
                 Vector3 e1n = v1 - v0;
                 Vector3 e2n = v2 - v0;
@@ -173,6 +198,28 @@ bool VFXTexturePainter::_raycast_mesh_uv(const Vector3& ray_origin, const Vector
         }
     }
     return found;
+}
+
+// Shared blend for one texture pixel
+void VFXTexturePainter::_blend_pixel(int x, int y, float falloff) {
+    Color base = texture->get_pixel(x, y);
+    Color stamp = brush_color;
+    float alpha = brush_opacity * falloff;
+
+    Color result;
+    switch (brush_mode) {
+        case BRUSH_ERASE:
+            result = Color(base.r, base.g, base.b, vfx::clampf(base.a - alpha, 0.0f, 1.0f));
+            break;
+        case BRUSH_SMUDGE:
+            result = base.lerp(stamp, alpha * 0.3f);
+            break;
+        case BRUSH_PAINT:
+        default:
+            result = base.lerp(stamp, alpha);
+            break;
+    }
+    texture->set_pixel(x, y, result);
 }
 
 void VFXTexturePainter::_paint_splat(const Vector2& uv) {
@@ -219,29 +266,217 @@ void VFXTexturePainter::_paint_splat(const Vector2& uv) {
             float falloff = vfx::lerp(soft, hard, brush_hardness);
 
             if (falloff <= 0.0f) continue;
-
-            Color base = texture->get_pixel(x, y);
-            Color stamp = brush_color;
-            float alpha = brush_opacity * falloff;
-
-            Color result;
-            switch (brush_mode) {
-                case BRUSH_ERASE:
-                    result = Color(base.r, base.g, base.b, vfx::clampf(base.a - alpha, 0.0f, 1.0f));
-                    break;
-                case BRUSH_SMUDGE:
-                    // Smudge drags color slightly toward brush tint
-                    result = base.lerp(stamp, alpha * 0.3f);
-                    break;
-                case BRUSH_PAINT:
-                default:
-                    result = base.lerp(stamp, alpha);
-                    break;
-            }
-
-            texture->set_pixel(x, y, result);
+            _blend_pixel(x, y, falloff);
         }
     }
+}
+
+// ------------------------------------------------------------------
+// 3D-filtered stamping.
+//
+// The legacy splat stamps a circle of brush_radius TEXTURE pixels around
+// the hit UV. On tightly packed unwraps (251 islands on a 1024 canvas for a
+// character mesh) that circle spills across neighbouring islands, so
+// painting a hand also paints the mirrored hand / back / face that happen
+// to live next to it in UV space.
+//
+// Here the stamp region is still located via the hit UV, but every candidate
+// texel is inverse-mapped through its own triangle to a world position and
+// only painted if its true 3D distance to the brush anchor (the hit point)
+// is inside the brush's WORLD-space radius. Texels on other islands fail the
+// distance test and are skipped, no matter how close they are in UV space.
+// ------------------------------------------------------------------
+void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor_world, float radius_world) {
+    if (texture.is_null() || mesh.is_null()) return;
+
+    int tw = texture->get_width();
+    int th = texture->get_height();
+    if (tw <= 0 || th <= 0) return;
+
+    float u = uv.x - floorf(uv.x);
+    float v = uv.y - floorf(uv.y);
+
+    // Conservative texture-space bbox: a world-space circle maps to at most
+    // this many texels in any direction.
+    float half_px = ceilf(radius_world * (float)std::max(tw, th)) + 1.0f;
+    float fx = u * (float)tw;
+    float fy = v * (float)th;
+
+    int x0 = (int)floorf(fx - half_px);
+    int x1 = (int)ceilf(fx + half_px);
+    int y0 = (int)floorf(fy - half_px);
+    int y1 = (int)ceilf(fy + half_px);
+    int bw = x1 - x0 + 1;
+    int bh = y1 - y0 + 1;
+    if (bw <= 0 || bh <= 0) return;
+    size_t cell_count = (size_t)bw * (size_t)bh;
+
+    // Per-texel: best (closest-to-camera) candidate only — this is what
+    // stops back-facing parts of the SAME island from painting through.
+    std::vector<float> best_z(cell_count, -1e30f);
+    std::vector<float> best_t(cell_count, 1.0f);
+
+    const float r2 = radius_world * radius_world;
+    const Transform3D cam_inv = camera_transform.affine_inverse();
+
+    int face_count = mesh->get_face_count();
+    for (int fi = 0; fi < face_count; ++fi) {
+        std::vector<vfx::HEVertex*> verts;
+        mesh->get_face_vertices(fi, verts);
+        const int nv = (int)verts.size();
+        if (nv < 3) continue;
+
+        float umin = 1e30f, umax = -1e30f, vmin = 1e30f, vmax = -1e30f;
+        for (int i = 0; i < nv; ++i) {
+            umin = std::min(umin, verts[i]->uv.x);
+            umax = std::max(umax, verts[i]->uv.x);
+            vmin = std::min(vmin, verts[i]->uv.y);
+            vmax = std::max(vmax, verts[i]->uv.y);
+        }
+
+        // The unwrap may sit on integer offsets (e.g. V in [-1,0]); test the
+        // three shifted copies of the face bbox against the wrapped region.
+        for (int su = -1; su <= 1; ++su) {
+            for (int sv = -1; sv <= 1; ++sv) {
+                int tx0 = std::max(x0, (int)floorf((umin + (float)su) * (float)tw));
+                int tx1 = std::min(x1, (int)ceilf ((umax + (float)su) * (float)tw));
+                int ty0 = std::max(y0, (int)floorf((vmin + (float)sv) * (float)th));
+                int ty1 = std::min(y1, (int)ceilf ((vmax + (float)sv) * (float)th));
+                if (tx0 > tx1 || ty0 > ty1) continue;
+
+                const Vector2 shift((float)su, (float)sv);
+                for (int i = 1; i + 1 < nv; ++i) {
+                    const Vector2 tuv0 = verts[0]->uv + shift;
+                    const Vector2 tuv1 = verts[i]->uv + shift;
+                    const Vector2 tuv2 = verts[i + 1]->uv + shift;
+                    const Vector2 e1 = tuv1 - tuv0;
+                    const Vector2 e2 = tuv2 - tuv0;
+                    const float D = e1.x * e2.y - e1.y * e2.x;
+                    if (fabsf(D) < 1e-10f) continue;
+
+                    const Vector3& p0 = verts[0]->position;
+                    const Vector3& p1 = verts[i]->position;
+                    const Vector3& p2 = verts[i + 1]->position;
+
+                    for (int y = ty0; y <= ty1; ++y) {
+                        for (int x = tx0; x <= tx1; ++x) {
+                            // Texel UV in [0,1), handling wrap-around indices
+                            float pxu = (float)(((x % tw) + tw) % tw) + 0.5f;
+                            float pyu = (float)(((y % th) + th) % th) + 0.5f;
+                            Vector2 ppu(pxu / (float)tw, pyu / (float)th);
+
+                            Vector2 d0 = ppu - tuv0;
+                            float ba = (d0.x * e2.y - d0.y * e2.x) / D;
+                            float bb = (e1.x * d0.y - e1.y * d0.x) / D;
+                            float bw0 = 1.0f - ba - bb;
+                            if (ba < -1e-4f || bb < -1e-4f || bw0 < -1e-4f) continue;
+
+                            Vector3 local = p0 * bw0 + p1 * ba + p2 * bb;
+                            Vector3 world = mesh_node_transform.xform(local);
+                            Vector3 d = world - anchor_world;
+                            if (d.length_squared() > r2) continue;
+
+                            // Closer to camera = larger z in Godot camera space
+                            float cz = cam_inv.xform(world).z;
+                            size_t idx = (size_t)(y - y0) * (size_t)bw + (size_t)(x - x0);
+                            if (cz > best_z[idx]) {
+                                best_z[idx] = cz;
+                                best_t[idx] = sqrtf(d.length_squared()) / radius_world;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (int y = y0; y <= y1; ++y) {
+        for (int x = x0; x <= x1; ++x) {
+            size_t idx = (size_t)(y - y0) * (size_t)bw + (size_t)(x - x0);
+            if (best_z[idx] < -1e29f) continue;
+
+            float soft = 1.0f - best_t[idx];
+            float hard = (best_t[idx] < 1.0f) ? 1.0f : 0.0f;
+            float falloff = vfx::lerp(soft, hard, brush_hardness);
+            if (falloff <= 0.0f) continue;
+
+            int xi = ((x % tw) + tw) % tw;
+            int yi = ((y % th) + th) % th;
+            _blend_pixel(xi, yi, falloff);
+        }
+    }
+}
+
+// Find the UV of the surface point closest to a world position (used to walk
+// a stroke segment across the mesh without ever leaving the surface).
+bool VFXTexturePainter::_uv_at_world_point(const Vector3& world_pos, Vector2& out_uv) const {
+    if (mesh.is_null()) return false;
+
+    Vector3 lp = mesh_node_transform.affine_inverse().xform(world_pos);
+    float best_dist = 1e30f;
+    bool found = false;
+
+    int face_count = mesh->get_face_count();
+    for (int fi = 0; fi < face_count; ++fi) {
+        std::vector<vfx::HEVertex*> verts;
+        mesh->get_face_vertices(fi, verts);
+        if (verts.size() < 3) continue;
+
+        for (size_t i = 1; i + 1 < verts.size(); ++i) {
+            const Vector3& p0 = verts[0]->position;
+            const Vector3& p1 = verts[i]->position;
+            const Vector3& p2 = verts[i + 1]->position;
+
+            Vector3 n = (p1 - p0).cross(p2 - p0);
+            float nl = n.length();
+            if (nl < 1e-12f) continue;
+            n /= nl;
+
+            float dn = n.dot(lp - p0);
+            Vector3 q = lp - n * dn;   // project onto triangle plane
+
+            Vector3 e1 = p1 - p0, e2 = p2 - p0, d = q - p0;
+            float d00 = e1.dot(e1), d01 = e1.dot(e2), d11 = e2.dot(e2);
+            float d20 = d.dot(e1), d21 = d.dot(e2);
+            float den = d00 * d11 - d01 * d01;
+            if (fabsf(den) < 1e-12f) continue;
+
+            float a = (d11 * d20 - d01 * d21) / den;
+            float b = (d00 * d21 - d01 * d20) / den;
+            float w0 = 1.0f - a - b;
+            if (a < -1e-3f || b < -1e-3f || w0 < -1e-3f) continue;
+
+            float ad = fabsf(dn);
+            if (ad < best_dist) {
+                best_dist = ad;
+                out_uv = verts[0]->uv * w0 + verts[i]->uv * a + verts[i + 1]->uv * b;
+                found = true;
+            }
+        }
+    }
+    return found;
+}
+
+// Stroke continuation in 3D: walk the world-space segment between the last
+// hit and the current hit, stamping only at real surface points. No UV-space
+// line is ever drawn, so nothing between islands can be crossed.
+void VFXTexturePainter::_paint_line_3d(const Vector2& from_uv, const Vector3& from_world,
+                                          const Vector2& to_uv, const Vector3& to_world,
+                                          float radius_world) {
+    float seg = (to_world - from_world).length();
+    int steps = (int)(seg / (radius_world * 0.5f)) + 1;
+    if (steps > 64) steps = 64;
+    if (steps < 1) steps = 1;
+
+    for (int i = 1; i <= steps; ++i) {
+        float t = (float)i / (float)steps;
+        Vector3 q = from_world.lerp(to_world, t);
+        Vector2 uv;
+        if (_uv_at_world_point(q, uv)) {
+            _paint_splat_3d(uv, q, radius_world);
+        }
+    }
+    _paint_splat_3d(to_uv, to_world, radius_world);
 }
 
 void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
@@ -265,16 +500,43 @@ void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
     }
 }
 
-void VFXTexturePainter::paint_at(const Vector3& ray_origin, const Vector3& ray_dir) {
+void VFXTexturePainter::paint_at(const Vector3& ray_origin, const Vector3& ray_dir, const Vector2& screen_center) {
     Vector2 hit_uv;
     Vector3 hit_normal;
+    Vector3 hit_pos_local;
 
     // Convert the world-space ray into the mesh node's local space before raycasting
     Transform3D inv = mesh_node_transform.affine_inverse();
     Vector3 local_origin = inv.xform(ray_origin);
     Vector3 local_dir    = inv.basis.xform(ray_dir);   // direction: no translation, no normalize needed
 
-    if (!_raycast_mesh_uv(local_origin, local_dir, hit_uv, hit_normal)) return;
+    if (!_raycast_mesh_uv(local_origin, local_dir, hit_uv, hit_normal, hit_pos_local)) return;
+
+    const bool use_3d = (screen_center.x >= 0.0f);
+
+    if (use_3d) {
+        Vector3 hit_world = mesh_node_transform.xform(hit_pos_local);
+
+        // Convert the screen-pixel brush radius into a world radius at the
+        // hit depth: half view height at depth d is d*tan(fov/2).
+        float depth = (hit_world - camera_transform.origin).length();
+        static const float DEG2RAD = 0.017453292519943295f;
+        float half_h_world = depth * tanf(camera_fov_deg * 0.5f * DEG2RAD);
+        float half_h_px = std::max(viewport_size.y * 0.5f, 1.0f);
+        float radius_world = half_h_world * (brush_screen_radius / half_h_px);
+        if (radius_world < 1e-5f) radius_world = 1e-5f;
+
+        if (is_stroking && has_last_uv && has_last_anchor) {
+            _paint_line_3d(last_uv, last_anchor_world, hit_uv, hit_world, radius_world);
+        } else {
+            _paint_splat_3d(hit_uv, hit_world, radius_world);
+        }
+        last_uv = hit_uv;
+        last_anchor_world = hit_world;
+        has_last_uv = true;
+        has_last_anchor = true;
+        return;
+    }
 
     if (is_stroking) {
         if (has_last_uv) {
