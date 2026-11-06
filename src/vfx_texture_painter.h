@@ -37,6 +37,10 @@ private:
     bool paint_top_only = false;   // only paint upward-facing triangles
     float top_threshold = 0.3f;    // minimum dot(N, world_up)
 
+    // Erase restores pixels toward this color (set by create_texture/clear_texture)
+    // instead of punching useless alpha holes in an opaque material.
+    Color background_color = Color(1.0f, 1.0f, 1.0f, 1.0f);
+
     bool is_stroking = false;
     Vector2 last_uv;
     bool has_last_uv = false;
