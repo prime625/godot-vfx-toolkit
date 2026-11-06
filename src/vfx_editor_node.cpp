@@ -636,6 +636,15 @@ void VFXEditorNode::apply_animation_frame() {
     if (skel_changed) {
         skeleton->update_transforms();
         refresh_mesh();
+        // Scene mode: the on-screen skinned mesh is a scene-container instance,
+        // NOT mesh_instance (which refresh_mesh() updates and which is hidden in
+        // scene mode). Without this flag _sync_scene_visuals() never runs, so
+        // the mesh only re-skins when some unrelated action marks the scene dirty
+        // (e.g. a tap). The flag is only consumed when scene.is_valid(), so it's
+        // harmless in direct mode.
+        if (scene.is_valid()) {
+            mark_scene_dirty();
+        }
         if (show_skeleton) _build_skeleton_mesh();
     }
 }
