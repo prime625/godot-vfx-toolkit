@@ -203,10 +203,13 @@ int VFXEditorNode::raycast_select(const Vector3& ray_origin, const Vector3& ray_
 // ============================================================================
 
 void VFXEditorNode::_update_gizmo_for_selection() {
-   if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
-       gizmo_transform = active_scene_node->get_global_transform();
-   } else if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
+   // Bone branch FIRST: a selected bone owns the gizmo even when the
+   // armature's scene node is still the active node (otherwise the gizmo
+   // snaps to the node pivot and bone drags become node drags).
+   if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
        gizmo_transform = _get_bone_gizmo_transform(selected_bone);
+   } else if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
+       gizmo_transform = active_scene_node->get_global_transform();
    } else if (edit_mode == MODE_OBJECT) {
        gizmo_transform = Transform3D();
    }
