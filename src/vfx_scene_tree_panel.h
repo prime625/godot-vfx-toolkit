@@ -33,6 +33,7 @@ private:
 
     bool syncing = false; // prevent signal loops
     bool tree_dirty = true;
+    TreeItem* last_clicked_item = nullptr; // becomes the "active" node of a multi-selection
 
     // Icon references (set these in _ready or load them)
     Ref<Texture2D> icon_empty;
