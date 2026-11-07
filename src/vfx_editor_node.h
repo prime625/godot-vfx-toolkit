@@ -158,7 +158,7 @@ private:
     float select_pixel_tolerance = 8.0f;
     float gizmo_screen_scale = 1.0f;
     float gizmo_select_pixel_tolerance = 12.0f;
-    float gizmo_priority = 0.35f;          // 0 = mesh always wins, 1 = gizmo always wins
+    float gizmo_priority = 1.0f;           // 0 = mesh always wins, 1 = gizmo wins when at least as close
     // === GIZMO DRAG STATE ===
     bool gizmo_dragging = false;
     int gizmo_drag_axis = GIZMO_NONE;
@@ -409,6 +409,7 @@ public:
     PackedInt32Array screen_select_box(const Rect2& screen_rect) const;
     void box_select(const Rect2& screen_rect);
     int screen_raycast_gizmo(const Vector2& screen_pos);
+    void _clear_gizmo_hover();
 
     // === EDIT MODE ===
     void set_edit_mode(int mode);
