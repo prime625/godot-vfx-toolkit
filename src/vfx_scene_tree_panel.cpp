@@ -16,6 +16,7 @@ void VFXSceneTreePanel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("force_rebuild"), &VFXSceneTreePanel::force_rebuild);
 
     ADD_SIGNAL(MethodInfo("node_selected", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
+    ADD_SIGNAL(MethodInfo("nodes_selected", PropertyInfo(Variant::ARRAY, "nodes")));
     ADD_SIGNAL(MethodInfo("node_activated", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_reparented"));
     ADD_SIGNAL(MethodInfo("node_visibility_changed",
@@ -123,6 +124,7 @@ void VFXSceneTreePanel::_clear_tree_maps() {
 
 void VFXSceneTreePanel::_on_tree_cell_selected(int column) {
     if (syncing) return;
+    last_clicked_item = tree->get_selected();
     _sync_selection_to_scene();
 }
 
@@ -264,11 +266,8 @@ TreeItem* VFXSceneTreePanel::_get_item_for_node(int node_id) const {
 // --- Signal handlers ---
 
 void VFXSceneTreePanel::_on_tree_item_selected() {
-    WARN_PRINT("Tree item_selected fired");
-    if (syncing) {
-        WARN_PRINT("  -> blocked by syncing");
-        return;
-    }
+    if (syncing) return;
+    last_clicked_item = tree->get_selected();
     _sync_selection_to_scene();
 }
 
@@ -282,6 +281,7 @@ void VFXSceneTreePanel::_on_tree_nothing_selected() {
         }
     }
     emit_signal("node_selected", Variant((Object*)nullptr));
+    emit_signal("nodes_selected", Array());
 }
 
 void VFXSceneTreePanel::_sync_selection_to_scene() {
@@ -293,17 +293,29 @@ void VFXSceneTreePanel::_sync_selection_to_scene() {
         if (n.is_valid()) n->set_selected(false);
     }
 
-    // Iterate multi-selection via get_next_selected
+    // Iterate multi-selection via get_next_selected and emit ONE batched
+    // signal. The last CLICKED node (not just the last in tree order)
+    // becomes the "active" one downstream.
+    Array selected_nodes;
     TreeItem* sel = tree->get_selected();
     while (sel) {
         Ref<VFXSceneNode> n = _get_node_for_item(sel);
         if (n.is_valid()) {
             n->set_selected(true);
-            WARN_PRINT("  -> emitting node_selected for: " + n->get_node_name());
-            emit_signal("node_selected", Variant(n.ptr()));
+            selected_nodes.append(n);
         }
         sel = tree->get_next_selected(sel);
     }
+
+    Ref<VFXSceneNode> clicked = _get_node_for_item(last_clicked_item);
+    if (clicked.is_valid()) {
+        int idx = selected_nodes.find(clicked);
+        if (idx >= 0 && idx != selected_nodes.size() - 1) {
+            selected_nodes.remove_at(idx);
+            selected_nodes.append(clicked);
+        }
+    }
+    emit_signal("nodes_selected", selected_nodes);
 }
 
 void VFXSceneTreePanel::_on_tree_item_edited() {
@@ -366,12 +378,14 @@ void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, i
     if (mouse_button_idx == MOUSE_BUTTON_RIGHT) {
         tree->deselect_all();
         item->select(0);
+        last_clicked_item = item;
         _sync_selection_to_scene();
     } else {
         // LEFT click or touch — also trigger selection
         // (item_selected signal is unreliable on some touch builds)
         tree->deselect_all();
         item->select(0);
+        last_clicked_item = item;
         _sync_selection_to_scene();
     }
 }
