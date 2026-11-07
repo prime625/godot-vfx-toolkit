@@ -1349,6 +1349,10 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             return -2;
         }
 
+        // Press didn't grab the gizmo — drop the hover highlight so the
+        // axis doesn't stay stuck yellow from the press-time hit test
+        if (gizmo_axis != GIZMO_NONE) _clear_gizmo_hover();
+
         if (bone_hit >= 0) {
             set_selected_bone(bone_hit);
             return bone_hit;
@@ -1421,6 +1425,10 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             return -2;
         }
 
+        // Press didn't grab the gizmo — drop the hover highlight so the
+        // axis doesn't stay stuck yellow from the press-time hit test
+        if (gizmo_axis != GIZMO_NONE) _clear_gizmo_hover();
+
         if (mesh_hit >= 0) {
             _handle_element_selection(mesh_hit);
             _build_selection_mesh();
@@ -1472,6 +1480,10 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
             gizmo_begin_drag(gizmo_axis, ray_origin, ray_dir);
             return -2;
         }
+
+        // Press didn't grab the gizmo — drop the hover highlight so the
+        // axis doesn't stay stuck yellow from the press-time hit test
+        if (gizmo_axis != GIZMO_NONE) _clear_gizmo_hover();
 
         if (bone_hit >= 0) {
             set_selected_bone(bone_hit);
