@@ -167,6 +167,7 @@ private:
     float gizmo_drag_plane_d = 0.0f;
     Transform3D gizmo_transform;
     Transform3D gizmo_drag_start_transform;
+    Transform3D gizmo_drag_start_bone_local;   // bone local pose at drag start (absolute deltas)
     Quaternion gizmo_drag_start_rotation;
     Vector3 gizmo_drag_start_scale;
     Plane gizmo_drag_plane;
