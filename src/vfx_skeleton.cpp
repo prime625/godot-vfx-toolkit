@@ -10,6 +10,9 @@ void VFXSkeleton::_bind_methods() {
     ClassDB::bind_method(D_METHOD("clear"), &VFXSkeleton::clear);
     ClassDB::bind_method(D_METHOD("add_bone", "name", "parent_id"), &VFXSkeleton::add_bone, DEFVAL(-1));
     ClassDB::bind_method(D_METHOD("find_bone", "name"), &VFXSkeleton::find_bone);
+    ClassDB::bind_method(D_METHOD("remove_bone", "bone_id", "reparent_children"), &VFXSkeleton::remove_bone, DEFVAL(true));
+    ClassDB::bind_method(D_METHOD("rename_bone", "bone_id", "new_name"), &VFXSkeleton::rename_bone);
+    ClassDB::bind_method(D_METHOD("is_ancestor_of", "ancestor_id", "bone_id"), &VFXSkeleton::is_ancestor_of);
     ClassDB::bind_method(D_METHOD("set_bone_parent", "bone_id", "parent_id"), &VFXSkeleton::set_bone_parent);
     ClassDB::bind_method(D_METHOD("set_bone_local_position", "bone_id", "pos"), &VFXSkeleton::set_bone_local_position);
     ClassDB::bind_method(D_METHOD("set_bone_local_rotation", "bone_id", "rot"), &VFXSkeleton::set_bone_local_rotation);
@@ -51,6 +54,7 @@ void VFXSkeleton::clear() {
 }
 
 int VFXSkeleton::add_bone(const String& name, int parent_id) {
+    if (name.is_empty()) return -1;
     Bone b;
     b.id = bones.size();
     b.name = name;
@@ -73,11 +77,74 @@ int VFXSkeleton::find_bone(const String& name) const {
     return -1;
 }
 
-void VFXSkeleton::set_bone_parent(int bone_id, int parent_id) {
-    if (bone_id >= 0 && bone_id < (int)bones.size()) {
-        bones[bone_id].parent_id = parent_id;
-        dirty = true;
+void VFXSkeleton::_build_name_map() {
+    name_to_index.clear();
+    for (int i = 0; i < (int)bones.size(); i++) {
+        std::string key = bones[i].name.utf8().get_data();
+        name_to_index[key] = i;
     }
+}
+
+bool VFXSkeleton::rename_bone(int bone_id, const String& new_name) {
+    if (bone_id < 0 || bone_id >= (int)bones.size()) return false;
+    if (new_name.is_empty()) return false;
+
+    // Reject duplicates (a bone may keep its own current name)
+    std::string new_key = new_name.utf8().get_data();
+    auto it = name_to_index.find(new_key);
+    if (it != name_to_index.end() && it->second != bone_id) return false;
+
+    std::string old_key = bones[bone_id].name.utf8().get_data();
+    name_to_index.erase(old_key);
+    bones[bone_id].name = new_name;
+    name_to_index[new_key] = bone_id;
+    return true;
+}
+
+bool VFXSkeleton::remove_bone(int bone_id, bool reparent_children) {
+    if (bone_id < 0 || bone_id >= (int)bones.size()) return false;
+
+    // Children are either adopted by the removed bone's parent (keeps the
+    // subtree intact, Prisma3D-style) or unparented to the root.
+    int adoptive_parent = reparent_children ? bones[bone_id].parent_id : -1;
+    for (auto& b : bones) {
+        if (b.parent_id == bone_id) b.parent_id = adoptive_parent;
+    }
+
+    bones.erase(bones.begin() + bone_id);
+
+    // Reindex: ids are dense array positions referenced by parents, skin
+    // weights and animations, so everything above the hole shifts down.
+    for (int i = 0; i < (int)bones.size(); i++) {
+        bones[i].id = i;
+        if (bones[i].parent_id > bone_id) bones[i].parent_id -= 1;
+    }
+
+    _build_name_map();
+    dirty = true;
+    update_transforms();
+    return true;
+}
+
+bool VFXSkeleton::is_ancestor_of(int ancestor_id, int bone_id) const {
+    if (ancestor_id < 0 || bone_id < 0) return false;
+    if (ancestor_id >= (int)bones.size() || bone_id >= (int)bones.size()) return false;
+    int p = bones[bone_id].parent_id;
+    while (p >= 0) {
+        if (p == ancestor_id) return true;
+        p = bones[p].parent_id;
+    }
+    return false;
+}
+
+void VFXSkeleton::set_bone_parent(int bone_id, int parent_id) {
+    if (bone_id < 0 || bone_id >= (int)bones.size()) return;
+    // Reject self-parenting and cycles (parent must not be the bone or one
+    // of its descendants)
+    if (parent_id == bone_id) return;
+    if (parent_id >= 0 && is_ancestor_of(bone_id, parent_id)) return;
+    bones[bone_id].parent_id = parent_id;
+    dirty = true;
 }
 
 void VFXSkeleton::set_bone_local_position(int bone_id, const Vector3& pos) {
