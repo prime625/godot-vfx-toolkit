@@ -103,6 +103,16 @@ private:
     Ref<VFXScene> scene;
     Ref<VFXSceneNode> active_scene_node;
 
+    // === OBJECT-MODE MULTI-SELECT ===
+    // The active node (last tapped) is always in this list. The gizmo stays
+    // anchored to the active node; dragging applies the same world-space
+    // delta to every selected node.
+    std::vector<Ref<VFXSceneNode>> selected_scene_nodes;
+    // World transforms of every selected node captured at gizmo drag start
+    // (parallel to selected_scene_nodes); used to move all selected nodes.
+    std::vector<Transform3D> object_drag_start_transforms;
+    Transform3D object_drag_active_start;
+
     // === LAST PRIMITIVE (Blender F9-style "adjust last operation") ===
     int last_primitive_type = -1;
     Dictionary last_primitive_params;
@@ -459,6 +469,12 @@ public:
     Ref<VFXScene> get_scene() const;
     void set_active_scene_node(const Ref<VFXSceneNode>& p_node);
     Ref<VFXSceneNode> get_active_scene_node() const;
+
+    // Object-mode multi-select
+    void set_scene_nodes_selected(const Array& p_nodes);   // last element becomes the active node
+    Array get_selected_scene_nodes() const;
+    void clear_scene_node_selection();
+    bool is_scene_node_selected(const Ref<VFXSceneNode>& p_node) const;
     bool import_model(const String& filepath, const Ref<VFXSceneNode>& parent);
     Ref<VFXSceneNode> raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir);
     void refresh_scene();
