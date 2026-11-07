@@ -373,6 +373,18 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
     mesh_edit_initial_positions.clear();
     mesh_edit_weights.clear();
 
+    // Capture the selected bone's local pose at drag start. The drag update
+    // applies deltas ABSOLUTELY (start pose + total delta); without this the
+    // full delta is re-added onto the current pose on every motion event and
+    // the bone flies ~N x too far (N = number of motion events).
+    gizmo_drag_start_bone_local = Transform3D();
+    if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
+        Basis rot_basis(skeleton->get_bone_local_rotation(selected_bone));
+        rot_basis = rot_basis.scaled(skeleton->get_bone_local_scale(selected_bone));
+        gizmo_drag_start_bone_local.set_basis(rot_basis);
+        gizmo_drag_start_bone_local.set_origin(skeleton->get_bone_local_position(selected_bone));
+    }
+
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
         std::unordered_set<int> unique_verts;
         Vector3 center = gizmo_transform.get_origin();
@@ -688,7 +700,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         Transform3D parent_world = (parent >= 0)
             ? armature * skeleton->get_bone_model_transform(parent)
             : armature;
-        // Old local transform of the selected bone
+        // Old local transform of the selected bone (kept for basis fallbacks)
         Transform3D old_local;
         {
             Basis rot_basis(skeleton->get_bone_local_rotation(selected_bone));
@@ -704,23 +716,25 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         new_local.set_basis(new_basis);
 
         if (gizmo_mode == GIZMO_TRANSLATE) {
-            // Move the bone's tail by the same delta the gizmo moved (in parent-local space)
+            // Move the bone ABSOLUTELY: start-of-drag local origin + the total
+            // delta the gizmo moved. Use affine_inverse() (true inverse) instead
+            // of Basis::xform_inv() (transpose), which is wrong when the parent
+            // chain has scale and would amplify/shrink the delta.
             Vector3 delta_world = gizmo_transform.get_origin() - gizmo_drag_start_transform.get_origin();
-            Vector3 delta_local = parent_world.basis.xform_inv(delta_world);
-            new_local.set_origin(old_local.get_origin() + delta_local);
+            Vector3 delta_local = parent_world.affine_inverse().basis.xform(delta_world);
+            new_local.set_origin(gizmo_drag_start_bone_local.get_origin() + delta_local);
         }
         else {
-            // For rotation/scale: pivot around bone head.
-            // The bone's local position must rotate/scale with the bone.
+            // For rotation/scale: pivot around bone head, from the START pose.
             // new_tail - head = delta_basis * (old_tail - head)
-            // In parent-local space: new_local.origin = delta_basis * old_local.origin
-            Basis old_basis = old_local.get_basis();
-            float det = old_basis.determinant();
+            // In parent-local space: new_local.origin = delta_basis * start_local.origin
+            Basis start_basis = gizmo_drag_start_bone_local.get_basis();
+            float det = start_basis.determinant();
             if (fabs(det) > 0.0001f) {
-                Basis delta_basis = new_basis * old_basis.inverse();
-                new_local.set_origin(delta_basis.xform(old_local.get_origin()));
+                Basis delta_basis = new_basis * start_basis.inverse();
+                new_local.set_origin(delta_basis.xform(gizmo_drag_start_bone_local.get_origin()));
             } else {
-                new_local.set_origin(old_local.get_origin());
+                new_local.set_origin(gizmo_drag_start_bone_local.get_origin());
             }
         }
 
