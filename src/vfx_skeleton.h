@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <vector>
 #include <string>
+#include <unordered_map>
 #include "vfx_math.h"
 
 using namespace godot;
@@ -69,6 +70,9 @@ public:
 
     int add_bone(const String& name, int parent_id = -1);
     int find_bone(const String& name) const;
+    bool remove_bone(int bone_id, bool reparent_children = true);
+    bool rename_bone(int bone_id, const String& new_name);
+    bool is_ancestor_of(int ancestor_id, int bone_id) const;
 
     void set_bone_parent(int bone_id, int parent_id);
     void set_bone_local_position(int bone_id, const Vector3& pos);
