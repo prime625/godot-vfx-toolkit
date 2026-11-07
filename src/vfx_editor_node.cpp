@@ -228,6 +228,10 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_scene"), &VFXEditorNode::get_scene);
     ClassDB::bind_method(D_METHOD("set_active_scene_node", "node"), &VFXEditorNode::set_active_scene_node);
     ClassDB::bind_method(D_METHOD("get_active_scene_node"), &VFXEditorNode::get_active_scene_node);
+    ClassDB::bind_method(D_METHOD("set_scene_nodes_selected", "nodes"), &VFXEditorNode::set_scene_nodes_selected);
+    ClassDB::bind_method(D_METHOD("get_selected_scene_nodes"), &VFXEditorNode::get_selected_scene_nodes);
+    ClassDB::bind_method(D_METHOD("clear_scene_node_selection"), &VFXEditorNode::clear_scene_node_selection);
+    ClassDB::bind_method(D_METHOD("is_scene_node_selected", "node"), &VFXEditorNode::is_scene_node_selected);
     ClassDB::bind_method(D_METHOD("import_model", "filepath", "parent"), &VFXEditorNode::import_model, DEFVAL(Ref<VFXSceneNode>()));
     ClassDB::bind_method(D_METHOD("raycast_scene_node", "ray_origin", "ray_dir"), &VFXEditorNode::raycast_scene_node);
 
@@ -696,6 +700,7 @@ void VFXEditorNode::clear_selection() {
     selected_vertex = -1;
     selected_bone = -1;
     last_loop_type = 0;
+    selected_scene_nodes.clear();
     _update_gizmo_for_selection();
     if (selection_visual) _build_selection_mesh();
     _build_skeleton_mesh();
@@ -1045,7 +1050,6 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
         emit_signal("mesh_changed", Ref<VFXMesh>());
         return;
     }
-
     // NEW: armature/empty parents inherit from their subtree
     Ref<VFXSceneNode> src = active_scene_node;
     if (!src->has_mesh() && !src->has_skeleton()) {
@@ -1068,10 +1072,64 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
     set_gizmo_transform(active_scene_node->get_global_transform());
     if (gizmo_node) _build_gizmo_mesh();
     clear_selection();
+    // The active node is always part of the object-mode selection.
+    selected_scene_nodes.push_back(active_scene_node);
     _update_gizmo_visibility();
     _update_origin_indicator();
     _update_scene_visual_transforms();
     mark_scene_dirty();
+}
+
+// ------------------------------------------------------------------
+// OBJECT-MODE MULTI-SELECT
+// ------------------------------------------------------------------
+bool VFXEditorNode::is_scene_node_selected(const Ref<VFXSceneNode>& p_node) const {
+    if (p_node.is_null()) return false;
+    for (const Ref<VFXSceneNode>& n : selected_scene_nodes) {
+        if (n == p_node) return true;
+    }
+    return false;
+}
+
+void VFXEditorNode::clear_scene_node_selection() {
+    clear_selection();   // also clears selected_scene_nodes + gizmo
+    _update_gizmo_visibility();
+}
+
+Array VFXEditorNode::get_selected_scene_nodes() const {
+    Array arr;
+    for (const Ref<VFXSceneNode>& n : selected_scene_nodes) {
+        if (n.is_valid()) arr.append(n);
+    }
+    return arr;
+}
+
+void VFXEditorNode::set_scene_nodes_selected(const Array& p_nodes) {
+    std::vector<Ref<VFXSceneNode>> requested;
+    Ref<VFXSceneNode> last;
+    for (int i = 0; i < p_nodes.size(); i++) {
+        Ref<VFXSceneNode> n = p_nodes[i];
+        if (n.is_null()) continue;
+        bool dup = false;
+        for (const Ref<VFXSceneNode>& r : requested) if (r == n) { dup = true; break; }
+        if (!dup) requested.push_back(n);
+        last = n;
+    }
+
+    if (last.is_null()) {
+        set_active_scene_node(Ref<VFXSceneNode>());
+        return;
+    }
+
+    // set_active_scene_node() wires mesh/skin/skeleton/animator from the node
+    // and (via clear_selection) resets the selection to just the active node.
+    set_active_scene_node(last);
+    for (const Ref<VFXSceneNode>& n : requested) {
+        if (n == last || is_scene_node_selected(n)) continue;
+        selected_scene_nodes.push_back(n);
+    }
+    _update_gizmo_for_selection();
+    _update_gizmo_visibility();
 }
 
 
@@ -1178,7 +1236,19 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
     if (p_skin.is_valid() && p_sk.is_valid() && p_sk->get_bone_count() > 0 && !p_show_weights) {
         p_sk->update_transforms();
         p_skin->set_mesh_transform(Transform3D());
-        positions = p_skin->compute_skinned_positions();
+        PackedVector3Array skinned = p_skin->compute_skinned_positions();
+        // compute_skinned_positions() reads the SKIN'S OWN mesh/skeleton refs,
+        // which set_vfx_skin() re-points behind this node's back (a skin can
+        // be shared between nodes). When they disagree with p_mesh, the
+        // vertex count mismatches the index array, add_surface_from_arrays()
+        // fails, the ArrayMesh ends up with ZERO surfaces — and the caller
+        // swaps it in, making the node vanish from the viewport. Fall back to
+        // raw positions whenever the counts don't line up.
+        if (skinned.size() == p_mesh->get_vertex_count()) {
+            positions = skinned;
+        } else {
+            positions = p_mesh->get_positions();
+        }
     } else {
         positions = p_mesh->get_positions();
     }
@@ -1244,8 +1314,6 @@ void VFXEditorNode::_sync_scene_visuals() {
     for (const auto& pair : scene_visuals) {
         if (used.find(pair.key) == used.end()) {
             pair.value->set_visible(false);
-            // in _sync_scene_visuals, in the hiding loop:
-            WARN_PRINT("HIDING visual id=" + String::num_int64(pair.key));
         }
     }
 }
@@ -1299,7 +1367,13 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
             }
 
         } else if (am.is_valid()) {
-            visual->set_mesh(am);  // empty mesh, don't touch materials
+            // Build yielded no surface (invalid arrays). NEVER swap in the
+            // empty ArrayMesh — that blanks an otherwise healthy node.
+            // Only take it when there is nothing worth keeping.
+            Ref<Mesh> old_mesh = visual->get_mesh();
+            if (old_mesh.is_null() || old_mesh->get_surface_count() == 0) {
+                visual->set_mesh(am);
+            }
         }
     }
 
@@ -1361,7 +1435,39 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
         if (selected_bone < 0) {
             Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
             if (hit.is_valid()) {
-                set_active_scene_node(hit);
+                // Multi-select (SELECTION_MODE_MULTI): tapping an unselected
+                // node adds it to the selection; tapping the active node
+                // again removes it (and activates the previous one).
+                // Single mode: plain replace, as before.
+                std::vector<Ref<VFXSceneNode>> prev = selected_scene_nodes;
+                bool already_selected = is_scene_node_selected(hit);
+
+                set_active_scene_node(hit);   // wires mesh/skin/skel + sets {hit}
+
+                if (selection_mode == SELECTION_MODE_MULTI) {
+                    if (already_selected && prev.size() > 1) {
+                        // Toggle OFF: drop hit, activate the previously-last node.
+                        std::vector<Ref<VFXSceneNode>> rest;
+                        for (const Ref<VFXSceneNode>& n : prev) {
+                            if (n != hit) rest.push_back(n);
+                        }
+                        Ref<VFXSceneNode> new_active = rest.back();
+                        set_active_scene_node(new_active);   // re-wires, resets set
+                        for (const Ref<VFXSceneNode>& n : rest) {
+                            if (n == new_active || is_scene_node_selected(n)) continue;
+                            selected_scene_nodes.push_back(n);
+                        }
+                    } else {
+                        // Toggle ON: restore everything that was selected before.
+                        for (const Ref<VFXSceneNode>& n : prev) {
+                            if (n == hit || is_scene_node_selected(n)) continue;
+                            selected_scene_nodes.push_back(n);
+                        }
+                    }
+                    _update_gizmo_for_selection();
+                    _update_gizmo_visibility();
+                    _update_origin_indicator();
+                }
                 return SCENE_NODE_HIT;
             }
             set_active_scene_node(Ref<VFXSceneNode>());
