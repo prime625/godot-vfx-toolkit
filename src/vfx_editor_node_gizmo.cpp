@@ -369,6 +369,21 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
     gizmo_rotation_angle = 0.0f;
     gizmo_drag_initial_vector = Vector3();
 
+    // Multi-select object drag: remember every selected node's world transform
+    // so gizmo_drag() can reapply one shared delta to all of them.
+    object_drag_start_transforms.clear();
+    object_drag_active_start = Transform3D();
+    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()
+            && selected_scene_nodes.size() > 1) {
+        object_drag_active_start = active_scene_node->get_global_transform();
+        object_drag_start_transforms.resize(selected_scene_nodes.size());
+        for (size_t i = 0; i < selected_scene_nodes.size(); i++) {
+            object_drag_start_transforms[i] = selected_scene_nodes[i].is_valid()
+                ? selected_scene_nodes[i]->get_global_transform()
+                : Transform3D();
+        }
+    }
+
     mesh_edit_verts.clear();
     mesh_edit_initial_positions.clear();
     mesh_edit_weights.clear();
@@ -786,6 +801,26 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             local = parent->get_global_transform().affine_inverse() * global;
         }
         active_scene_node->set_local_transform(local);
+
+        // Multi-select: every other selected node gets the same world-space
+        // delta (delta = new_active_global * active_start^-1), converted
+        // into its own parent space.
+        if (object_drag_start_transforms.size() == selected_scene_nodes.size()
+                && object_drag_start_transforms.size() > 1) {
+            Transform3D delta = global * object_drag_active_start.affine_inverse();
+            for (size_t i = 0; i < selected_scene_nodes.size(); i++) {
+                Ref<VFXSceneNode> n = selected_scene_nodes[i];
+                if (n.is_null() || n == active_scene_node) continue;
+                Transform3D n_global = delta * object_drag_start_transforms[i];
+                VFXSceneNode* n_parent = n->get_parent_node();
+                Transform3D n_local = n_global;
+                if (n_parent != nullptr) {
+                    n_local = n_parent->get_global_transform().affine_inverse() * n_global;
+                }
+                n->set_local_transform(n_local);
+            }
+        }
+
         // Immediate transform update — children follow parent without frame delay
         _update_scene_visual_transforms();
         mark_scene_dirty();
