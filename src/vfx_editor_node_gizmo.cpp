@@ -332,6 +332,12 @@ int VFXEditorNode::_query_gizmo_screen_hit(const Vector2& screen_pos, float& out
 // ============================================================================
 // GIZMO — SCREEN-SPACE RAYCAST (with hover/build side effects)
 // ============================================================================
+void VFXEditorNode::_clear_gizmo_hover() {
+    if (gizmo_hover_axis == GIZMO_NONE) return;
+    gizmo_hover_axis = GIZMO_NONE;
+    _build_gizmo_mesh();
+}
+
 int VFXEditorNode::screen_raycast_gizmo(const Vector2& screen_pos) {
     float dist_sq = 0.0f;
     int best = _query_gizmo_screen_hit(screen_pos, dist_sq);
@@ -665,22 +671,11 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         return;
     }
 
-    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
-        // gizmo_transform is in world space; convert back to local
-        Transform3D global = gizmo_transform;
-        Transform3D local = global;
-        VFXSceneNode* parent = active_scene_node->get_parent_node();
-        if (parent != nullptr) {
-            local = parent->get_global_transform().affine_inverse() * global;
-        }
-        active_scene_node->set_local_transform(local);
-        // Immediate transform update — children follow parent without frame delay
-        _update_scene_visual_transforms();
-        mark_scene_dirty();
-        return;
-    }
-
-    if (selected_bone >= 0 && skeleton.is_valid()) {
+    // Bone branch FIRST: a selected bone owns the gizmo even when the
+    // armature's scene node is still the active node. Checking the node
+    // first made bone drags move the whole node and the gizmo jump to the
+    // node pivot on release.
+    if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
         skeleton->update_transforms();
 
         // Bone model transforms live in SKELETON space (rooted at the armature
@@ -765,6 +760,22 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         } else if (auto_update) {
             _update_godot_mesh();
         }
+        return;
+    }
+
+    if (edit_mode == MODE_OBJECT && active_scene_node.is_valid()) {
+        // gizmo_transform is in world space; convert back to local
+        Transform3D global = gizmo_transform;
+        Transform3D local = global;
+        VFXSceneNode* parent = active_scene_node->get_parent_node();
+        if (parent != nullptr) {
+            local = parent->get_global_transform().affine_inverse() * global;
+        }
+        active_scene_node->set_local_transform(local);
+        // Immediate transform update — children follow parent without frame delay
+        _update_scene_visual_transforms();
+        mark_scene_dirty();
+        return;
     }
 }
 
