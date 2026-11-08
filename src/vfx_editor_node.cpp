@@ -1236,14 +1236,23 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
     if (p_skin.is_valid() && p_sk.is_valid() && p_sk->get_bone_count() > 0 && !p_show_weights) {
         p_sk->update_transforms();
         p_skin->set_mesh_transform(Transform3D());
-        PackedVector3Array skinned = p_skin->compute_skinned_positions();
         // compute_skinned_positions() reads the SKIN'S OWN mesh/skeleton refs,
         // which set_vfx_skin() re-points behind this node's back (a skin can
-        // be shared between nodes). When they disagree with p_mesh, the
-        // vertex count mismatches the index array, add_surface_from_arrays()
-        // fails, the ArrayMesh ends up with ZERO surfaces — and the caller
-        // swaps it in, making the node vanish from the viewport. Fall back to
-        // raw positions whenever the counts don't line up.
+        // be shared between nodes). Re-point the skin to THIS node's data for
+        // the computation, then restore — otherwise a shared skin renders
+        // with the active node's skeleton (garbage/crumpled mesh that looks
+        // like the node vanished) or, on a vertex-count mismatch, produces
+        // positions that don't line up with p_mesh's index array, so
+        // add_surface_from_arrays() fails and the ArrayMesh ends up with
+        // ZERO surfaces — and the caller swaps it in, making the node vanish
+        // from the viewport.
+        Ref<VFXMesh> prev_mesh = p_skin->get_mesh();
+        Ref<VFXSkeleton> prev_skel = p_skin->get_skeleton();
+        p_skin->set_mesh(p_mesh);
+        p_skin->set_skeleton(p_sk);
+        PackedVector3Array skinned = p_skin->compute_skinned_positions();
+        p_skin->set_mesh(prev_mesh);
+        p_skin->set_skeleton(prev_skel);
         if (skinned.size() == p_mesh->get_vertex_count()) {
             positions = skinned;
         } else {
@@ -1366,15 +1375,10 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
                 visual->set_surface_override_material(0, base_material);
             }
 
-        } else if (am.is_valid()) {
-            // Build yielded no surface (invalid arrays). NEVER swap in the
-            // empty ArrayMesh — that blanks an otherwise healthy node.
-            // Only take it when there is nothing worth keeping.
-            Ref<Mesh> old_mesh = visual->get_mesh();
-            if (old_mesh.is_null() || old_mesh->get_surface_count() == 0) {
-                visual->set_mesh(am);
-            }
         }
+        // else: build yielded no surface (invalid arrays) — keep whatever mesh
+        // the visual already has. NEVER swap in a zero-surface ArrayMesh;
+        // that blanks an otherwise healthy node.
     }
 
     for (int i = 0; i < p_node->get_child_count(); ++i) {
