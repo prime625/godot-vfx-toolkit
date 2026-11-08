@@ -1367,8 +1367,11 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
             visual->set_mesh(am);
             if (show_weights && p_node->get_skin().is_valid()) {
                 visual->set_surface_override_material(0, weight_material);
-            } else if (paint_material.is_valid()) {                          // ADD
-                visual->set_surface_override_material(0, paint_material);    // ADD
+            } else if (p_node->get_paint_material().is_valid()) {
+                // Per-node painted texture/material, set from GDScript.
+                visual->set_surface_override_material(0, p_node->get_paint_material());
+            } else if (paint_material.is_valid()) {
+                visual->set_surface_override_material(0, paint_material);
             } else if (vmesh->material.is_valid()) {
                 visual->set_surface_override_material(0, vmesh->material);
             } else {
