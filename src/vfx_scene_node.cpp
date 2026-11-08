@@ -86,11 +86,13 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("has_animator"), &VFXSceneNode::has_animator);
     ClassDB::bind_method(D_METHOD("get_type_color"), &VFXSceneNode::get_type_color);
     ClassDB::bind_method(D_METHOD("get_type_icon_hint"), &VFXSceneNode::get_type_icon_hint);
+	ClassDB::bind_method(D_METHOD("set_paint_material", "mat"), &VFXSceneNode::set_paint_material);
+	ClassDB::bind_method(D_METHOD("get_paint_material"), &VFXSceneNode::get_paint_material);
 
     ClassDB::bind_method(D_METHOD("serialize"), &VFXSceneNode::serialize);
     ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXSceneNode::deserialize);
-	ClassDB::bind_method(D_METHOD("is_visible"), &VFXSceneNode::is_visible);
-	ClassDB::bind_method(D_METHOD("get_global_transform"), &VFXSceneNode::get_global_transform);
+    ClassDB::bind_method(D_METHOD("is_visible"), &VFXSceneNode::is_visible);
+    ClassDB::bind_method(D_METHOD("get_global_transform"), &VFXSceneNode::get_global_transform);
 }
 
 VFXSceneNode::VFXSceneNode() {}
@@ -374,7 +376,7 @@ PackedByteArray VFXSceneNode::serialize() const {
     int name_len = cs.length();
     append_int(name_len);
 
-	for (int i = 0; i < name_len; ++i) data.append(cs.ptr()[i]);
+        for (int i = 0; i < name_len; ++i) data.append(cs.ptr()[i]);
 
 
     Basis b = local_transform.get_basis();
@@ -406,3 +408,6 @@ PackedByteArray VFXSceneNode::serialize() const {
 void VFXSceneNode::deserialize(const PackedByteArray& p_data) {
     clear_children();
 }
+
+void VFXSceneNode::set_paint_material(const Ref<Material>& p_mat) { paint_material = p_mat; }
+Ref<Material> VFXSceneNode::get_paint_material() const { return paint_material; }
