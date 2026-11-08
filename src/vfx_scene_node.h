@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <vector>
 
@@ -50,6 +51,7 @@ private:
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
     Ref<VFXAnimator> animator;
+	Ref<Material> paint_material;
 
     int bone_parent_idx = -1;
 
@@ -116,14 +118,18 @@ public:
     // Components
     void set_mesh(const Ref<VFXMesh>& p_mesh);
     Ref<VFXMesh> get_mesh() const;
+	void set_paint_material(const Ref<Material>& p_mat);
+	Ref<Material> get_paint_material() const;
+
+
     void set_skeleton(const Ref<VFXSkeleton>& p_skeleton);
     Ref<VFXSkeleton> get_skeleton() const;
     void set_skin(const Ref<VFXSkin>& p_skin);
     Ref<VFXSkin> get_skin() const;
     void set_animator(const Ref<VFXAnimator>& p_animator);
     Ref<VFXAnimator> get_animator() const;
-	bool is_visible() const;                 // alias for get_visible()
-	Transform3D get_global_transform() const; // walks parent chain
+        bool is_visible() const;                 // alias for get_visible()
+        Transform3D get_global_transform() const; // walks parent chain
 
 
     // Bone
