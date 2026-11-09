@@ -21,6 +21,7 @@ struct Keyframe {
     float value = 0.0f;
     Vector3 vec_value;
     Quaternion quat_value;
+    bool has_quaternion = false; // Preserve source quaternion for correct LINEAR slerp.
     float in_tangent = 0.0f;
     float out_tangent = 0.0f;
     Vector3 vec_in_tangent;
