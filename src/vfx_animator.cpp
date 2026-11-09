@@ -948,7 +948,61 @@ PackedVector2Array VFXAnimator::get_curve_samples(int clip_idx, int curve_idx, i
         float v = 0.0f;
 
         if (curve.is_rotation) {
-            Vector3 euler = curve.sample_vector(t);
+            // The viewport must visualize the same interpolation used by
+            // playback. Imported glTF rotations are stored as quaternions and
+            // played with SLERP, so sampling the Euler backing values here
+            // would draw straight component-wise segments instead of the
+            // actual rotational path.
+            Vector3 euler;
+            bool sampled_quaternion = false;
+
+            if (curve.keys.size() >= 2) {
+                size_t key_idx = 0;
+                for (; key_idx + 1 < curve.keys.size(); ++key_idx) {
+                    if (t >= curve.keys[key_idx].time && t <= curve.keys[key_idx + 1].time) break;
+                }
+
+                if (key_idx + 1 < curve.keys.size()) {
+                    const Keyframe& k0 = curve.keys[key_idx];
+                    const Keyframe& k1 = curve.keys[key_idx + 1];
+                    if (k0.has_quaternion && k1.has_quaternion &&
+                        (k0.interp == VFXAnimator::INTERP_LINEAR ||
+                         k0.interp == VFXAnimator::INTERP_STEP)) {
+                        const float dt = k1.time - k0.time;
+                        const float alpha = dt > 0.0001f
+                            ? CLAMP((t - k0.time) / dt, 0.0f, 1.0f)
+                            : 0.0f;
+                        const Vector3 euler_reference = k0.interp == VFXAnimator::INTERP_STEP
+                            ? k0.vec_value
+                            : k0.vec_value.lerp(k1.vec_value, alpha);
+                        euler = Basis(curve.sample_quaternion(t)).get_euler();
+                        // Euler angles have multiple equivalent representations.
+                        // Select the branch nearest the stored, unwrapped key
+                        // values so the displayed line remains continuous and
+                        // meets the key diamonds rather than jumping by 2*PI.
+                        euler = _unwrap_euler_near(euler, euler_reference);
+                        sampled_quaternion = true;
+                    }
+                } else {
+                    const Keyframe& last = curve.keys.back();
+                    if (last.has_quaternion) {
+                        euler = _unwrap_euler_near(
+                            Basis(last.quat_value.normalized()).get_euler(), last.vec_value);
+                        sampled_quaternion = true;
+                    }
+                }
+            } else if (curve.keys.size() == 1 && curve.keys[0].has_quaternion) {
+                euler = _unwrap_euler_near(
+                    Basis(curve.keys[0].quat_value.normalized()).get_euler(),
+                    curve.keys[0].vec_value);
+                sampled_quaternion = true;
+            }
+
+            if (!sampled_quaternion) {
+                // App-authored Bezier rotation curves intentionally remain
+                // Euler-Bezier curves; their graph must match their playback.
+                euler = curve.sample_vector(t);
+            }
             v = (component == 0) ? euler.x : (component == 1) ? euler.y : euler.z;
         } else if (curve.is_scalar) {
             v = curve.sample_scalar(t);
