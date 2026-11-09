@@ -184,7 +184,7 @@ private:
     Ref<VFXMesh> _build_mesh(const GLBMesh& glb_mesh, String& out_error, const Transform3D& vertex_space = Transform3D());
     Ref<VFXSkeleton> _build_skeleton(const GLBSkin& glb_skin, int owner_node_idx, String& out_error);
     bool _skin_uses_scene_space_ibms(const GLBSkin& glb_skin, int owner_node_idx);
-    void _build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone);
+    void _build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone, bool smooth_linear_curves);
     void _clear_document();
 
 protected:
@@ -193,7 +193,7 @@ protected:
 public:
     VFXGLBImporter();
     ~VFXGLBImporter();
-    Dictionary import_glb(const String& path);
+    Dictionary import_glb(const String& path, bool smooth_linear_curves = false);
     static Vector3 convert_position(const Vector3& gltf_pos);
     static Vector3 convert_normal(const Vector3& gltf_normal);
     static Quaternion convert_rotation(const Quaternion& gltf_rot);
