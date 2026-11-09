@@ -1309,7 +1309,7 @@ bool VFXGLBImporter::_skin_uses_scene_space_ibms(const GLBSkin& glb_skin, int ow
     };
 
     // The mesh node may be a SIBLING of the joints (not an ancestor), so it
-    // cannot be discovered from the joint list — the caller must pass it.
+    // cannot be discovered from the joint list â€” the caller must pass it.
     Transform3D g_mesh_inv = global_of(owner_node_idx).affine_inverse();
 
     double err_standard = 0.0, err_scene = 0.0;
@@ -1365,7 +1365,7 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
     }
 
     // Bind poses must be expressed relative to the node that will OWN the
-    // skeleton in the VFX scene — the mesh node carrying the skin (import_glb
+    // skeleton in the VFX scene â€” the mesh node carrying the skin (import_glb
     // attaches the skeleton to that same node, and the exporter parents the
     // bone roots under it).
     //
@@ -1494,6 +1494,20 @@ void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vec
             const int interp = is_step ? VFXAnimator::INTERP_STEP
                                        : (smooth_this_track ? VFXAnimator::INTERP_BEZIER : VFXAnimator::INTERP_LINEAR);
 
+            // TEMP DEBUG: verify the importer receives the smoothing option and
+            // chooses the expected interpolation for each imported animation track.
+            const String interp_name = interp == VFXAnimator::INTERP_BEZIER ? "BEZIER"
+                                     : (interp == VFXAnimator::INTERP_STEP ? "STEP" : "LINEAR");
+            UtilityFunctions::print(
+                String("[GLB DEBUG] Track: ") + curve_name +
+                " | glTF sampler: " + sampler.interpolation +
+                " | smooth requested: " + (smooth_linear_curves ? "true" : "false") +
+                " | smooth applied: " + (smooth_this_track ? "true" : "false") +
+                " | keys: " + String::num_int64(times.size()) +
+                " | chosen interpolation: " + interp_name +
+                " (" + String::num_int64(interp) + ")"
+            );
+
             for (int k = 0; k < times.size(); k++) {
                 const float t = times[k];
                 const int base = k * comp_count;
@@ -1539,6 +1553,23 @@ void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vec
                     animator->set_keyframe_tangent_mode(clip_idx, curve_idx, key_idx, VFXAnimator::TANGENT_AUTO);
                 }
                 animator->auto_compute_tangents(clip_idx, curve_idx);
+
+                // TEMP DEBUG: read back the stored values after tangent generation.
+                const int final_interp = animator->get_keyframe_interp(clip_idx, curve_idx, 0);
+                const int final_tangent_mode = animator->get_keyframe_tangent_mode(clip_idx, curve_idx, 0);
+                UtilityFunctions::print(
+                    String("[GLB DEBUG] Final track: ") + curve_name +
+                    " | first key interpolation: " + String::num_int64(final_interp) +
+                    " | first key tangent mode: " + String::num_int64(final_tangent_mode) +
+                    " (AUTO=" + String::num_int64(VFXAnimator::TANGENT_AUTO) + ")"
+                );
+            } else {
+                const int final_interp = animator->get_keyframe_interp(clip_idx, curve_idx, 0);
+                UtilityFunctions::print(
+                    String("[GLB DEBUG] Final track: ") + curve_name +
+                    " | first key interpolation: " + String::num_int64(final_interp) +
+                    " | auto tangents: not requested"
+                );
             }
         }
     }
