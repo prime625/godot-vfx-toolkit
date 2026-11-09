@@ -15,7 +15,7 @@
 using namespace godot;
 
 void VFXGLBImporter::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("import_glb", "path"), &VFXGLBImporter::import_glb);
+    ClassDB::bind_method(D_METHOD("import_glb", "path", "smooth_linear_curves"), &VFXGLBImporter::import_glb, DEFVAL(false));
     ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_position", "gltf_pos"), &VFXGLBImporter::convert_position);
     ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_normal", "gltf_normal"), &VFXGLBImporter::convert_normal);
     ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_rotation", "gltf_rot"), &VFXGLBImporter::convert_rotation);
@@ -90,7 +90,7 @@ void VFXGLBImporter::_clear_document() {
     scene_nodes.clear();
 }
 
-Dictionary VFXGLBImporter::import_glb(const String& path) {
+Dictionary VFXGLBImporter::import_glb(const String& path, bool smooth_linear_curves) {
     Dictionary result;
     result[KEY_SUCCESS] = false;
     result[KEY_ERROR] = "";
@@ -325,7 +325,7 @@ Dictionary VFXGLBImporter::import_glb(const String& path) {
                                 node_to_bone[joint_node] = j;
                             }
                         }
-                        _build_animations(animator, node_to_bone);
+                        _build_animations(animator, node_to_bone, smooth_linear_curves);
                         built_animators[skin_idx] = animator;
 
                     }
@@ -1423,7 +1423,7 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
 }
 
 
-void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone) {
+void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vector<int>& node_to_bone, bool smooth_linear_curves) {
     for (const GLBAnimation& anim : animations) {
         float duration = 0.0f;
         for (const GLBAnimationSampler& sampler : anim.samplers) {
@@ -1455,36 +1455,62 @@ void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vec
             if (!_read_accessor_floats(sampler.input, times, err)) continue;
             if (!_read_accessor_floats(sampler.output, values, err)) continue;
 
-            bool is_rotation = (channel.target_path == "rotation");
-            bool is_scale = (channel.target_path == "scale");
-            bool is_translation = (channel.target_path == "translation");
+            const bool is_rotation = (channel.target_path == "rotation");
+            const bool is_scale = (channel.target_path == "scale");
+            const bool is_translation = (channel.target_path == "translation");
             if (!is_rotation && !is_scale && !is_translation) continue;
 
-            String curve_name = nodes[channel.target_node].name + "_" + channel.target_path;
-            int curve_idx = animator->add_curve(clip_idx, curve_name, bone_id, is_rotation, is_scale);
+            // This importer currently supports glTF STEP and LINEAR samplers.
+            // CUBICSPLINE has 3 output elements per key and needs a separate
+            // Hermite/tangent path; do not silently interpret it as ordinary keys.
+            if (sampler.interpolation == "CUBICSPLINE") {
+                UtilityFunctions::push_warning(
+                    "VFXGLBImporter: CUBICSPLINE sampler on '" + nodes[channel.target_node].name +
+                    "' is not yet supported; skipping this animation channel.");
+                continue;
+            }
 
-            int comp_count = is_rotation ? 4 : 3;
-            if ((int)values.size() < times.size() * comp_count) continue;
+            const String curve_name = nodes[channel.target_node].name + "_" + channel.target_path;
+            const int curve_idx = animator->add_curve(clip_idx, curve_name, bone_id, is_rotation, is_scale);
 
-            int interp = VFXAnimator::INTERP_LINEAR;
-            if (sampler.interpolation == "STEP") interp = VFXAnimator::INTERP_STEP;
+            const int comp_count = is_rotation ? 4 : 3;
+            if ((int)values.size() < times.size() * comp_count) {
+                UtilityFunctions::push_warning("VFXGLBImporter: animation output is shorter than its input times for '" + curve_name + "'.");
+                continue;
+            }
+
+            const bool is_step = sampler.interpolation == "STEP";
+            // Smoothing is intentionally limited to vector tracks. Rotation
+            // stays quaternion LINEAR/SLERP to avoid Euler-space distortion.
+            const bool smooth_this_track = smooth_linear_curves && !is_rotation && !is_step && times.size() > 1;
+            const int interp = is_step ? VFXAnimator::INTERP_STEP
+                                       : (smooth_this_track ? VFXAnimator::INTERP_BEZIER : VFXAnimator::INTERP_LINEAR);
 
             for (int k = 0; k < times.size(); k++) {
-                float t = times[k];
-                int base = k * comp_count;
+                const float t = times[k];
+                const int base = k * comp_count;
 
                 if (is_rotation) {
-                    Quaternion q(values[base], values[base+1], values[base+2], values[base+3]);
-                    q = _gltf_to_godot_q(q);
+                    Quaternion q(values[base], values[base + 1], values[base + 2], values[base + 3]);
+                    q = _gltf_to_godot_q(q).normalized();
                     animator->add_keyframe_quaternion(clip_idx, curve_idx, t, q, interp);
                 } else if (is_scale) {
-                    Vector3 s(values[base], values[base+1], values[base+2]);
-                    animator->add_keyframe_vector(clip_idx, curve_idx, t, s, interp);
+                    const Vector3 scale(values[base], values[base + 1], values[base + 2]);
+                    animator->add_keyframe_vector(clip_idx, curve_idx, t, scale, interp);
                 } else {
-                    Vector3 p(values[base], values[base+1], values[base+2]);
-                    p = _gltf_to_godot_v3(p);
-                    animator->add_keyframe_vector(clip_idx, curve_idx, t, p, interp);
+                    const Vector3 position = _gltf_to_godot_v3(Vector3(values[base], values[base + 1], values[base + 2]));
+                    animator->add_keyframe_vector(clip_idx, curve_idx, t, position, interp);
                 }
+            }
+
+            if (smooth_this_track) {
+                // Automatic handles use the actual key-time spacing, so
+                // unevenly sampled GLB tracks remain well behaved.
+                const int key_count = animator->get_keyframe_count(clip_idx, curve_idx);
+                for (int key_idx = 0; key_idx < key_count; key_idx++) {
+                    animator->set_keyframe_tangent_mode(clip_idx, curve_idx, key_idx, VFXAnimator::TANGENT_AUTO);
+                }
+                animator->auto_compute_tangents(clip_idx, curve_idx);
             }
         }
     }
