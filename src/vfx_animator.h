@@ -24,6 +24,9 @@ struct Keyframe {
     bool has_quaternion = false; // Preserve source quaternion for correct LINEAR slerp.
     float in_tangent = 0.0f;
     float out_tangent = 0.0f;
+    // Horizontal Bézier handle offsets in seconds (incoming is negative).
+    float in_time_tangent = 0.0f;
+    float out_time_tangent = 0.0f;
     Vector3 vec_in_tangent;
     Vector3 vec_out_tangent;
     int interp = 0;
@@ -152,6 +155,8 @@ public:
     void set_keyframe_tangent_mode(int clip_idx, int curve_idx, int key_idx, int mode);
     int get_keyframe_tangent_mode(int clip_idx, int curve_idx, int key_idx) const;
     void set_keyframe_scalar_tangents(int clip_idx, int curve_idx, int key_idx, float in_tan, float out_tan);
+    void set_keyframe_time_tangents(int clip_idx, int curve_idx, int key_idx, float in_time, float out_time);
+    Vector2 get_keyframe_time_tangents(int clip_idx, int curve_idx, int key_idx) const;
     void set_keyframe_vector_tangents(int clip_idx, int curve_idx, int key_idx, const Vector3& in_tan, const Vector3& out_tan);
     Vector2 get_keyframe_scalar_tangents(int clip_idx, int curve_idx, int key_idx) const;              // [NEW] (in, out)
     Vector3 get_keyframe_vector_in_tangent(int clip_idx, int curve_idx, int key_idx) const;           // [NEW]
