@@ -14,6 +14,11 @@
 
 using namespace godot;
 
+// Local turn constants so the smoothing code below does not depend on
+// godot_cpp math_defs include order.
+static constexpr float VFX_PI  = 3.14159265358979323846f;
+static constexpr float VFX_TAU = 6.28318530717958647692f;
+
 void VFXGLBImporter::_bind_methods() {
     ClassDB::bind_method(D_METHOD("import_glb", "path", "smooth_linear_curves"), &VFXGLBImporter::import_glb, DEFVAL(false));
     ClassDB::bind_static_method("VFXGLBImporter", D_METHOD("convert_position", "gltf_pos"), &VFXGLBImporter::convert_position);
@@ -1480,9 +1485,12 @@ void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vec
             }
 
             const bool is_step = sampler.interpolation == "STEP";
-            // Smoothing is intentionally limited to vector tracks. Rotation
-            // stays quaternion LINEAR/SLERP to avoid Euler-space distortion.
-            const bool smooth_this_track = smooth_linear_curves && !is_rotation && !is_step && times.size() > 1;
+            // Smooth every sampled track, including rotation: keys are stored
+            // as continuous (unwrapped) Euler with auto-tangent Bezier handles.
+            // Quaternion slerp playback only applies to INTERP_LINEAR keys, so
+            // BEZIER rotation keys automatically use the Euler-backed path in
+            // AnimationCurve::sample_quaternion().
+            const bool smooth_this_track = smooth_linear_curves && !is_step && times.size() > 1;
             const int interp = is_step ? VFXAnimator::INTERP_STEP
                                        : (smooth_this_track ? VFXAnimator::INTERP_BEZIER : VFXAnimator::INTERP_LINEAR);
 
@@ -1504,9 +1512,29 @@ void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vec
             }
 
             if (smooth_this_track) {
+                const int key_count = animator->get_keyframe_count(clip_idx, curve_idx);
+
+                if (is_rotation) {
+                    // Unwrap Euler components so adjacent keys stay continuous.
+                    // glTF quaternions often flip sign between keys (q and -q are
+                    // the same rotation), which appears as ~2*pi jumps in Euler
+                    // space and would collapse the auto tangents to zero.
+                    Vector3 prev = animator->get_keyframe_vector_value(clip_idx, curve_idx, 0);
+                    for (int key_idx = 1; key_idx < key_count; key_idx++) {
+                        Vector3 e = animator->get_keyframe_vector_value(clip_idx, curve_idx, key_idx);
+                        for (int a = 0; a < 3; a++) {
+                            while (e[a] - prev[a] >  VFX_PI) e[a] -= VFX_TAU;
+                            while (e[a] - prev[a] < -VFX_PI) e[a] += VFX_TAU;
+                        }
+                        // Keeps quat_value in sync (same rotation, since adding
+                        // full turns does not change Basis::from_euler(e)).
+                        animator->set_keyframe_vector_value(clip_idx, curve_idx, key_idx, e);
+                        prev = e;
+                    }
+                }
+
                 // Automatic handles use the actual key-time spacing, so
                 // unevenly sampled GLB tracks remain well behaved.
-                const int key_count = animator->get_keyframe_count(clip_idx, curve_idx);
                 for (int key_idx = 0; key_idx < key_count; key_idx++) {
                     animator->set_keyframe_tangent_mode(clip_idx, curve_idx, key_idx, VFXAnimator::TANGENT_AUTO);
                 }
