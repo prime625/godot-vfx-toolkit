@@ -1563,6 +1563,36 @@ void VFXGLBImporter::_build_animations(Ref<VFXAnimator> animator, const std::vec
                     " | first key tangent mode: " + String::num_int64(final_tangent_mode) +
                     " (AUTO=" + String::num_int64(VFXAnimator::TANGENT_AUTO) + ")"
                 );
+
+                // TEMP DEBUG: inspect actual Euler values and generated handles
+                // for the imported Spine rotation curve (especially its X component).
+                if (curve_name.find("Spine_rotation") >= 0 && key_count > 1) {
+                    const int debug_indices[] = {0, 1, 2, key_count / 4, key_count / 2,
+                                                 (key_count * 3) / 4, key_count - 2, key_count - 1};
+                    for (int debug_i = 0; debug_i < 8; ++debug_i) {
+                        const int key_idx = debug_indices[debug_i];
+                        if (key_idx < 0 || key_idx >= key_count) continue;
+                        bool already_printed = false;
+                        for (int prior = 0; prior < debug_i; ++prior) {
+                            if (debug_indices[prior] == key_idx) already_printed = true;
+                        }
+                        if (already_printed) continue;
+
+                        const Vector3 value = animator->get_keyframe_vector_value(clip_idx, curve_idx, key_idx);
+                        const Vector3 in_tan = animator->get_keyframe_vector_in_tangent(clip_idx, curve_idx, key_idx);
+                        const Vector3 out_tan = animator->get_keyframe_vector_out_tangent(clip_idx, curve_idx, key_idx);
+                        const Vector2 time_tan = animator->get_keyframe_time_tangents(clip_idx, curve_idx, key_idx);
+                        UtilityFunctions::print(
+                            String("[GLB TANGENT DEBUG] ") + curve_name +
+                            " | key: " + String::num_int64(key_idx) +
+                            " | time: " + String::num(animator->get_keyframe_time(clip_idx, curve_idx, key_idx), 6) +
+                            " | value XYZ: " + String::num(value.x, 6) + "," + String::num(value.y, 6) + "," + String::num(value.z, 6) +
+                            " | in XYZ: " + String::num(in_tan.x, 6) + "," + String::num(in_tan.y, 6) + "," + String::num(in_tan.z, 6) +
+                            " | out XYZ: " + String::num(out_tan.x, 6) + "," + String::num(out_tan.y, 6) + "," + String::num(out_tan.z, 6) +
+                            " | time handles: " + String::num(time_tan.x, 6) + "," + String::num(time_tan.y, 6)
+                        );
+                    }
+                }
             } else {
                 const int final_interp = animator->get_keyframe_interp(clip_idx, curve_idx, 0);
                 UtilityFunctions::print(
