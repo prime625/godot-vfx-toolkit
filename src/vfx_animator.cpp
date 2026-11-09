@@ -146,30 +146,79 @@ Quaternion AnimationCurve::sample_quaternion(float time) const {
     return Basis::from_euler(sample_vector(time)).get_rotation_quaternion();
 }
 
+// Shape-preserving PCHIP-style slope at a key. The weighted harmonic mean
+// prevents a tangent from changing sign or creating overshoot around extrema.
+static float _auto_monotone_slope(float d_prev, float d_next,
+                                  float h_prev, float h_next) {
+    if (h_prev <= 0.0001f || h_next <= 0.0001f) return 0.0f;
+    if (d_prev == 0.0f || d_next == 0.0f ||
+        (d_prev < 0.0f) != (d_next < 0.0f)) {
+        return 0.0f;
+    }
+    const float w1 = 2.0f * h_next + h_prev;
+    const float w2 = h_next + 2.0f * h_prev;
+    const float denom = (w1 / d_prev) + (w2 / d_next);
+    if (fabsf(denom) < 0.000001f) return 0.0f;
+    return (w1 + w2) / denom;
+}
+
 void AnimationCurve::auto_compute_tangents() {
     if (keys.size() < 2) return;
-    for (size_t i = 0; i < keys.size(); i++) {
-        if (keys[i].tangent_mode != VFXAnimator::TANGENT_AUTO) continue;
 
-        float prev_t = (i > 0) ? keys[i-1].time : keys[0].time;
-        float next_t = (i + 1 < keys.size()) ? keys[i+1].time : keys.back().time;
-        float dt = next_t - prev_t;
-        if (dt < 0.0001f) dt = 1.0f;
-        float dt_out = next_t - keys[i].time;
-        float dt_in = keys[i].time - prev_t;
-
-        if (is_scalar) {
-            float prev_val = (i > 0) ? keys[i-1].value : keys[0].value;
-            float next_val = (i + 1 < keys.size()) ? keys[i+1].value : keys.back().value;
-            float slope = (next_val - prev_val) / dt;
-            keys[i].out_tangent = slope * dt_out * 0.3333f;
-            keys[i].in_tangent = slope * dt_in * 0.3333f;
-        } else {
-            Vector3 prev_val = (i > 0) ? keys[i-1].vec_value : keys[0].vec_value;
-            Vector3 next_val = (i + 1 < keys.size()) ? keys[i+1].vec_value : keys.back().vec_value;
-            Vector3 slope = (next_val - prev_val) / dt;
-            keys[i].vec_out_tangent = slope * dt_out * 0.3333f;
-            keys[i].vec_in_tangent = slope * dt_in * 0.3333f;
+    // Calculate a slope for every key first, so incoming and outgoing handles
+    // share exactly the same derivative and remain C1-continuous.
+    const size_t count = keys.size();
+    if (is_scalar) {
+        std::vector<float> slopes(count, 0.0f);
+        for (size_t i = 0; i < count; ++i) {
+            if (i == 0) {
+                const float h = keys[1].time - keys[0].time;
+                slopes[i] = h > 0.0001f ? (keys[1].value - keys[0].value) / h : 0.0f;
+            } else if (i == count - 1) {
+                const float h = keys[i].time - keys[i - 1].time;
+                slopes[i] = h > 0.0001f ? (keys[i].value - keys[i - 1].value) / h : 0.0f;
+            } else {
+                const float h_prev = keys[i].time - keys[i - 1].time;
+                const float h_next = keys[i + 1].time - keys[i].time;
+                const float d_prev = h_prev > 0.0001f ? (keys[i].value - keys[i - 1].value) / h_prev : 0.0f;
+                const float d_next = h_next > 0.0001f ? (keys[i + 1].value - keys[i].value) / h_next : 0.0f;
+                slopes[i] = _auto_monotone_slope(d_prev, d_next, h_prev, h_next);
+            }
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if (keys[i].tangent_mode != VFXAnimator::TANGENT_AUTO) continue;
+            const float h_prev = i > 0 ? keys[i].time - keys[i - 1].time : 0.0f;
+            const float h_next = i + 1 < count ? keys[i + 1].time - keys[i].time : 0.0f;
+            // Tangents are handle offsets, not derivatives. The incoming
+            // control point lies behind the key, hence its negative sign.
+            keys[i].in_tangent = -slopes[i] * h_prev / 3.0f;
+            keys[i].out_tangent = slopes[i] * h_next / 3.0f;
+        }
+    } else {
+        std::vector<Vector3> slopes(count, Vector3());
+        for (size_t i = 0; i < count; ++i) {
+            if (i == 0) {
+                const float h = keys[1].time - keys[0].time;
+                slopes[i] = h > 0.0001f ? (keys[1].vec_value - keys[0].vec_value) / h : Vector3();
+            } else if (i == count - 1) {
+                const float h = keys[i].time - keys[i - 1].time;
+                slopes[i] = h > 0.0001f ? (keys[i].vec_value - keys[i - 1].vec_value) / h : Vector3();
+            } else {
+                const float h_prev = keys[i].time - keys[i - 1].time;
+                const float h_next = keys[i + 1].time - keys[i].time;
+                const Vector3 d_prev = h_prev > 0.0001f ? (keys[i].vec_value - keys[i - 1].vec_value) / h_prev : Vector3();
+                const Vector3 d_next = h_next > 0.0001f ? (keys[i + 1].vec_value - keys[i].vec_value) / h_next : Vector3();
+                for (int axis = 0; axis < 3; ++axis) {
+                    slopes[i][axis] = _auto_monotone_slope(d_prev[axis], d_next[axis], h_prev, h_next);
+                }
+            }
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if (keys[i].tangent_mode != VFXAnimator::TANGENT_AUTO) continue;
+            const float h_prev = i > 0 ? keys[i].time - keys[i - 1].time : 0.0f;
+            const float h_next = i + 1 < count ? keys[i + 1].time - keys[i].time : 0.0f;
+            keys[i].vec_in_tangent = slopes[i] * (-h_prev / 3.0f);
+            keys[i].vec_out_tangent = slopes[i] * (h_next / 3.0f);
         }
     }
 }
