@@ -332,6 +332,7 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_animated_node_ids", "clip_idx"), &VFXAnimator::get_animated_node_ids);
 
     ClassDB::bind_method(D_METHOD("get_curve_samples", "clip_idx", "curve_idx", "component", "resolution"), &VFXAnimator::get_curve_samples);
+    ClassDB::bind_method(D_METHOD("get_curve_samples_in_range", "clip_idx", "curve_idx", "component", "start_time", "end_time", "resolution"), &VFXAnimator::get_curve_samples_in_range);
 
     ClassDB::bind_method(D_METHOD("mirror_bone_curves", "clip_idx", "source_bone", "target_bone", "mirror_axis"), &VFXAnimator::mirror_bone_curves);
     ClassDB::bind_method(D_METHOD("apply_symmetry", "clip_idx", "skeleton"), &VFXAnimator::apply_symmetry);
@@ -982,28 +983,50 @@ PackedInt32Array VFXAnimator::get_animated_node_ids(int clip_idx) const {
 }
 
 PackedVector2Array VFXAnimator::get_curve_samples(int clip_idx, int curve_idx, int component, int resolution) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return PackedVector2Array();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return PackedVector2Array();
+    const AnimationCurve& curve = clips[clip_idx].curves[curve_idx];
+    if (curve.keys.empty()) return PackedVector2Array();
+    const float start = curve.keys.front().time;
+    const float end = curve.keys.size() > 1 ? curve.keys.back().time : start + 1.0f;
+    return get_curve_samples_in_range(clip_idx, curve_idx, component, start, end, resolution);
+}
+
+PackedVector2Array VFXAnimator::get_curve_samples_in_range(
+        int clip_idx, int curve_idx, int component,
+        float start_time, float end_time, int resolution) const {
     PackedVector2Array samples;
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return samples;
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return samples;
+
     const AnimationCurve& curve = clips[clip_idx].curves[curve_idx];
     if (curve.keys.empty()) return samples;
-    if (resolution < 2) resolution = 2;
+    if (end_time < start_time) std::swap(start_time, end_time);
 
-    float start = curve.keys.front().time;
-    float end = curve.keys.back().time;
-    if (end <= start) end = start + 1.0f;
+    // Restrict work to the visible graph interval. For multi-key curves, do not
+    // extrapolate beyond the first/last key because sample_vector/scalar hold
+    // their final value outside the keyed range.
+    if (curve.keys.size() > 1) {
+        const float curve_start = curve.keys.front().time;
+        const float curve_end = curve.keys.back().time;
+        if (end_time < curve_start || start_time > curve_end) return samples;
+        start_time = MAX(start_time, curve_start);
+        end_time = MIN(end_time, curve_end);
+    } else {
+        // A one-key curve is constant. Draw it across the visible interval
+        // only when its key lies in that interval.
+        const float key_time = curve.keys.front().time;
+        if (key_time < start_time || key_time > end_time) return samples;
+    }
 
-    samples.resize(resolution);
-    for (int i = 0; i < resolution; i++) {
-        float t = start + (end - start) * (float)i / (resolution - 1);
+    if (end_time < start_time) return samples;
+    resolution = CLAMP(resolution, 2, 8192);
+
+    // Keep the same value evaluation used by the existing graph sampler,
+    // including quaternion-to-Euler display for glTF LINEAR/STEP rotations.
+    auto value_at = [&](float t) -> float {
         float v = 0.0f;
-
         if (curve.is_rotation) {
-            // The viewport must visualize the same interpolation used by
-            // playback. Imported glTF rotations are stored as quaternions and
-            // played with SLERP, so sampling the Euler backing values here
-            // would draw straight component-wise segments instead of the
-            // actual rotational path.
             Vector3 euler;
             bool sampled_quaternion = false;
 
@@ -1027,10 +1050,6 @@ PackedVector2Array VFXAnimator::get_curve_samples(int clip_idx, int curve_idx, i
                             ? k0.vec_value
                             : k0.vec_value.lerp(k1.vec_value, alpha);
                         euler = Basis(curve.sample_quaternion(t)).get_euler();
-                        // Euler angles have multiple equivalent representations.
-                        // Select the branch nearest the stored, unwrapped key
-                        // values so the displayed line remains continuous and
-                        // meets the key diamonds rather than jumping by 2*PI.
                         euler = _unwrap_euler_near(euler, euler_reference);
                         sampled_quaternion = true;
                     }
@@ -1050,18 +1069,42 @@ PackedVector2Array VFXAnimator::get_curve_samples(int clip_idx, int curve_idx, i
             }
 
             if (!sampled_quaternion) {
-                // App-authored Bezier rotation curves intentionally remain
-                // Euler-Bezier curves; their graph must match their playback.
+                // Editor-authored BEZIER rotations are Euler-component curves.
                 euler = curve.sample_vector(t);
             }
             v = (component == 0) ? euler.x : (component == 1) ? euler.y : euler.z;
         } else if (curve.is_scalar) {
             v = curve.sample_scalar(t);
         } else {
-            Vector3 vec = curve.sample_vector(t);
+            const Vector3 vec = curve.sample_vector(t);
             v = (component == 0) ? vec.x : (component == 1) ? vec.y : vec.z;
         }
-        samples[i] = Vector2(t, v);
+        return v;
+    };
+
+    // Uniform screen-driven samples capture the shape between keys. Explicitly
+    // add every key in view as well, so short/dense segments cannot be skipped
+    // merely because a uniform sample falls on either side of them.
+    std::vector<float> times;
+    times.reserve((size_t)resolution + curve.keys.size() + 2);
+    for (int i = 0; i < resolution; ++i) {
+        const float alpha = (float)i / (float)(resolution - 1);
+        times.push_back(start_time + (end_time - start_time) * alpha);
+    }
+    for (const Keyframe& key : curve.keys) {
+        if (key.time >= start_time && key.time <= end_time) {
+            times.push_back(key.time);
+        }
+    }
+    std::sort(times.begin(), times.end());
+    times.erase(std::unique(times.begin(), times.end(), [](float a, float b) {
+        return fabsf(a - b) <= 0.000001f;
+    }), times.end());
+
+    samples.resize((int)times.size());
+    for (int i = 0; i < (int)times.size(); ++i) {
+        const float t = times[(size_t)i];
+        samples.set(i, Vector2(t, value_at(t)));
     }
     return samples;
 }
