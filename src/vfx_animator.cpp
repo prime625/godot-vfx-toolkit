@@ -40,6 +40,20 @@ void AnimationCurve::sort_keys() {
     });
 }
 
+// Solve cubic Bezier X(u)=time. Horizontal handles are stored as signed
+// offsets from their key times. Bisection is stable even for nearly-flat handles.
+static float _bezier_parameter_for_time(float time, float x0, float x1, float x2, float x3) {
+    float lo = 0.0f, hi = 1.0f;
+    for (int i = 0; i < 28; ++i) {
+        const float u = (lo + hi) * 0.5f;
+        const float omt = 1.0f - u;
+        const float x = omt*omt*omt*x0 + 3.0f*omt*omt*u*x1 +
+                        3.0f*omt*u*u*x2 + u*u*u*x3;
+        if (x < time) lo = u; else hi = u;
+    }
+    return (lo + hi) * 0.5f;
+}
+
 float AnimationCurve::sample_scalar(float time) const {
     if (keys.empty()) return 0.0f;
     if (keys.size() == 1) return keys[0].value;
@@ -58,6 +72,11 @@ float AnimationCurve::sample_scalar(float time) const {
 
     if (k0.interp == VFXAnimator::INTERP_STEP) return k0.value;
     if (k0.interp == VFXAnimator::INTERP_BEZIER) {
+        float x1 = k0.time + (fabsf(k0.out_time_tangent) > 0.000001f ? k0.out_time_tangent : (k1.time-k0.time)/3.0f);
+        float x2 = k1.time + (fabsf(k1.in_time_tangent) > 0.000001f ? k1.in_time_tangent : -(k1.time-k0.time)/3.0f);
+        x1 = CLAMP(x1, k0.time, k1.time);
+        x2 = CLAMP(x2, x1, k1.time);
+        t = _bezier_parameter_for_time(time, k0.time, x1, x2, k1.time);
         float t2 = t * t;
         float t3 = t2 * t;
         float omt = 1.0f - t;
@@ -88,6 +107,11 @@ Vector3 AnimationCurve::sample_vector(float time) const {
 
     if (k0.interp == VFXAnimator::INTERP_STEP) return k0.vec_value;
     if (k0.interp == VFXAnimator::INTERP_BEZIER) {
+        float x1 = k0.time + (fabsf(k0.out_time_tangent) > 0.000001f ? k0.out_time_tangent : (k1.time-k0.time)/3.0f);
+        float x2 = k1.time + (fabsf(k1.in_time_tangent) > 0.000001f ? k1.in_time_tangent : -(k1.time-k0.time)/3.0f);
+        x1 = CLAMP(x1, k0.time, k1.time);
+        x2 = CLAMP(x2, x1, k1.time);
+        t = _bezier_parameter_for_time(time, k0.time, x1, x2, k1.time);
         float t2 = t * t;
         float t3 = t2 * t;
         float omt = 1.0f - t;
@@ -193,6 +217,8 @@ void AnimationCurve::auto_compute_tangents() {
             // control point lies behind the key, hence its negative sign.
             keys[i].in_tangent = -slopes[i] * h_prev / 3.0f;
             keys[i].out_tangent = slopes[i] * h_next / 3.0f;
+            keys[i].in_time_tangent = -h_prev / 3.0f;
+            keys[i].out_time_tangent = h_next / 3.0f;
         }
     } else {
         std::vector<Vector3> slopes(count, Vector3());
@@ -219,6 +245,8 @@ void AnimationCurve::auto_compute_tangents() {
             const float h_next = i + 1 < count ? keys[i + 1].time - keys[i].time : 0.0f;
             keys[i].vec_in_tangent = slopes[i] * (-h_prev / 3.0f);
             keys[i].vec_out_tangent = slopes[i] * (h_next / 3.0f);
+            keys[i].in_time_tangent = -h_prev / 3.0f;
+            keys[i].out_time_tangent = h_next / 3.0f;
         }
     }
 }
@@ -277,6 +305,8 @@ void VFXAnimator::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_keyframe_tangent_mode", "clip_idx", "curve_idx", "key_idx", "mode"), &VFXAnimator::set_keyframe_tangent_mode);
     ClassDB::bind_method(D_METHOD("get_keyframe_tangent_mode", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_tangent_mode);
     ClassDB::bind_method(D_METHOD("set_keyframe_scalar_tangents", "clip_idx", "curve_idx", "key_idx", "in_tan", "out_tan"), &VFXAnimator::set_keyframe_scalar_tangents);
+    ClassDB::bind_method(D_METHOD("set_keyframe_time_tangents", "clip_idx", "curve_idx", "key_idx", "in_time", "out_time"), &VFXAnimator::set_keyframe_time_tangents);
+    ClassDB::bind_method(D_METHOD("get_keyframe_time_tangents", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_time_tangents);
     ClassDB::bind_method(D_METHOD("set_keyframe_vector_tangents", "clip_idx", "curve_idx", "key_idx", "in_tan", "out_tan"), &VFXAnimator::set_keyframe_vector_tangents);
     ClassDB::bind_method(D_METHOD("get_keyframe_scalar_tangents", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_scalar_tangents);
     ClassDB::bind_method(D_METHOD("get_keyframe_vector_in_tangent", "clip_idx", "curve_idx", "key_idx"), &VFXAnimator::get_keyframe_vector_in_tangent);
@@ -737,6 +767,27 @@ void VFXAnimator::set_keyframe_vector_tangents(int clip_idx, int curve_idx, int 
     keys[key_idx].tangent_mode = TANGENT_FREE;
 }
 
+void VFXAnimator::set_keyframe_time_tangents(int clip_idx, int curve_idx, int key_idx, float in_time, float out_time) {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return;
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return;
+    auto& keys = clips[clip_idx].curves[curve_idx].keys;
+    if (key_idx < 0 || key_idx >= (int)keys.size()) return;
+    keys[key_idx].in_time_tangent = in_time;
+    keys[key_idx].out_time_tangent = out_time;
+}
+
+Vector2 VFXAnimator::get_keyframe_time_tangents(int clip_idx, int curve_idx, int key_idx) const {
+    if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector2();
+    if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector2();
+    const auto& keys = clips[clip_idx].curves[curve_idx].keys;
+    if (key_idx < 0 || key_idx >= (int)keys.size()) return Vector2();
+    const Keyframe& key = keys[key_idx];
+    float in_time = key.in_time_tangent, out_time = key.out_time_tangent;
+    if (fabsf(in_time) < 0.000001f && key_idx > 0) in_time = -(key.time - keys[key_idx-1].time) / 3.0f;
+    if (fabsf(out_time) < 0.000001f && key_idx + 1 < (int)keys.size()) out_time = (keys[key_idx+1].time - key.time) / 3.0f;
+    return Vector2(in_time, out_time);
+}
+
 Vector2 VFXAnimator::get_keyframe_scalar_tangents(int clip_idx, int curve_idx, int key_idx) const {
     if (clip_idx < 0 || clip_idx >= (int)clips.size()) return Vector2();
     if (curve_idx < 0 || curve_idx >= (int)clips[clip_idx].curves.size()) return Vector2();
@@ -1079,7 +1130,7 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
 
     // Magic "VFXA" + version 4 (preserve source quaternions for LINEAR rotation)
     data.append('V'); data.append('F'); data.append('X'); data.append('A');
-    data.append(4);
+    data.append(5);
 
     auto append_u16 = [&](uint16_t v) {
         data.append(v & 0xFF);
@@ -1143,6 +1194,8 @@ PackedByteArray VFXAnimator::serialize_clip(int idx) const {
 
             append_f32(key.in_tangent);
             append_f32(key.out_tangent);
+            append_f32(key.in_time_tangent);
+            append_f32(key.out_time_tangent);
             append_f32(key.vec_in_tangent.x);
             append_f32(key.vec_in_tangent.y);
             append_f32(key.vec_in_tangent.z);
@@ -1168,7 +1221,7 @@ void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
     if (data.size() < 5) return;
     if (data[0] != 'V' || data[1] != 'F' || data[2] != 'X' || data[3] != 'A') return;
     uint8_t version = data[4];
-    if (version < 1 || version > 4) return;
+    if (version < 1 || version > 5) return;
 
     int p = 5;
     auto read_u16 = [&]() -> uint16_t {
@@ -1250,6 +1303,10 @@ void VFXAnimator::deserialize_clip(const PackedByteArray& data) {
 
             key.in_tangent = read_f32();
             key.out_tangent = read_f32();
+            if (version >= 5) {
+                key.in_time_tangent = read_f32();
+                key.out_time_tangent = read_f32();
+            }
             key.vec_in_tangent.x = read_f32();
             key.vec_in_tangent.y = read_f32();
             key.vec_in_tangent.z = read_f32();
