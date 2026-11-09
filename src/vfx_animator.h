@@ -187,6 +187,8 @@ public:
 
     // Curve visualization: returns Array of Vector2(time, value) for drawing
     PackedVector2Array get_curve_samples(int clip_idx, int curve_idx, int component, int resolution) const;
+    PackedVector2Array get_curve_samples_in_range(int clip_idx, int curve_idx, int component,
+                                                  float start_time, float end_time, int resolution) const;
 
     // Symmetry
     void mirror_bone_curves(int clip_idx, int source_bone, int target_bone, int mirror_axis);
