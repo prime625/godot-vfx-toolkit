@@ -120,6 +120,9 @@ public:
     Ref<VFXMesh> get_mesh() const;
 	void set_paint_material(const Ref<Material>& p_mat);
 	Ref<Material> get_paint_material() const;
+	// Generic per-scene-node material override (StandardMaterial3D or ShaderMaterial).
+	void set_material(const Ref<Material>& p_mat);
+	Ref<Material> get_material() const;
 
 
     void set_skeleton(const Ref<VFXSkeleton>& p_skeleton);
