@@ -91,8 +91,10 @@ public:
 
     std::vector<VFXUVLayer> uv_layers;
 
-    // Imported render material (GLB/FBX). Plain field, not serialized yet.
+    // Imported render material (GLB/FBX).
     Ref<Material> material;
+    void set_material(const Ref<Material>& p_material);
+    Ref<Material> get_material() const;
 
     void _rebuild_remap() const;
     void _clear_mesh();
