@@ -71,6 +71,10 @@ void VFXMesh::_bind_methods() {
    ClassDB::bind_method(D_METHOD("get_indices"), &VFXMesh::get_indices);
    ClassDB::bind_method(D_METHOD("get_skinning_data"), &VFXMesh::get_skinning_data);
 
+   ClassDB::bind_method(D_METHOD("set_material", "material"), &VFXMesh::set_material);
+   ClassDB::bind_method(D_METHOD("get_material"), &VFXMesh::get_material);
+   ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
+
    ClassDB::bind_method(D_METHOD("to_godot_mesh"), &VFXMesh::to_godot_mesh);
    ClassDB::bind_method(D_METHOD("from_godot_mesh", "mesh"), &VFXMesh::from_godot_mesh);
 
@@ -83,6 +87,9 @@ void VFXMesh::_bind_methods() {
 }
 
 VFXMesh::VFXMesh() {}
+
+void VFXMesh::set_material(const Ref<Material>& p_material) { material = p_material; }
+Ref<Material> VFXMesh::get_material() const { return material; }
 
 VFXMesh::~VFXMesh() {
    _clear_mesh();
