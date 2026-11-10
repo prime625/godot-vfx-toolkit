@@ -96,6 +96,7 @@ private:
     struct GLBImage {
         String name;
         String mime_type;
+        String uri;
         int buffer_view = -1;
     };
     struct GLBSampler {
@@ -129,6 +130,7 @@ private:
         bool unlit = false;
     };
 
+    String source_path;
     std::vector<GLBBuffer> buffers;
     std::vector<GLBBufferView> buffer_views;
     std::vector<GLBAccessor> accessors;
