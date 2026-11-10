@@ -111,6 +111,7 @@ Dictionary VFXGLBImporter::import_glb(const String& path, bool smooth_linear_cur
     result[KEY_NODE_COUNT] = 0;
     result[KEY_MESH_COUNT] = 0;
 
+    source_path = path;
     Ref<FileAccess> f = FileAccess::open(path, FileAccess::READ);
     if (f.is_null()) {
         result[KEY_ERROR] = "Failed to open file: " + path;
@@ -703,7 +704,7 @@ bool VFXGLBImporter::_parse_images(const Array& img_arr) {
         img.name = d.get("name", "image_" + String::num_int64(i));
         img.mime_type = d.get("mimeType", "");
         if (d.has("bufferView")) img.buffer_view = d["bufferView"];
-        // External URI images are not supported (same policy as buffers).
+        if (d.has("uri")) img.uri = d["uri"];
         images.push_back(img);
     }
     return true;
@@ -789,28 +790,42 @@ Ref<Image> VFXGLBImporter::_decode_image(int image_idx) {
     if (image_idx < 0 || image_idx >= (int)images.size()) return Ref<Image>();
     const GLBImage& img = images[image_idx];
 
-    if (img.buffer_view < 0 || img.buffer_view >= (int)buffer_views.size()) {
-        UtilityFunctions::push_warning("VFXGLBImporter: image '" + img.name + "' has no embedded bufferView (external URI unsupported), skipping");
+    PackedByteArray bytes;
+    if (img.buffer_view >= 0 && img.buffer_view < (int)buffer_views.size()) {
+        const GLBBufferView& bv = buffer_views[img.buffer_view];
+        if (bv.buffer < 0 || bv.buffer >= (int)buffers.size()) return Ref<Image>();
+        const GLBBuffer& buf = buffers[bv.buffer];
+        if (bv.byte_offset + bv.byte_length > buf.data.size()) return Ref<Image>();
+        bytes.resize(bv.byte_length);
+        memcpy(bytes.ptrw(), buf.data.ptr() + bv.byte_offset, bv.byte_length);
+    } else if (!img.uri.is_empty()) {
+        // GLB files may also reference external image files. Resolve relative
+        // URIs beside the GLB, while retaining embedded bufferView support.
+        String image_path = img.uri.is_absolute_path()
+            ? img.uri
+            : source_path.get_base_dir().path_join(img.uri);
+        Ref<FileAccess> image_file = FileAccess::open(image_path, FileAccess::READ);
+        if (image_file.is_null()) {
+            UtilityFunctions::push_warning("VFXGLBImporter: could not open external image '" + image_path + "'");
+            return Ref<Image>();
+        }
+        bytes = image_file->get_buffer(image_file->get_length());
+        image_file->close();
+    } else {
+        UtilityFunctions::push_warning("VFXGLBImporter: image '" + img.name + "' has neither bufferView nor URI");
         return Ref<Image>();
     }
-    const GLBBufferView& bv = buffer_views[img.buffer_view];
-    if (bv.buffer < 0 || bv.buffer >= (int)buffers.size()) return Ref<Image>();
-    const GLBBuffer& buf = buffers[bv.buffer];
-    if (bv.byte_offset + bv.byte_length > buf.data.size()) return Ref<Image>();
 
-    PackedByteArray bytes;
-    bytes.resize(bv.byte_length);
-    memcpy(bytes.ptrw(), buf.data.ptr() + bv.byte_offset, bv.byte_length);
-
+    if (bytes.is_empty()) return Ref<Image>();
     Ref<Image> image;
     image.instantiate();
     Error err = FAILED;
-    if (img.mime_type == "image/png") {
+    if (img.mime_type == "image/png" || img.uri.to_lower().ends_with(".png")) {
         err = image->load_png_from_buffer(bytes);
-    } else if (img.mime_type == "image/jpeg" || img.mime_type == "image/jpg") {
+    } else if (img.mime_type == "image/jpeg" || img.mime_type == "image/jpg"
+            || img.uri.to_lower().ends_with(".jpg") || img.uri.to_lower().ends_with(".jpeg")) {
         err = image->load_jpg_from_buffer(bytes);
     } else {
-        // Unknown/missing mimeType: sniff PNG first, then JPEG.
         err = image->load_png_from_buffer(bytes);
         if (err != OK) err = image->load_jpg_from_buffer(bytes);
     }
@@ -859,6 +874,22 @@ void VFXGLBImporter::_build_materials() {
 
         mat->set_metallic(m.pbr.metallic_factor);
         mat->set_roughness(m.pbr.roughness_factor);
+
+        // glTF packs roughness in G and metallic in B of this texture.
+        // Godot's StandardMaterial3D exposes the combined metallic texture slot.
+        if (m.pbr.metallic_roughness_texture.index >= 0) {
+            Ref<ImageTexture> tex = _get_texture(m.pbr.metallic_roughness_texture.index);
+            if (tex.is_valid()) {
+                mat->set_texture(BaseMaterial3D::TEXTURE_METALLIC, tex);
+                mat->set_metallic_texture_channel(BaseMaterial3D::TEXTURE_CHANNEL_BLUE);
+                mat->set_roughness_texture_channel(BaseMaterial3D::TEXTURE_CHANNEL_GREEN);
+            }
+        }
+
+        if (m.occlusion_texture.index >= 0) {
+            Ref<ImageTexture> tex = _get_texture(m.occlusion_texture.index);
+            if (tex.is_valid()) mat->set_texture(BaseMaterial3D::TEXTURE_AMBIENT_OCCLUSION, tex);
+        }
 
         if (m.normal_texture.index >= 0) {
             Ref<ImageTexture> tex = _get_texture(m.normal_texture.index);
