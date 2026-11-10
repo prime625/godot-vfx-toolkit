@@ -88,6 +88,9 @@ void VFXSceneNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_type_icon_hint"), &VFXSceneNode::get_type_icon_hint);
 	ClassDB::bind_method(D_METHOD("set_paint_material", "mat"), &VFXSceneNode::set_paint_material);
 	ClassDB::bind_method(D_METHOD("get_paint_material"), &VFXSceneNode::get_paint_material);
+	ClassDB::bind_method(D_METHOD("set_material", "mat"), &VFXSceneNode::set_material);
+	ClassDB::bind_method(D_METHOD("get_material"), &VFXSceneNode::get_material);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material", "get_material");
 
     ClassDB::bind_method(D_METHOD("serialize"), &VFXSceneNode::serialize);
     ClassDB::bind_method(D_METHOD("deserialize", "data"), &VFXSceneNode::deserialize);
@@ -411,3 +414,5 @@ void VFXSceneNode::deserialize(const PackedByteArray& p_data) {
 
 void VFXSceneNode::set_paint_material(const Ref<Material>& p_mat) { paint_material = p_mat; }
 Ref<Material> VFXSceneNode::get_paint_material() const { return paint_material; }
+void VFXSceneNode::set_material(const Ref<Material>& p_mat) { paint_material = p_mat; }
+Ref<Material> VFXSceneNode::get_material() const { return paint_material; }
