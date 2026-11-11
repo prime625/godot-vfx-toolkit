@@ -244,12 +244,17 @@ void VFXEditorNode::_bind_methods() {
 // ============================================================================
 VFXEditorNode::VFXEditorNode() {
     base_material.instantiate();
-    base_material->set_albedo(Color(0.8f, 0.8f, 0.8f, 1.0f));
+    // Modeling/VFX fallback material: neutral Blender-like viewport gray.
+    // VFXMesh supplies white vertex colors when COLOR_0 is absent, so enabling
+    // vertex color keeps the fallback gray while honoring authored vertex colors.
+    base_material->set_albedo(Color(0.58f, 0.58f, 0.58f, 1.0f));
     base_material->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    // Blender's default solid viewport does not cull backfaces.
+    // Imported glTF materials still use their own doubleSided setting below.
     base_material->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
     base_material->set_metallic(0.0f);
-    base_material->set_roughness(0.5f);
-    base_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, false);
+    base_material->set_roughness(0.78f);
+    base_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 
     weight_material.instantiate();
     weight_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
