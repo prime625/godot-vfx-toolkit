@@ -864,11 +864,13 @@ void VFXGLBImporter::_build_materials() {
 
         // Base color: factor x texture (vertex COLOR_0 multiplies in too).
         mat->set_albedo(m.pbr.base_color_factor);
+        // glTF COLOR_0 is multiplicative with baseColorFactor/baseColorTexture.
+        // Enable it even for materials without an albedo texture.
+        mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
         if (m.pbr.base_color_texture.index >= 0) {
             Ref<ImageTexture> tex = _get_texture(m.pbr.base_color_texture.index);
             if (tex.is_valid()) {
                 mat->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, tex);
-                mat->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
             }
         }
 
@@ -1429,13 +1431,6 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
     }
     Transform3D owner_inv = owner_global.affine_inverse();
 
-    // Bind poses and the initial/current pose are NOT necessarily the same.
-    // The inverse bind matrices describe the mesh-to-joint bind relationship
-    // used by skinning. The glTF node hierarchy describes the pose in which
-    // the model is authored when the scene is opened. Some exporters (notably
-    // this Minion GLB) store a current node pose that differs from the bind
-    // pose. Using inverse(IBM) for both makes the imported model appear in its
-    // bind/rest orientation until an animation overwrites the bone transforms.
     std::vector<Transform3D> bind_poses(joint_count);
     for (int i = 0; i < joint_count; i++) {
         Transform3D ibm = _gltf_to_godot_t(ibms[i]);
@@ -1444,54 +1439,16 @@ Ref<VFXSkeleton> VFXGLBImporter::_build_skeleton(const GLBSkin& glb_skin, int ow
             : ibm.affine_inverse();
     }
 
-    // Build the authored glTF node globals in Godot space. Bone pose globals
-    // are then made relative to the mesh node, which is the coordinate space
-    // used by VFXSkin for both standard and scene-space IBM conventions.
-    std::vector<Transform3D> node_globals(nodes.size());
-    std::vector<int> node_global_state(nodes.size(), 0);
-    std::function<Transform3D(int)> get_node_global = [&](int node_idx) -> Transform3D {
-        if (node_idx < 0 || node_idx >= (int)nodes.size()) {
-            return Transform3D();
-        }
-        if (node_global_state[node_idx] == 2) {
-            return node_globals[node_idx];
-        }
-        if (node_global_state[node_idx] == 1) {
-            // Malformed cyclic hierarchy: use identity as a safe fallback.
-            return Transform3D();
-        }
-
-        node_global_state[node_idx] = 1;
-        Transform3D local = _get_node_local_transform(nodes[node_idx]);
-        Transform3D global = local;
-        int parent_node = nodes[node_idx].parent;
-        if (parent_node >= 0 && parent_node < (int)nodes.size()) {
-            global = get_node_global(parent_node) * local;
-        }
-        node_globals[node_idx] = global;
-        node_global_state[node_idx] = 2;
-        return global;
-    };
-
-    std::vector<Transform3D> pose_globals(joint_count);
-    for (int i = 0; i < joint_count; i++) {
-        int node_idx = glb_skin.joints[i];
-        pose_globals[i] = (node_idx >= 0 && node_idx < (int)nodes.size())
-            ? owner_inv * get_node_global(node_idx)
-            : bind_poses[i];
-    }
-
     for (int i = 0; i < joint_count; i++) {
         skeleton->set_bone_bind_pose(i, bind_poses[i]);
 
-        // Reconstruct the initial local pose from the authored node hierarchy,
-        // not from the inverse bind matrices. For root bones this is already
-        // relative to the mesh node; child bones are relative to their joint
-        // parent as usual.
         int parent = skeleton->get_bone_parent(i);
-        Transform3D local = pose_globals[i];
-        if (parent >= 0 && parent < joint_count) {
-            local = pose_globals[parent].affine_inverse() * pose_globals[i];
+        Transform3D local;
+        if (parent >= 0) {
+            Transform3D parent_inv = bind_poses[parent].affine_inverse();
+            local = parent_inv * bind_poses[i];
+        } else {
+            local = bind_poses[i];
         }
 
         skeleton->set_bone_local_position(i, local.get_origin());
