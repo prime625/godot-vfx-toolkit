@@ -1164,11 +1164,13 @@ bool VFXGLBImporter::_read_accessor_mat4(int accessor_idx, std::vector<Transform
     out.resize(acc.count);
     for (int i = 0; i < acc.count; i++) {
         int b = i * 16;
-        // glTF MAT4 is COLUMN-major; Godot Basis stores ROWs.
+        // glTF MAT4 data is column-major. Godot Basis stores its X/Y/Z
+        // axes as columns too, so each glTF column maps directly to one
+        // Godot Basis axis. Do not transpose these values.
         Basis basis;
-        basis[0] = Vector3(floats[b+0], floats[b+4], floats[b+8]);
-        basis[1] = Vector3(floats[b+1], floats[b+5], floats[b+9]);
-        basis[2] = Vector3(floats[b+2], floats[b+6], floats[b+10]);
+        basis[0] = Vector3(floats[b+0], floats[b+1], floats[b+2]);
+        basis[1] = Vector3(floats[b+4], floats[b+5], floats[b+6]);
+        basis[2] = Vector3(floats[b+8], floats[b+9], floats[b+10]);
         Vector3 origin(floats[b+12], floats[b+13], floats[b+14]);
         out[i] = Transform3D(basis, origin);
     }
