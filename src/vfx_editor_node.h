@@ -4,6 +4,8 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/curve3d.hpp>
@@ -133,7 +135,10 @@ private:
 
     // === MATERIALS ===
     Ref<StandardMaterial3D> base_material;
+    Ref<StandardMaterial3D> solid_viewport_material;
     Ref<StandardMaterial3D> weight_material;
+    Ref<Shader> viewport_custom_shader;
+    Ref<ShaderMaterial> viewport_custom_shader_material;
     Ref<Mesh> bone_shaft_mesh;
     Ref<Mesh> bone_joint_mesh;
     float bone_shaft_radius = 0.008f;
@@ -146,6 +151,7 @@ private:
     bool show_weights = false;
     bool auto_update = true;
     bool show_wireframe = false;
+    int viewport_shading_mode = VIEWPORT_SHADING_TEXTURED;
     bool symmetry_enabled = false;
     bool gizmo_locked = false;   // <-- NEW: prevents gizmo from intercepting paint clicks
     int visualize_bone = -1;
@@ -427,6 +433,19 @@ public:
     int get_edit_mode() const;
     void set_show_wireframe(bool show);
     bool get_show_wireframe() const;
+
+    // Viewport shading: 0 = Solid, 1 = Material Color, 2 = Textured.
+    enum ViewportShadingMode {
+        VIEWPORT_SHADING_SOLID = 0,
+        VIEWPORT_SHADING_MATERIAL_COLOR = 1,
+        VIEWPORT_SHADING_TEXTURED = 2,
+        VIEWPORT_SHADING_CUSTOM_GDSHADER = 3
+    };
+    void set_viewport_shading_mode(int mode);
+    int get_viewport_shading_mode() const;
+    void set_viewport_custom_shader(const Ref<Shader>& shader);
+    Ref<Shader> get_viewport_custom_shader() const;
+
     void clear_selection();
     int get_selected_face() const;
     int get_selected_edge() const;
