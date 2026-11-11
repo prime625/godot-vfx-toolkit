@@ -151,6 +151,14 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_edit_mode"), &VFXEditorNode::get_edit_mode);
     ClassDB::bind_method(D_METHOD("set_show_wireframe", "show"), &VFXEditorNode::set_show_wireframe);
     ClassDB::bind_method(D_METHOD("get_show_wireframe"), &VFXEditorNode::get_show_wireframe);
+    ClassDB::bind_method(D_METHOD("set_viewport_shading_mode", "mode"), &VFXEditorNode::set_viewport_shading_mode);
+    ClassDB::bind_method(D_METHOD("get_viewport_shading_mode"), &VFXEditorNode::get_viewport_shading_mode);
+    ClassDB::bind_method(D_METHOD("set_viewport_custom_shader", "shader"), &VFXEditorNode::set_viewport_custom_shader);
+    ClassDB::bind_method(D_METHOD("get_viewport_custom_shader"), &VFXEditorNode::get_viewport_custom_shader);
+    ClassDB::bind_integer_constant(get_class_static(), "", "VIEWPORT_SHADING_SOLID", VIEWPORT_SHADING_SOLID);
+    ClassDB::bind_integer_constant(get_class_static(), "", "VIEWPORT_SHADING_MATERIAL_COLOR", VIEWPORT_SHADING_MATERIAL_COLOR);
+    ClassDB::bind_integer_constant(get_class_static(), "", "VIEWPORT_SHADING_TEXTURED", VIEWPORT_SHADING_TEXTURED);
+    ClassDB::bind_integer_constant(get_class_static(), "", "VIEWPORT_SHADING_CUSTOM_GDSHADER", VIEWPORT_SHADING_CUSTOM_GDSHADER);
     ClassDB::bind_method(D_METHOD("clear_selection"), &VFXEditorNode::clear_selection);
     ClassDB::bind_method(D_METHOD("get_selected_face"), &VFXEditorNode::get_selected_face);
     ClassDB::bind_method(D_METHOD("get_selected_edge"), &VFXEditorNode::get_selected_edge);
@@ -255,6 +263,16 @@ VFXEditorNode::VFXEditorNode() {
     base_material->set_metallic(0.0f);
     base_material->set_roughness(0.78f);
     base_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
+
+    // Dedicated Solid viewport mode: a uniform neutral gray, independent of
+    // imported vertex colors or textures.
+    solid_viewport_material.instantiate();
+    solid_viewport_material->set_albedo(Color(0.58f, 0.58f, 0.58f, 1.0f));
+    solid_viewport_material->set_shading_mode(StandardMaterial3D::SHADING_MODE_PER_PIXEL);
+    solid_viewport_material->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
+    solid_viewport_material->set_metallic(0.0f);
+    solid_viewport_material->set_roughness(0.78f);
+    solid_viewport_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, false);
 
     weight_material.instantiate();
     weight_material->set_flag(StandardMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
@@ -695,6 +713,32 @@ void VFXEditorNode::set_show_wireframe(bool show) {
 }
 
 bool VFXEditorNode::get_show_wireframe() const { return show_wireframe; }
+
+void VFXEditorNode::set_viewport_shading_mode(int mode) {
+    viewport_shading_mode = CLAMP(mode, VIEWPORT_SHADING_SOLID, VIEWPORT_SHADING_CUSTOM_GDSHADER);
+    if (auto_update) {
+        _sync_scene_visuals();
+    }
+}
+
+int VFXEditorNode::get_viewport_shading_mode() const {
+    return viewport_shading_mode;
+}
+
+void VFXEditorNode::set_viewport_custom_shader(const Ref<Shader>& shader) {
+    viewport_custom_shader = shader;
+    if (viewport_custom_shader_material.is_null()) {
+        viewport_custom_shader_material.instantiate();
+    }
+    viewport_custom_shader_material->set_shader(viewport_custom_shader);
+    if (auto_update && viewport_shading_mode == VIEWPORT_SHADING_CUSTOM_GDSHADER) {
+        _sync_scene_visuals();
+    }
+}
+
+Ref<Shader> VFXEditorNode::get_viewport_custom_shader() const {
+    return viewport_custom_shader;
+}
 
 void VFXEditorNode::clear_selection() {
     selected_faces.clear();
@@ -1372,15 +1416,48 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
             visual->set_mesh(am);
             if (show_weights && p_node->get_skin().is_valid()) {
                 visual->set_surface_override_material(0, weight_material);
-            } else if (p_node->get_paint_material().is_valid()) {
-                // Per-node painted texture/material, set from GDScript.
-                visual->set_surface_override_material(0, p_node->get_paint_material());
-            } else if (paint_material.is_valid()) {
-                visual->set_surface_override_material(0, paint_material);
-            } else if (vmesh->material.is_valid()) {
-                visual->set_surface_override_material(0, vmesh->material);
+            } else if (viewport_shading_mode == VIEWPORT_SHADING_CUSTOM_GDSHADER &&
+                    viewport_custom_shader_material.is_valid() &&
+                    viewport_custom_shader_material->get_shader().is_valid()) {
+                // Custom GDShader preview is viewport-only; it does not overwrite
+                // the source mesh material used by export.
+                visual->set_surface_override_material(0, viewport_custom_shader_material);
+            } else if (viewport_shading_mode == VIEWPORT_SHADING_SOLID) {
+                // Solid mode deliberately ignores authored materials and textures.
+                visual->set_surface_override_material(0, solid_viewport_material);
             } else {
-                visual->set_surface_override_material(0, base_material);
+                Ref<Material> source_material;
+                if (p_node->get_paint_material().is_valid()) {
+                    // Per-node painted texture/material, set from GDScript.
+                    source_material = p_node->get_paint_material();
+                } else if (paint_material.is_valid()) {
+                    source_material = paint_material;
+                } else if (vmesh->material.is_valid()) {
+                    source_material = vmesh->material;
+                }
+
+                if (source_material.is_valid() &&
+                        viewport_shading_mode == VIEWPORT_SHADING_MATERIAL_COLOR) {
+                    // Blender-like Material Color: keep the material's base color,
+                    // but remove its albedo image so the texture is not displayed.
+                    Ref<Resource> duplicated = source_material->duplicate();
+                    StandardMaterial3D *standard = duplicated.is_valid()
+                            ? Object::cast_to<StandardMaterial3D>(duplicated.ptr())
+                            : nullptr;
+                    if (standard) {
+                        standard->set_texture(BaseMaterial3D::TEXTURE_ALBEDO, Ref<Texture2D>());
+                        visual->set_surface_override_material(0, Ref<Material>(standard));
+                    } else {
+                        // Shader/custom materials cannot be safely reduced to a
+                        // simple diffuse color; preserve them rather than breaking them.
+                        visual->set_surface_override_material(0, source_material);
+                    }
+                } else if (source_material.is_valid()) {
+                    // Textured mode: preserve the imported or painted material.
+                    visual->set_surface_override_material(0, source_material);
+                } else {
+                    visual->set_surface_override_material(0, base_material);
+                }
             }
 
         }
