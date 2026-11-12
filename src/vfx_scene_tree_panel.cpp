@@ -7,11 +7,12 @@
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <algorithm>
+#include <cstdint>
 
 using namespace godot;
 
 namespace {
-enum ContextAction { ACTION_RENAME = 1, ACTION_DELETE = 2, ACTION_ADD_CHILD = 3, ACTION_COLLAPSE = 4, ACTION_EXPAND = 5 };
+enum ContextAction { ACTION_RENAME = 1, ACTION_DELETE = 2, ACTION_ADD_CHILD = 3, ACTION_COLLAPSE = 4, ACTION_EXPAND = 5, ACTION_TOGGLE_SELECTION = 6 };
 }
 
 void VFXSceneTreePanel::_bind_methods() {
@@ -36,6 +37,13 @@ VFXSceneTreePanel::VFXSceneTreePanel() {}
 VFXSceneTreePanel::~VFXSceneTreePanel() {}
 
 void VFXSceneTreePanel::_notification(int what) {
+    if (what == NOTIFICATION_MOUSE_EXIT) {
+        if (hover_id >= 0) { hover_id = -1; queue_redraw(); }
+    }
+    if (what == NOTIFICATION_RESIZED) {
+        _rebuild_rows();
+        _position_rename_editor();
+    }
     if (what == NOTIFICATION_READY) {
         set_clip_contents(true);
         set_focus_mode(FOCUS_ALL);
@@ -73,9 +81,10 @@ void VFXSceneTreePanel::_notification(int what) {
         context_menu->add_separator();
         context_menu->add_item("Rename", ACTION_RENAME);
         context_menu->add_item("Expand", ACTION_EXPAND);
-        context_menu->add_item("Collapse", ACTION_COLLAPSE);
         context_menu->add_separator();
         context_menu->add_item("Delete", ACTION_DELETE);
+        context_menu->add_separator();
+        context_menu->add_item("Add to Selection", ACTION_TOGGLE_SELECTION);
         context_menu->connect("id_pressed", callable_mp(this, &VFXSceneTreePanel::_on_context_id_pressed));
 
         _load_icons();
@@ -85,7 +94,7 @@ void VFXSceneTreePanel::_notification(int what) {
         const uint64_t now = Time::get_singleton()->get_ticks_msec();
         if (now - press_time_msec >= 520 && press_position.distance_to(last_pointer_position) < 12.0f) {
             long_press_fired = true;
-            _show_context_menu(pressed_id, last_pointer_position);
+            _show_context_menu(pressed_id, last_pointer_position, true);
         }
     }
 }
@@ -179,35 +188,67 @@ Ref<VFXSceneNode> VFXSceneTreePanel::_row_node_at(float y) const { return _find_
 void VFXSceneTreePanel::_draw_row(const Row &row) {
     const float y = row.y - scroll_offset;
     if (y + row_height < _tree_top() || y > get_size().y) return;
+
     const int id = row.node->get_node_id();
     const float left = 7.0f + row.depth * indent_width;
     const float right = get_size().x - 7.0f;
-    if (selected_ids.count(id)) draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color("#3d526d"));
-    else if (id == drop_target_id) draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color("#405d43"));
+    const bool selected = selected_ids.count(id) != 0;
+
+    // Godot-style row states: hover is subtle, selection is persistent, and
+    // a valid drop target is visually distinct from both.
+    if (id == drop_target_id) {
+        draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color("#405d43"));
+        draw_line(Vector2(2, y + 1), Vector2(get_size().x - 2, y + 1), Color("#80c78a"), 2.0f);
+    } else if (selected) {
+        draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color("#315b78"));
+        if (id == active_id) {
+            draw_rect(Rect2(2, y + 2, 3, row_height - 4), Color("#72b7e8"));
+        }
+    } else if (id == hover_id) {
+        draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color(1, 1, 1, 0.055f));
+    }
+
+    // Indentation guides make deep hierarchies easier to follow on narrow screens.
+    for (int depth = 0; depth < row.depth; ++depth) {
+        const float guide_x = 7.0f + depth * indent_width + 6.0f;
+        draw_line(Vector2(guide_x, y), Vector2(guide_x, y + row_height), Color(0.55f, 0.59f, 0.65f, 0.18f), 1.0f);
+    }
 
     if (row.has_children) {
         const float cx = left + 6.0f;
         const float cy = y + row_height * 0.5f;
         PackedVector2Array tri;
         if (row.node->get_expanded() || (search_edit && !search_edit->get_text().is_empty())) {
-            tri.push_back(Vector2(cx - 3, cy - 2)); tri.push_back(Vector2(cx + 3, cy - 2)); tri.push_back(Vector2(cx, cy + 2));
+            tri.push_back(Vector2(cx - 3, cy - 2));
+            tri.push_back(Vector2(cx + 3, cy - 2));
+            tri.push_back(Vector2(cx, cy + 2));
         } else {
-            tri.push_back(Vector2(cx - 2, cy - 4)); tri.push_back(Vector2(cx - 2, cy + 4)); tri.push_back(Vector2(cx + 3, cy));
+            tri.push_back(Vector2(cx - 2, cy - 4));
+            tri.push_back(Vector2(cx - 2, cy + 4));
+            tri.push_back(Vector2(cx + 3, cy));
         }
         draw_colored_polygon(tri, Color("#b9c0ca"));
     }
 
     Ref<Texture2D> type_icon = _get_icon_for_type(row.node->get_node_type());
     const float icon_x = left + 16.0f;
-    if (type_icon.is_valid()) draw_texture_rect(type_icon, Rect2(icon_x, y + 5.0f, 17.0f, 17.0f), false);
+    if (type_icon.is_valid()) {
+        draw_texture_rect(type_icon, Rect2(icon_x, y + 5.0f, 17.0f, 17.0f), false);
+    }
+
     Ref<Font> font = get_theme_default_font();
     if (font.is_valid()) {
         Color text_color = row.node->get_type_color();
-        if (selected_ids.count(id)) text_color = Color(1, 1, 1);
-        draw_string(font, Vector2(icon_x + 23.0f, y + 18.5f), row.node->get_node_name(), HORIZONTAL_ALIGNMENT_LEFT, right - icon_x - 48.0f, 14, text_color);
+        if (selected) text_color = Color(1, 1, 1);
+        if (!row.node->get_visible()) text_color.a = 0.55f;
+        draw_string(font, Vector2(icon_x + 23.0f, y + 18.5f), row.node->get_node_name(),
+                HORIZONTAL_ALIGNMENT_LEFT, right - icon_x - 48.0f, 14, text_color);
     }
+
     Ref<Texture2D> vis = row.node->get_visible() ? icon_visible : icon_hidden;
-    if (vis.is_valid()) draw_texture_rect(vis, Rect2(right - 18.0f, y + 6.0f, 16.0f, 16.0f), false);
+    if (vis.is_valid()) {
+        draw_texture_rect(vis, Rect2(right - 18.0f, y + 6.0f, 16.0f, 16.0f), false);
+    }
 }
 
 void VFXSceneTreePanel::_draw_tree() {
@@ -238,23 +279,51 @@ void VFXSceneTreePanel::_select_node(int id, bool additive, bool range) {
         }
         selected_ids.insert(anchor_id); selected_ids.insert(id);
     } else if (additive) {
-        if (selected_ids.count(id)) selected_ids.erase(id); else selected_ids.insert(id);
+        if (selected_ids.count(id)) {
+            selected_ids.erase(id);
+            if (active_id == id) {
+                active_id = -1;
+                if (scene.is_valid()) {
+                    Array all_nodes = scene->flatten_tree();
+                    for (int i = all_nodes.size() - 1; i >= 0; --i) {
+                        Ref<VFXSceneNode> candidate = all_nodes[i];
+                        if (candidate.is_valid() && selected_ids.count(candidate->get_node_id())) {
+                            active_id = candidate->get_node_id();
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            selected_ids.insert(id);
+            active_id = id;
+        }
         anchor_id = id;
     } else {
-        selected_ids.clear(); selected_ids.insert(id); anchor_id = id;
+        selected_ids.clear(); selected_ids.insert(id); anchor_id = id; active_id = id;
     }
-    active_id = id;
     _sync_selection_to_scene();
     queue_redraw();
 }
 void VFXSceneTreePanel::_sync_selection_to_scene() {
     if (!scene.is_valid()) return;
     Array all = scene->flatten_tree();
-    for (int i = 0; i < all.size(); ++i) { Ref<VFXSceneNode> n = all[i]; if (n.is_valid()) n->set_selected(selected_ids.count(n->get_node_id()) != 0); }
     Array selected;
-    for (const Row &row : rows) if (selected_ids.count(row.node->get_node_id())) selected.append(row.node);
+    for (int i = 0; i < all.size(); ++i) {
+        Ref<VFXSceneNode> node = all[i];
+        if (node.is_null()) continue;
+        const bool is_selected = selected_ids.count(node->get_node_id()) != 0;
+        node->set_selected(is_selected);
+        if (is_selected) selected.append(node);
+    }
     Ref<VFXSceneNode> active = _find_node(active_id);
-    if (active.is_valid()) { int idx = selected.find(active); if (idx >= 0 && idx != selected.size() - 1) { selected.remove_at(idx); selected.append(active); } }
+    if (active.is_valid()) {
+        int idx = selected.find(active);
+        if (idx >= 0 && idx != selected.size() - 1) {
+            selected.remove_at(idx);
+            selected.append(active);
+        }
+    }
     emit_signal("nodes_selected", selected);
     Variant active_variant;
     if (active.is_valid()) active_variant = active.ptr();
@@ -268,15 +337,27 @@ void VFXSceneTreePanel::_ensure_active_visible() {
     _rebuild_rows();
 }
 
-void VFXSceneTreePanel::_begin_rename(int id) {
-    Ref<VFXSceneNode> node = _find_node(id); if (node.is_null() || !rename_edit) return;
-    rename_id = id;
-    const float y = row_y_by_id.count(id) ? row_y_by_id[id] - scroll_offset : _tree_top();
-    const Row *found = nullptr; for (const Row &r : rows) if (r.node->get_node_id() == id) { found = &r; break; }
+void VFXSceneTreePanel::_position_rename_editor() {
+    if (rename_id < 0 || !rename_edit || !rename_edit->is_visible()) return;
+    const float y = row_y_by_id.count(rename_id) ? row_y_by_id[rename_id] - scroll_offset : _tree_top();
+    const Row *found = nullptr;
+    for (const Row &row : rows) {
+        if (row.node->get_node_id() == rename_id) { found = &row; break; }
+    }
     const float x = found ? 28.0f + found->depth * indent_width : 28.0f;
     rename_edit->set_position(Vector2(x, y + 2.0f));
     rename_edit->set_size(Vector2(MAX(80.0f, get_size().x - x - 28.0f), row_height - 4.0f));
-    rename_edit->set_text(node->get_node_name()); rename_edit->set_visible(true); rename_edit->grab_focus(); rename_edit->select_all();
+}
+
+void VFXSceneTreePanel::_begin_rename(int id) {
+    Ref<VFXSceneNode> node = _find_node(id);
+    if (node.is_null() || !rename_edit) return;
+    rename_id = id;
+    rename_edit->set_text(node->get_node_name());
+    rename_edit->set_visible(true);
+    _position_rename_editor();
+    rename_edit->grab_focus();
+    rename_edit->select_all();
 }
 void VFXSceneTreePanel::_finish_rename() {
     if (rename_id < 0 || !rename_edit || !rename_edit->is_visible()) return;
@@ -290,18 +371,31 @@ void VFXSceneTreePanel::_finish_rename() {
 void VFXSceneTreePanel::_on_rename_finished(const String &text) { _finish_rename(); }
 void VFXSceneTreePanel::_on_rename_focus_exited() { _finish_rename(); }
 
-void VFXSceneTreePanel::_show_context_menu(int id, const Vector2 &screen_position) {
+void VFXSceneTreePanel::_show_context_menu(int id, const Vector2 &screen_position, bool preserve_selection) {
     Ref<VFXSceneNode> node = _find_node(id); if (node.is_null() || !context_menu) return;
     context_id = id;
+    // Desktop right-click selects an unselected row. Mobile long-press keeps
+    // the current selection so the menu can add/remove items without a keyboard.
+    if (!preserve_selection && !selected_ids.count(id)) _select_node(id, false, false);
     context_menu->set_item_text(3, node->get_expanded() ? "Collapse" : "Expand");
     context_menu->set_item_id(3, node->get_expanded() ? ACTION_COLLAPSE : ACTION_EXPAND);
+    context_menu->set_item_text(5, selected_ids.size() > 1
+            ? String("Delete ") + String::num_int64((int64_t)selected_ids.size()) + " Nodes"
+            : String("Delete"));
+    context_menu->set_item_text(7, selected_ids.count(id) ? "Remove from Selection" : "Add to Selection");
     context_menu->set_position(Vector2i(get_global_transform().xform(screen_position)));
     context_menu->popup();
 }
 void VFXSceneTreePanel::_on_context_id_pressed(int action) {
     Ref<VFXSceneNode> node = _find_node(context_id); if (node.is_null()) return;
     if (action == ACTION_RENAME) _begin_rename(context_id);
-    else if (action == ACTION_DELETE) { _select_node(context_id, true, false); _delete_selected(); }
+    else if (action == ACTION_DELETE) {
+        if (!selected_ids.count(context_id)) _select_node(context_id, false, false);
+        _delete_selected();
+    }
+    else if (action == ACTION_TOGGLE_SELECTION) {
+        _select_node(context_id, true, false);
+    }
     else if (action == ACTION_ADD_CHILD) {
         Ref<VFXSceneNode> added = scene->create_node("New Container", VFXSceneNode::NODE_EMPTY, node);
         if (added.is_valid()) { _rebuild_rows(); _select_node(added->get_node_id(), false, false); _begin_rename(added->get_node_id()); }
@@ -376,18 +470,21 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
         }
         if (button == MOUSE_BUTTON_LEFT && !mb->is_pressed()) {
             if (pointer_down && dragging && drop_target_id >= 0 && pressed_id >= 0) _reparent_node(pressed_id, drop_target_id);
-            else if (pointer_down && !long_press_fired && pressed_id >= 0) {
+            else if (pointer_down && !dragging && !long_press_fired && pressed_id >= 0) {
                 const uint64_t now = Time::get_singleton()->get_ticks_msec();
                 if (last_tap_id == pressed_id && now - last_tap_time_msec < 360) _begin_rename(pressed_id);
                 last_tap_id = pressed_id; last_tap_time_msec = now;
             }
             pointer_down = false; dragging = false; pressed_id = -1; drop_target_id = -1; queue_redraw(); accept_event(); return;
         }
-        if (button == MOUSE_BUTTON_RIGHT && mb->is_pressed()) { const int id = _row_id_at(pos.y); if (id >= 0) { _select_node(id, false, false); _show_context_menu(id, pos); } accept_event(); return; }
+        if (button == MOUSE_BUTTON_RIGHT && mb->is_pressed()) { const int id = _row_id_at(pos.y); if (id >= 0) { _show_context_menu(id, pos); } accept_event(); return; }
     }
     Ref<InputEventMouseMotion> mm = event;
     if (mm.is_valid()) {
         last_pointer_position = mm->get_position();
+        const int new_hover_id = (last_pointer_position.x >= 0.0f && last_pointer_position.x <= get_size().x)
+                ? _row_id_at(last_pointer_position.y) : -1;
+        if (new_hover_id != hover_id) { hover_id = new_hover_id; if (!pointer_down) queue_redraw(); }
         if (pointer_down && pressed_id >= 0 && press_position.distance_to(last_pointer_position) > 7.0f) {
             dragging = true; if (long_press_fired && context_menu) context_menu->hide(); drop_target_id = _row_id_at(last_pointer_position.y);
             if (drop_target_id == pressed_id) drop_target_id = -1;
@@ -399,13 +496,29 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
         Vector2 pos = touch->get_position();
         if (touch->is_pressed()) {
             pointer_down = true; touch_scrolling = false; dragging = false; long_press_fired = false;
-            press_position = pos; last_pointer_position = pos; press_time_msec = Time::get_singleton()->get_ticks_msec(); pressed_id = _row_id_at(pos.y);
-            if (pressed_id >= 0) _select_node(pressed_id, false, false);
+            press_position = pos; last_pointer_position = pos; press_time_msec = Time::get_singleton()->get_ticks_msec();
+            pressed_id = _row_id_at(pos.y); drop_target_id = -1;
+            if (pressed_id >= 0) {
+                Ref<VFXSceneNode> node = _find_node(pressed_id);
+                const Row *row = nullptr;
+                for (const Row &r : rows) if (r.node->get_node_id() == pressed_id) { row = &r; break; }
+                const float indent = row ? 7.0f + row->depth * indent_width : 7.0f;
+                if (node.is_valid() && node->get_child_count() > 0 && pos.x >= indent && pos.x < indent + 14.0f) {
+                    node->set_expanded(!node->get_expanded()); _rebuild_rows(); pressed_id = -1;
+                } else if (pos.x >= get_size().x - 27.0f) {
+                    node->set_visible(!node->get_visible()); emit_signal("node_visibility_changed", node); queue_redraw(); pressed_id = -1;
+                } else {
+                    _select_node(pressed_id, false, false);
+                }
+            } else if (pos.y >= _tree_top()) {
+                _clear_selection();
+            }
         } else {
             if (pointer_down && dragging && drop_target_id >= 0 && pressed_id >= 0) _reparent_node(pressed_id, drop_target_id);
             else if (pointer_down && long_press_fired) { /* context menu already shown */ }
-            else if (pointer_down && pressed_id >= 0) { const uint64_t now = Time::get_singleton()->get_ticks_msec(); if (last_tap_id == pressed_id && now - last_tap_time_msec < 360) _begin_rename(pressed_id); last_tap_id = pressed_id; last_tap_time_msec = now; }
-            pointer_down = false; dragging = false; pressed_id = -1; drop_target_id = -1;
+            else if (pointer_down && !dragging && !touch_scrolling && pressed_id >= 0) { const uint64_t now = Time::get_singleton()->get_ticks_msec(); if (last_tap_id == pressed_id && now - last_tap_time_msec < 360) _begin_rename(pressed_id); last_tap_id = pressed_id; last_tap_time_msec = now; }
+            pointer_down = false; dragging = false; pressed_id = -1; drop_target_id = -1; hover_id = -1;
+            queue_redraw();
         }
         accept_event(); return;
     }
@@ -424,7 +537,19 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
     Ref<InputEventKey> key = event;
     if (key.is_valid()) {
         if (!key->is_pressed() || key->is_echo()) return;
-        if (key->get_keycode() == KEY_DELETE || key->get_keycode() == KEY_BACKSPACE) { _delete_selected(); accept_event(); }
+        if (key->get_keycode() == KEY_UP || key->get_keycode() == KEY_DOWN) {
+            if (!rows.empty()) {
+                int current = -1;
+                for (size_t i = 0; i < rows.size(); ++i) if (rows[i].node->get_node_id() == active_id) { current = (int)i; break; }
+                if (current < 0) current = key->get_keycode() == KEY_DOWN ? -1 : (int)rows.size();
+                const int next = CLAMP(current + (key->get_keycode() == KEY_DOWN ? 1 : -1), 0, (int)rows.size() - 1);
+                const bool extend = Input::get_singleton()->is_key_pressed(KEY_SHIFT);
+                _select_node(rows[next].node->get_node_id(), false, extend);
+                _ensure_active_visible();
+            }
+            accept_event();
+        }
+        else if (key->get_keycode() == KEY_DELETE || key->get_keycode() == KEY_BACKSPACE) { _delete_selected(); accept_event(); }
         else if (key->get_keycode() == KEY_F2 && active_id >= 0) { _begin_rename(active_id); accept_event(); }
         else if (key->get_keycode() == KEY_LEFT && active_id >= 0) { Ref<VFXSceneNode> n = _find_node(active_id); if (n.is_valid()) { n->set_expanded(false); _rebuild_rows(); } accept_event(); }
         else if (key->get_keycode() == KEY_RIGHT && active_id >= 0) { Ref<VFXSceneNode> n = _find_node(active_id); if (n.is_valid()) { n->set_expanded(true); _rebuild_rows(); } accept_event(); }
