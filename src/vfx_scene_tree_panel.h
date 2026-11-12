@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <map>
+#include <set>
 
 #include "vfx_scene.h"
 
@@ -23,6 +24,12 @@ private:
     Tree* tree = nullptr;
     LineEdit* search_edit = nullptr;
     Button* add_btn = nullptr;
+    Button* multi_btn = nullptr;
+    Button* delete_btn = nullptr;
+    Button* reparent_btn = nullptr;
+    bool multi_select_enabled = false;
+    bool reparent_mode = false;
+    std::set<int> remembered_selection_ids;
 
     Ref<VFXScene> scene;
 
@@ -60,6 +67,10 @@ private:
     void _on_tree_nothing_selected();
     void _on_search_text_changed(const String& text);
     void _on_add_pressed();
+    void _on_delete_pressed();
+    void _on_multi_pressed();
+    void _on_reparent_pressed();
+    void _delete_selected_nodes();
     void _on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx);
     void _on_tree_cell_selected(int column);
     void _sync_selection_to_scene();
