@@ -99,16 +99,17 @@ private:
     void _set_drop_target_from_position(const Vector2 &position);
 
 protected:
-    // Godot registers these virtual callbacks through GDCLASS. Keep them
-    // protected (not private), so godot-cpp can take their member pointers.
-    void _draw() override;
-    void _gui_input(const Ref<InputEvent> &event) override;
-    void _process(double delta) override;
+    // Internal notification and binding helpers.
     void _notification(int what);
-
     static void _bind_methods();
 
 public:
+    // godot-cpp's BIND_VIRTUAL_METHOD takes these member pointers from
+    // generated registration code, so the overrides must be public.
+    void _draw() override;
+    void _gui_input(const Ref<InputEvent> &event) override;
+    void _process(double delta) override;
+
     VFXSceneTreePanel();
     ~VFXSceneTreePanel();
 
