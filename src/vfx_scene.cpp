@@ -37,7 +37,7 @@ VFXScene::~VFXScene() {}
 void VFXScene::create_default_root() {
     if (root.is_valid()) return;
     root.instantiate();
-    root->set_node_name("Scene");
+    root->set_node_name("New Container");
     root->set_node_type(VFXSceneNode::NODE_EMPTY);
 }
 
