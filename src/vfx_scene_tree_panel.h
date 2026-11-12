@@ -2,86 +2,116 @@
 #define VFX_SCENE_TREE_PANEL_H
 
 #include <godot_cpp/classes/control.hpp>
-#include <godot_cpp/classes/tree.hpp>
-#include <godot_cpp/classes/tree_item.hpp>
-#include <godot_cpp/classes/v_box_container.hpp>
 #include <godot_cpp/classes/h_box_container.hpp>
 #include <godot_cpp/classes/line_edit.hpp>
 #include <godot_cpp/classes/button.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/popup_menu.hpp>
+#include <godot_cpp/classes/input_event.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
+#include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/input_event_screen_touch.hpp>
+#include <godot_cpp/classes/input_event_screen_drag.hpp>
+#include <godot_cpp/classes/font.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <map>
+#include <set>
+#include <vector>
 
 #include "vfx_scene.h"
 
 using namespace godot;
 
-class VFXSceneTreePanel : public VBoxContainer {
-    GDCLASS(VFXSceneTreePanel, VBoxContainer)
+// A fully custom-drawn scene dock. No Godot Tree/TreeItem is used.
+class VFXSceneTreePanel : public Control {
+    GDCLASS(VFXSceneTreePanel, Control)
+
+    struct Row {
+        Ref<VFXSceneNode> node;
+        int depth = 0;
+        float y = 0.0f;
+        bool has_children = false;
+    };
 
 private:
-    Tree* tree = nullptr;
-    LineEdit* search_edit = nullptr;
-    Button* add_btn = nullptr;
+    HBoxContainer *toolbar = nullptr;
+    LineEdit *search_edit = nullptr;
+    Button *add_btn = nullptr;
+    LineEdit *rename_edit = nullptr;
+    PopupMenu *context_menu = nullptr;
 
     Ref<VFXScene> scene;
+    Ref<Texture2D> icon_empty, icon_mesh, icon_armature, icon_bone;
+    Ref<Texture2D> icon_light, icon_camera, icon_curve, icon_visible, icon_hidden;
 
-    // Map: VFXSceneNode id -> TreeItem*
-    std::map<int, TreeItem*> node_to_item;
-    // Map: TreeItem* -> VFXSceneNode id
-    std::map<TreeItem*, int> item_to_node;
+    std::vector<Row> rows;
+    std::set<int> selected_ids;
+    std::map<int, float> row_y_by_id;
+    int active_id = -1;
+    int anchor_id = -1;
+    int context_id = -1;
+    int rename_id = -1;
 
-    bool syncing = false; // prevent signal loops
-    bool tree_dirty = true;
-    TreeItem* last_clicked_item = nullptr; // becomes the "active" node of a multi-selection
+    float row_height = 27.0f;
+    float indent_width = 18.0f;
+    float scroll_offset = 0.0f;
+    float content_height = 0.0f;
+    bool syncing = false;
 
-    // Icon references (set these in _ready or load them)
-    Ref<Texture2D> icon_empty;
-    Ref<Texture2D> icon_mesh;
-    Ref<Texture2D> icon_armature;
-    Ref<Texture2D> icon_bone;
-    Ref<Texture2D> icon_light;
-    Ref<Texture2D> icon_camera;
-    Ref<Texture2D> icon_curve;
-    Ref<Texture2D> icon_visible;
-    Ref<Texture2D> icon_hidden;
+    bool pointer_down = false;
+    bool dragging = false;
+    bool touch_scrolling = false;
+    Vector2 press_position;
+    Vector2 last_pointer_position;
+    int pressed_id = -1;
+    int drop_target_id = -1;
+    uint64_t press_time_msec = 0;
+    uint64_t last_tap_time_msec = 0;
+    int last_tap_id = -1;
+    bool long_press_fired = false;
 
-    void _build_tree();
-    void _build_tree_recursive(TreeItem* parent_item, const Ref<VFXSceneNode>& node);
-    void _clear_tree_maps();
-
+    void _load_icons();
     Ref<Texture2D> _get_icon_for_type(int type) const;
-
-    void _on_tree_item_selected();
-    void _on_tree_item_edited();
-    void _on_tree_button_clicked(TreeItem* item, int column, int id, int mouse_button_idx);
-    void _on_tree_item_collapsed(TreeItem* item);
-    void _on_tree_item_activated();
-    void _on_tree_nothing_selected();
-    void _on_search_text_changed(const String& text);
-    void _on_add_pressed();
-    void _on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx);
-    void _on_tree_cell_selected(int column);
+    void _rebuild_rows();
+    void _append_rows(const Ref<VFXSceneNode> &node, int depth, const String &filter);
+    bool _subtree_matches(const Ref<VFXSceneNode> &node, const String &filter) const;
+    Ref<VFXSceneNode> _find_node(int id) const;
+    Ref<VFXSceneNode> _row_node_at(float y) const;
+    int _row_id_at(float y) const;
+    float _tree_top() const;
+    void _ensure_active_visible();
     void _sync_selection_to_scene();
-    void _sync_expansion_to_scene();
-    void _reparent_item(TreeItem* item, TreeItem* new_parent);
-
-    Ref<VFXSceneNode> _get_node_for_item(TreeItem* item);  // was: ... const;
-    TreeItem* _get_item_for_node(int node_id) const;
+    void _select_node(int id, bool additive, bool range);
+    void _clear_selection();
+    void _draw_row(const Row &row);
+    void _draw_tree();
+    void _begin_rename(int id);
+    void _finish_rename();
+    void _show_context_menu(int id, const Vector2 &screen_position);
+    void _delete_selected();
+    void _reparent_node(int node_id, int parent_id);
+    void _on_search_changed(const String &text);
+    void _on_add_pressed();
+    void _on_rename_finished(const String &text);
+    void _on_rename_focus_exited();
+    void _on_context_id_pressed(int id);
 
 protected:
     static void _bind_methods();
     void _notification(int p_what);
+    void _draw() override;
+    void _gui_input(const Ref<InputEvent> &event) override;
 
 public:
     VFXSceneTreePanel();
     ~VFXSceneTreePanel();
 
-    void set_scene(const Ref<VFXScene>& p_scene);
+    void set_scene(const Ref<VFXScene> &p_scene);
     Ref<VFXScene> get_scene() const;
-
     void mark_dirty();
     void force_rebuild();
+    void delete_selected_nodes();
 };
 
 #endif
