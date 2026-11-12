@@ -19,6 +19,9 @@ void VFXSceneTreePanel::_bind_methods() {
     ADD_SIGNAL(MethodInfo("nodes_selected", PropertyInfo(Variant::ARRAY, "nodes")));
     ADD_SIGNAL(MethodInfo("node_activated", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_reparented"));
+    ADD_SIGNAL(MethodInfo("node_renamed", PropertyInfo(Variant::OBJECT, "node"), PropertyInfo(Variant::STRING, "old_name"), PropertyInfo(Variant::STRING, "new_name")));
+    ADD_SIGNAL(MethodInfo("node_deleted", PropertyInfo(Variant::OBJECT, "node"), PropertyInfo(Variant::OBJECT, "old_parent")));
+    ADD_SIGNAL(MethodInfo("node_reparented", PropertyInfo(Variant::OBJECT, "node"), PropertyInfo(Variant::OBJECT, "old_parent"), PropertyInfo(Variant::OBJECT, "new_parent")));
     ADD_SIGNAL(MethodInfo("node_visibility_changed",
     PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
 
@@ -46,6 +49,26 @@ void VFXSceneTreePanel::_notification(int p_what) {
         add_btn->set_tooltip_text("Add node");
         toolbar->add_child(add_btn);
         add_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_add_pressed));
+
+        multi_btn = memnew(Button);
+        multi_btn->set_text("Multi");
+        multi_btn->set_toggle_mode(true);
+        multi_btn->set_tooltip_text("Toggle multi-selection (mobile friendly)");
+        toolbar->add_child(multi_btn);
+        multi_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_multi_pressed));
+
+        delete_btn = memnew(Button);
+        delete_btn->set_text("−");
+        delete_btn->set_tooltip_text("Delete selected custom nodes");
+        toolbar->add_child(delete_btn);
+        delete_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_delete_pressed));
+
+        reparent_btn = memnew(Button);
+        reparent_btn->set_text("Parent");
+        reparent_btn->set_toggle_mode(true);
+        reparent_btn->set_tooltip_text("Tap Parent, then tap the new parent node");
+        toolbar->add_child(reparent_btn);
+        reparent_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_reparent_pressed));
 
         // --- Tree ---
         tree = memnew(Tree);
@@ -315,6 +338,11 @@ void VFXSceneTreePanel::_sync_selection_to_scene() {
             selected_nodes.append(clicked);
         }
     }
+    remembered_selection_ids.clear();
+    for (int i = 0; i < selected_nodes.size(); ++i) {
+        Ref<VFXSceneNode> selected_node = selected_nodes[i];
+        if (selected_node.is_valid()) remembered_selection_ids.insert(selected_node->get_node_id());
+    }
     emit_signal("nodes_selected", selected_nodes);
 }
 
@@ -323,8 +351,18 @@ void VFXSceneTreePanel::_on_tree_item_edited() {
     if (!item) return;
     Ref<VFXSceneNode> node = _get_node_for_item(item);
     if (node.is_valid()) {
-        node->set_node_name(item->get_text(0));
+        String old_name = node->get_node_name();
+        String new_name = item->get_text(0).strip_edges();
+        if (new_name.is_empty()) new_name = old_name;
+        item->set_text(0, new_name);
+        if (new_name != old_name) {
+            node->set_node_name(new_name);
+            emit_signal("node_renamed", node, old_name, new_name);
+        }
     }
+    // Tree's inline editor is a LineEdit. Explicitly return keyboard focus
+    // to the Tree after the edit commits (important on Android).
+    tree->call_deferred("grab_focus");
 }
 
 void VFXSceneTreePanel::_on_tree_button_clicked(TreeItem* item, int column, int id, int mouse_button_idx) {
@@ -374,20 +412,105 @@ void VFXSceneTreePanel::_on_add_pressed() {
 void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx) {
     TreeItem* item = tree->get_item_at_position(mouse_pos);
     if (!item) return;
-    
-    if (mouse_button_idx == MOUSE_BUTTON_RIGHT) {
-        tree->deselect_all();
-        item->select(0);
-        last_clicked_item = item;
-        _sync_selection_to_scene();
-    } else {
-        // LEFT click or touch — also trigger selection
-        // (item_selected signal is unreliable on some touch builds)
-        tree->deselect_all();
-        item->select(0);
-        last_clicked_item = item;
-        _sync_selection_to_scene();
+
+    // Mobile reparent workflow: arm Parent, then tap the destination parent.
+    if (reparent_mode) {
+        Array selected;
+        Ref<VFXSceneNode> root = scene.is_valid() ? scene->get_root() : Ref<VFXSceneNode>();
+        if (root.is_valid()) {
+            for (int id : remembered_selection_ids) {
+                Ref<VFXSceneNode> n = root->find_node_by_id(id);
+                if (n.is_valid()) selected.append(n);
+            }
+        }
+        Ref<VFXSceneNode> destination = _get_node_for_item(item);
+        bool valid = destination.is_valid() && !selected.is_empty();
+        for (int i = 0; valid && i < selected.size(); ++i) {
+            Ref<VFXSceneNode> n = selected[i];
+            if (n == destination || destination->is_descendant_of(n)) valid = false;
+        }
+        if (valid) {
+            for (int i = 0; i < selected.size(); ++i) {
+                Ref<VFXSceneNode> n = selected[i];
+                Ref<VFXSceneNode> old_parent = n->get_parent_node();
+                if (old_parent == destination) continue;
+                Transform3D world = n->get_global_transform();
+                if (old_parent.is_valid()) old_parent->remove_child(n);
+                destination->add_child(n);
+                n->set_parent_node(destination.ptr());
+                n->set_local_transform(destination->get_global_transform().affine_inverse() * world);
+                emit_signal("node_reparented", n, old_parent, destination);
+            }
+            emit_signal("nodes_reparented");
+            mark_dirty();
+        }
+        reparent_mode = false;
+        if (reparent_btn) reparent_btn->set_pressed(false);
+        return;
     }
+
+    if (mouse_button_idx == MOUSE_BUTTON_RIGHT || !multi_select_enabled) {
+        tree->deselect_all();
+        item->select(0);
+    } else {
+        // Restore the previous multi-selection (Tree may collapse it to one
+        // item on touch), then toggle the tapped item.
+        bool was_selected = remembered_selection_ids.count(_get_node_for_item(item).is_valid() ? _get_node_for_item(item)->get_node_id() : -1) > 0;
+        tree->deselect_all();
+        for (int id : remembered_selection_ids) {
+            TreeItem* previous = _get_item_for_node(id);
+            if (previous && previous != item) previous->select(0);
+        }
+        if (!was_selected) item->select(0);
+    }
+    last_clicked_item = item;
+    _sync_selection_to_scene();
+}
+
+void VFXSceneTreePanel::_on_multi_pressed() {
+    multi_select_enabled = multi_btn && multi_btn->is_pressed();
+}
+
+void VFXSceneTreePanel::_on_reparent_pressed() {
+    reparent_mode = reparent_btn && reparent_btn->is_pressed();
+}
+
+void VFXSceneTreePanel::_on_delete_pressed() {
+    _delete_selected_nodes();
+}
+
+void VFXSceneTreePanel::_delete_selected_nodes() {
+    if (!scene.is_valid() || !tree) return;
+    Array selected_nodes;
+    TreeItem* selected_item = tree->get_selected();
+    while (selected_item) {
+        Ref<VFXSceneNode> n = _get_node_for_item(selected_item);
+        if (n.is_valid() && n != scene->get_root()) selected_nodes.append(n);
+        selected_item = tree->get_next_selected(selected_item);
+    }
+    // Remove descendants from the batch when their ancestor is also selected.
+    Array roots_to_delete;
+    for (int i = 0; i < selected_nodes.size(); ++i) {
+        Ref<VFXSceneNode> candidate = selected_nodes[i];
+        bool covered = false;
+        for (int j = 0; j < selected_nodes.size(); ++j) {
+            if (i == j) continue;
+            Ref<VFXSceneNode> other = selected_nodes[j];
+            if (candidate->is_descendant_of(other)) { covered = true; break; }
+        }
+        if (!covered) roots_to_delete.append(candidate);
+    }
+    for (int i = 0; i < roots_to_delete.size(); ++i) {
+        Ref<VFXSceneNode> n = roots_to_delete[i];
+        Ref<VFXSceneNode> old_parent = n->get_parent_node();
+        if (old_parent.is_valid()) {
+            emit_signal("node_deleted", n, old_parent);
+            old_parent->remove_child(n);
+        }
+    }
+    tree->deselect_all();
+    _sync_selection_to_scene();
+    mark_dirty();
 }
 
 // --- Drag & Drop Reparenting ---
@@ -405,12 +528,12 @@ void VFXSceneTreePanel::_reparent_item(TreeItem* item, TreeItem* new_parent_item
 
     // Do the reparent in scene
     Ref<VFXSceneNode> old_parent = node->get_parent_node();
-    if (old_parent.is_valid()) {
-        old_parent->remove_child(node);
-    }
+    Transform3D world = node->get_global_transform();
+    if (old_parent.is_valid()) old_parent->remove_child(node);
     new_parent->add_child(node);
     node->set_parent_node(new_parent.ptr());
-
+    node->set_local_transform(new_parent->get_global_transform().affine_inverse() * world);
+    emit_signal("node_reparented", node, old_parent, new_parent);
     emit_signal("nodes_reparented");
     mark_dirty();
 }
