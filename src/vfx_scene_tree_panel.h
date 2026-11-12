@@ -66,6 +66,7 @@ private:
     Vector2 last_pointer_position;
     int pressed_id = -1;
     int drop_target_id = -1;
+    int hover_id = -1;
     uint64_t press_time_msec = 0;
     uint64_t last_tap_time_msec = 0;
     int last_tap_id = -1;
@@ -87,8 +88,9 @@ private:
     void _draw_row(const Row &row);
     void _draw_tree();
     void _begin_rename(int id);
+    void _position_rename_editor();
     void _finish_rename();
-    void _show_context_menu(int id, const Vector2 &screen_position);
+    void _show_context_menu(int id, const Vector2 &screen_position, bool preserve_selection = false);
     void _delete_selected();
     void _reparent_node(int node_id, int parent_id);
     void _on_search_changed(const String &text);
