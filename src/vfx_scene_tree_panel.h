@@ -74,9 +74,6 @@ private:
 
     void _rebuild_rows();
     void _append_rows(const Ref<VFXSceneNode> &node, int depth, const String &filter);
-    void _draw() override;
-    void _gui_input(const Ref<InputEvent> &event) override;
-    void _process(double delta) override;
 
     int _row_at_y(float y) const;
     int _row_index_for_id(int id) const;
@@ -102,8 +99,14 @@ private:
     void _set_drop_target_from_position(const Vector2 &position);
 
 protected:
-    static void _bind_methods();
+    // Godot registers these virtual callbacks through GDCLASS. Keep them
+    // protected (not private), so godot-cpp can take their member pointers.
+    void _draw() override;
+    void _gui_input(const Ref<InputEvent> &event) override;
+    void _process(double delta) override;
     void _notification(int what);
+
+    static void _bind_methods();
 
 public:
     VFXSceneTreePanel();
