@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/h_box_container.hpp>
 #include <godot_cpp/classes/line_edit.hpp>
 #include <godot_cpp/classes/button.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <map>
@@ -25,7 +26,6 @@ private:
     LineEdit* search_edit = nullptr;
     Button* add_btn = nullptr;
     Button* multi_btn = nullptr;
-    Button* delete_btn = nullptr;
     Button* reparent_btn = nullptr;
     bool multi_select_enabled = false;
     bool reparent_mode = false;
@@ -76,6 +76,11 @@ private:
     void _sync_selection_to_scene();
     void _sync_expansion_to_scene();
     void _reparent_item(TreeItem* item, TreeItem* new_parent);
+    Variant _get_tree_drag_data(const Vector2& position);
+    bool _can_drop_tree_data(const Vector2& position, const Variant& data) const;
+    void _drop_tree_data(const Vector2& position, const Variant& data);
+    bool _can_reparent_node(const Ref<VFXSceneNode>& node, const Ref<VFXSceneNode>& new_parent) const;
+    void _reparent_node_preserving_world(const Ref<VFXSceneNode>& node, const Ref<VFXSceneNode>& new_parent);
 
     Ref<VFXSceneNode> _get_node_for_item(TreeItem* item);  // was: ... const;
     TreeItem* _get_item_for_node(int node_id) const;
@@ -93,6 +98,7 @@ public:
 
     void mark_dirty();
     void force_rebuild();
+    void delete_selected_nodes();
 };
 
 #endif
