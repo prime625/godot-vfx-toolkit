@@ -44,7 +44,7 @@ void VFXSceneTreePanel::_notification(int what) {
 
         toolbar = memnew(HBoxContainer);
         toolbar->set_anchors_and_offsets_preset(Control::PRESET_TOP_WIDE);
-        toolbar->set_offset_bottom(34.0);
+        toolbar->set_offset(SIDE_BOTTOM, 34.0);
         toolbar->set_custom_minimum_size(Vector2(0, 34));
         add_child(toolbar);
 
@@ -348,7 +348,8 @@ void VFXSceneTreePanel::_on_add_pressed() {
 
 void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
     if (event.is_null()) return;
-    if (Ref<InputEventMouseButton> mb = event) {
+    Ref<InputEventMouseButton> mb = event;
+    if (mb.is_valid()) {
         const int button = mb->get_button_index(); const Vector2 pos = mb->get_position();
         if (button == MOUSE_BUTTON_WHEEL_UP && mb->is_pressed()) { scroll_offset = MAX(0.0f, scroll_offset - row_height * 3.0f); queue_redraw(); accept_event(); return; }
         if (button == MOUSE_BUTTON_WHEEL_DOWN && mb->is_pressed()) { scroll_offset = MIN(MAX(0.0f, content_height - (get_size().y - _tree_top())), scroll_offset + row_height * 3.0f); queue_redraw(); accept_event(); return; }
@@ -358,7 +359,6 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
             pressed_id = _row_id_at(pos.y); drop_target_id = -1;
             if (pressed_id >= 0) {
                 Ref<VFXSceneNode> node = _find_node(pressed_id);
-                const float local_x = pos.x - (7.0f + (node.is_valid() && node->get_parent_node() ? 18.0f : 0.0f));
                 const Row *row = nullptr; for (const Row &r : rows) if (r.node->get_node_id() == pressed_id) { row = &r; break; }
                 const float indent = row ? 7.0f + row->depth * indent_width : 7.0f;
                 if (node.is_valid() && node->get_child_count() > 0 && pos.x >= indent && pos.x < indent + 14.0f) {
@@ -385,7 +385,8 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
         }
         if (button == MOUSE_BUTTON_RIGHT && mb->is_pressed()) { const int id = _row_id_at(pos.y); if (id >= 0) { _select_node(id, false, false); _show_context_menu(id, pos); } accept_event(); return; }
     }
-    if (Ref<InputEventMouseMotion> mm = event) {
+    Ref<InputEventMouseMotion> mm = event;
+    if (mm.is_valid()) {
         last_pointer_position = mm->get_position();
         if (pointer_down && pressed_id >= 0 && press_position.distance_to(last_pointer_position) > 7.0f) {
             dragging = true; if (long_press_fired && context_menu) context_menu->hide(); drop_target_id = _row_id_at(last_pointer_position.y);
@@ -393,7 +394,8 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
             queue_redraw(); accept_event();
         }
     }
-    if (Ref<InputEventScreenTouch> touch = event) {
+    Ref<InputEventScreenTouch> touch = event;
+    if (touch.is_valid()) {
         Vector2 pos = touch->get_position();
         if (touch->is_pressed()) {
             pointer_down = true; touch_scrolling = false; dragging = false; long_press_fired = false;
@@ -407,7 +409,8 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
         }
         accept_event(); return;
     }
-    if (Ref<InputEventScreenDrag> drag = event) {
+    Ref<InputEventScreenDrag> drag = event;
+    if (drag.is_valid()) {
         const Vector2 pos = drag->get_position(); const Vector2 delta = drag->get_relative(); last_pointer_position = pos;
         if (pointer_down && press_position.distance_to(pos) > 10.0f) {
             // A vertical gesture that starts in the row body scrolls; a horizontal/held gesture can reparent.
@@ -418,7 +421,8 @@ void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
         }
         accept_event(); return;
     }
-    if (Ref<InputEventKey> key = event) {
+    Ref<InputEventKey> key = event;
+    if (key.is_valid()) {
         if (!key->is_pressed() || key->is_echo()) return;
         if (key->get_keycode() == KEY_DELETE || key->get_keycode() == KEY_BACKSPACE) { _delete_selected(); accept_event(); }
         else if (key->get_keycode() == KEY_F2 && active_id >= 0) { _begin_rename(active_id); accept_event(); }
