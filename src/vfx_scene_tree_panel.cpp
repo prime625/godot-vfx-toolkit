@@ -1,131 +1,106 @@
 #include "vfx_scene_tree_panel.h"
-#include <godot_cpp/classes/theme.hpp>
-#include <godot_cpp/classes/font.hpp>
-#include <godot_cpp/variant/utility_functions.hpp>
+
+#include <godot_cpp/classes/h_box_container.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
-#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/input.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+#include <algorithm>
 
 using namespace godot;
+
+namespace {
+enum ContextAction { ACTION_RENAME = 1, ACTION_DELETE = 2, ACTION_ADD_CHILD = 3, ACTION_COLLAPSE = 4, ACTION_EXPAND = 5 };
+}
 
 void VFXSceneTreePanel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_scene", "scene"), &VFXSceneTreePanel::set_scene);
     ClassDB::bind_method(D_METHOD("get_scene"), &VFXSceneTreePanel::get_scene);
     ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scene", PROPERTY_HINT_RESOURCE_TYPE, "VFXScene"), "set_scene", "get_scene");
-
     ClassDB::bind_method(D_METHOD("mark_dirty"), &VFXSceneTreePanel::mark_dirty);
     ClassDB::bind_method(D_METHOD("force_rebuild"), &VFXSceneTreePanel::force_rebuild);
+    ClassDB::bind_method(D_METHOD("delete_selected_nodes"), &VFXSceneTreePanel::delete_selected_nodes);
 
     ADD_SIGNAL(MethodInfo("node_selected", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_selected", PropertyInfo(Variant::ARRAY, "nodes")));
     ADD_SIGNAL(MethodInfo("node_activated", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
+    ADD_SIGNAL(MethodInfo("node_visibility_changed", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
+    ADD_SIGNAL(MethodInfo("node_renamed", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode"), PropertyInfo(Variant::STRING, "old_name"), PropertyInfo(Variant::STRING, "new_name")));
+    ADD_SIGNAL(MethodInfo("node_deleted", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode"), PropertyInfo(Variant::OBJECT, "old_parent", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
+    ADD_SIGNAL(MethodInfo("node_reparented", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode"), PropertyInfo(Variant::OBJECT, "old_parent", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode"), PropertyInfo(Variant::OBJECT, "new_parent", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_reparented"));
-    ADD_SIGNAL(MethodInfo("node_visibility_changed",
-    PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
-
 }
 
 VFXSceneTreePanel::VFXSceneTreePanel() {}
 VFXSceneTreePanel::~VFXSceneTreePanel() {}
 
-void VFXSceneTreePanel::_notification(int p_what) {
-    if (p_what == NOTIFICATION_READY) {
+void VFXSceneTreePanel::_notification(int what) {
+    if (what == NOTIFICATION_READY) {
+        set_clip_contents(true);
+        set_focus_mode(FOCUS_ALL);
+        set_process(true);
         set_custom_minimum_size(Vector2(180, 200));
 
-        // --- Toolbar ---
-        HBoxContainer* toolbar = memnew(HBoxContainer);
+        toolbar = memnew(HBoxContainer);
+        toolbar->set_anchors_and_offsets_preset(Control::PRESET_TOP_WIDE);
+        toolbar->set_offset_bottom(34.0);
+        toolbar->set_custom_minimum_size(Vector2(0, 34));
         add_child(toolbar);
 
         search_edit = memnew(LineEdit);
-        search_edit->set_placeholder("Filter nodes...");
+        search_edit->set_placeholder("Filter Nodes");
         search_edit->set_h_size_flags(Control::SIZE_EXPAND_FILL);
         toolbar->add_child(search_edit);
-        search_edit->connect("text_changed", callable_mp(this, &VFXSceneTreePanel::_on_search_text_changed));
+        search_edit->connect("text_changed", callable_mp(this, &VFXSceneTreePanel::_on_search_changed));
 
         add_btn = memnew(Button);
         add_btn->set_text("+");
-        add_btn->set_tooltip_text("Add node");
+        add_btn->set_tooltip_text("Add New Container");
         toolbar->add_child(add_btn);
         add_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_add_pressed));
 
-        // --- Tree ---
-        tree = memnew(Tree);
-        tree->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-        tree->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-        tree->set_hide_root(false);
-        tree->set_select_mode(Tree::SELECT_MULTI);
-        tree->set_allow_reselect(true);
-        tree->set_allow_rmb_select(true);
-        add_child(tree);
+        rename_edit = memnew(LineEdit);
+        rename_edit->set_visible(false);
+        rename_edit->set_z_index(10);
+        add_child(rename_edit);
+        rename_edit->connect("text_submitted", callable_mp(this, &VFXSceneTreePanel::_on_rename_finished));
+        rename_edit->connect("focus_exited", callable_mp(this, &VFXSceneTreePanel::_on_rename_focus_exited));
 
-        // Columns: [Name | Visibility button]
-        tree->set_columns(2);
-        tree->set_column_title(0, "Node");
-        tree->set_column_expand(0, true);
-        tree->set_column_expand(1, false);
-        tree->set_column_custom_minimum_width(1, 22);
-        tree->set_column_title_alignment(0, HorizontalAlignment::HORIZONTAL_ALIGNMENT_LEFT);
+        context_menu = memnew(PopupMenu);
+        add_child(context_menu);
+        context_menu->add_item("Add Child Container", ACTION_ADD_CHILD);
+        context_menu->add_separator();
+        context_menu->add_item("Rename", ACTION_RENAME);
+        context_menu->add_item("Expand", ACTION_EXPAND);
+        context_menu->add_item("Collapse", ACTION_COLLAPSE);
+        context_menu->add_separator();
+        context_menu->add_item("Delete", ACTION_DELETE);
+        context_menu->connect("id_pressed", callable_mp(this, &VFXSceneTreePanel::_on_context_id_pressed));
 
-        // Signals
-        tree->connect("item_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_selected));
-        tree->connect("item_edited", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_edited));
-        tree->connect("button_clicked", callable_mp(this, &VFXSceneTreePanel::_on_tree_button_clicked));
-        tree->connect("item_collapsed", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_collapsed));
-        tree->connect("item_activated", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_activated));
-        tree->connect("nothing_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_nothing_selected));
-        tree->connect("item_mouse_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_item_mouse_selected));
-        // Fallback: cell_selected fires more reliably on mobile than item_selected
-        tree->connect("cell_selected", callable_mp(this, &VFXSceneTreePanel::_on_tree_cell_selected));
-        // Load icons (fallback to empty if not found)
-        ResourceLoader* rl = ResourceLoader::get_singleton();
-        icon_mesh = rl->load("res://addons/vfx_toolkit/icons/mesh.svg");
-        icon_armature = rl->load("res://addons/vfx_toolkit/icons/armature.svg");
-        icon_bone = rl->load("res://addons/vfx_toolkit/icons/bone.svg");
-        icon_light = rl->load("res://addons/vfx_toolkit/icons/light.svg");
-        icon_camera = rl->load("res://addons/vfx_toolkit/icons/camera.svg");
-        icon_curve = rl->load("res://addons/vfx_toolkit/icons/curve.svg");
-        icon_empty = rl->load("res://addons/vfx_toolkit/icons/empty.svg");
-        icon_visible = rl->load("res://addons/vfx_toolkit/icons/visible.svg");
-        icon_hidden = rl->load("res://addons/vfx_toolkit/icons/hidden.svg");
-
-        mark_dirty();
+        _load_icons();
+        _rebuild_rows();
     }
-
-    if (p_what == NOTIFICATION_PROCESS) {
-        if (tree_dirty && scene.is_valid()) {
-            tree_dirty = false;
-            _build_tree();
+    if (what == NOTIFICATION_PROCESS && pointer_down && !long_press_fired && pressed_id >= 0) {
+        const uint64_t now = Time::get_singleton()->get_ticks_msec();
+        if (now - press_time_msec >= 520 && press_position.distance_to(last_pointer_position) < 12.0f) {
+            long_press_fired = true;
+            _show_context_menu(pressed_id, last_pointer_position);
         }
     }
 }
 
-void VFXSceneTreePanel::set_scene(const Ref<VFXScene>& p_scene) {
-    scene = p_scene;
-    mark_dirty();
-}
-
-Ref<VFXScene> VFXSceneTreePanel::get_scene() const {
-    return scene;
-}
-
-void VFXSceneTreePanel::mark_dirty() {
-    tree_dirty = true;
-}
-
-void VFXSceneTreePanel::force_rebuild() {
-    tree_dirty = false;
-    _build_tree();
-}
-
-void VFXSceneTreePanel::_clear_tree_maps() {
-    node_to_item.clear();
-    item_to_node.clear();
-}
-
-
-void VFXSceneTreePanel::_on_tree_cell_selected(int column) {
-    if (syncing) return;
-    last_clicked_item = tree->get_selected();
-    _sync_selection_to_scene();
+void VFXSceneTreePanel::_load_icons() {
+    ResourceLoader *loader = ResourceLoader::get_singleton();
+    icon_mesh = loader->load("res://addons/vfx_toolkit/icons/mesh.svg");
+    icon_armature = loader->load("res://addons/vfx_toolkit/icons/armature.svg");
+    icon_bone = loader->load("res://addons/vfx_toolkit/icons/bone.svg");
+    icon_light = loader->load("res://addons/vfx_toolkit/icons/light.svg");
+    icon_camera = loader->load("res://addons/vfx_toolkit/icons/camera.svg");
+    icon_curve = loader->load("res://addons/vfx_toolkit/icons/curve.svg");
+    icon_empty = loader->load("res://addons/vfx_toolkit/icons/empty.svg");
+    icon_visible = loader->load("res://addons/vfx_toolkit/icons/visible.svg");
+    icon_hidden = loader->load("res://addons/vfx_toolkit/icons/hidden.svg");
 }
 
 Ref<Texture2D> VFXSceneTreePanel::_get_icon_for_type(int type) const {
@@ -140,277 +115,314 @@ Ref<Texture2D> VFXSceneTreePanel::_get_icon_for_type(int type) const {
     }
 }
 
-void VFXSceneTreePanel::_build_tree() {
-    if (!tree || !scene.is_valid()) return;
-    syncing = true;
-
-    // Save selection state using get_next_selected iteration
-    PackedInt32Array old_selection;
-    TreeItem* sel = tree->get_selected();
-    while (sel) {
-        auto itf = item_to_node.find(sel);
-        if (itf != item_to_node.end()) old_selection.append(itf->second);
-        sel = tree->get_next_selected(sel);
-    }
-
-    tree->clear();
-    _clear_tree_maps();
-
-    Ref<VFXSceneNode> root = scene->get_root();
-    if (root.is_null()) {
-        syncing = false;
-        return;
-    }
-
-    TreeItem* root_item = tree->create_item();
-    root_item->set_text(0, root->get_node_name());
-    root_item->set_icon(0, _get_icon_for_type(root->get_node_type()));
-    root_item->set_metadata(0, root->get_node_id());
-    root_item->set_editable(0, true);
-    root_item->set_selectable(0, true);
-    root_item->set_collapsed(!root->get_expanded());
-
-    // Visibility button
-    root_item->add_button(1, root->get_visible() ? icon_visible : icon_hidden,
-                          root->get_visible() ? 0 : 1, false,
-                          root->get_visible() ? "Hide" : "Show");
-
-    node_to_item[root->get_node_id()] = root_item;
-    item_to_node[root_item] = root->get_node_id();
-
-    _build_tree_recursive(root_item, root);
-
-    // Restore selection
-    for (int i = 0; i < old_selection.size(); i++) {
-        TreeItem* it = _get_item_for_node(old_selection[i]);
-        if (it) it->select(0);
-    }
-
-    syncing = false;
+void VFXSceneTreePanel::set_scene(const Ref<VFXScene> &p_scene) {
+    scene = p_scene;
+    selected_ids.clear(); active_id = -1; anchor_id = -1;
+    force_rebuild();
 }
+Ref<VFXScene> VFXSceneTreePanel::get_scene() const { return scene; }
+void VFXSceneTreePanel::mark_dirty() { queue_redraw(); }
+void VFXSceneTreePanel::force_rebuild() { _rebuild_rows(); queue_redraw(); }
 
-void VFXSceneTreePanel::_build_tree_recursive(TreeItem* parent_item, const Ref<VFXSceneNode>& node) {
+bool VFXSceneTreePanel::_subtree_matches(const Ref<VFXSceneNode> &node, const String &filter) const {
+    if (node.is_null()) return false;
+    if (node->get_node_name().to_lower().contains(filter)) return true;
     Array children = node->get_children();
-    String filter = search_edit ? search_edit->get_text().to_lower() : String();
-
-    for (int i = 0; i < children.size(); i++) {
+    for (int i = 0; i < children.size(); ++i) {
         Ref<VFXSceneNode> child = children[i];
-        if (child.is_null()) continue;
+        if (_subtree_matches(child, filter)) return true;
+    }
+    return false;
+}
 
-        // Filter: if name doesn't match, skip unless a descendant matches
-        bool name_matches = filter.is_empty() || child->get_node_name().to_lower().contains(filter);
-        bool descendant_matches = false;
-        if (!name_matches) {
-            Array desc = child->get_all_descendants();
-            for (int d = 0; d < desc.size(); d++) {
-                Ref<VFXSceneNode> dd = desc[d];
-                if (dd.is_valid() && dd->get_node_name().to_lower().contains(filter)) {
-                    descendant_matches = true;
-                    break;
-                }
-            }
+void VFXSceneTreePanel::_append_rows(const Ref<VFXSceneNode> &node, int depth, const String &filter) {
+    if (node.is_null()) return;
+    const bool matches = filter.is_empty() || _subtree_matches(node, filter);
+    if (!matches) return;
+    Row row; row.node = node; row.depth = depth; row.has_children = node->get_child_count() > 0;
+    rows.push_back(row);
+    const bool force_open = !filter.is_empty();
+    if (node->get_expanded() || force_open) {
+        Array children = node->get_children();
+        for (int i = 0; i < children.size(); ++i) _append_rows(children[i], depth + 1, filter);
+    }
+}
+
+void VFXSceneTreePanel::_rebuild_rows() {
+    rows.clear(); row_y_by_id.clear(); content_height = 0.0f;
+    if (!scene.is_valid() || scene->get_root().is_null()) { queue_redraw(); return; }
+    const String filter = search_edit ? search_edit->get_text().strip_edges().to_lower() : String();
+    _append_rows(scene->get_root(), 0, filter);
+    const float top = _tree_top();
+    for (size_t i = 0; i < rows.size(); ++i) {
+        rows[i].y = top + float(i) * row_height;
+        row_y_by_id[rows[i].node->get_node_id()] = rows[i].y;
+    }
+    content_height = float(rows.size()) * row_height;
+    const float viewport = MAX(0.0f, get_size().y - top);
+    scroll_offset = CLAMP(scroll_offset, 0.0f, MAX(0.0f, content_height - viewport));
+    queue_redraw();
+}
+
+float VFXSceneTreePanel::_tree_top() const { return toolbar ? MAX(36.0f, toolbar->get_size().y + 2.0f) : 36.0f; }
+Ref<VFXSceneNode> VFXSceneTreePanel::_find_node(int id) const {
+    if (!scene.is_valid() || scene->get_root().is_null()) return Ref<VFXSceneNode>();
+    return scene->get_root()->find_node_by_id(id);
+}
+int VFXSceneTreePanel::_row_id_at(float y) const {
+    const float local_y = y + scroll_offset;
+    for (const Row &row : rows) if (local_y >= row.y && local_y < row.y + row_height) return row.node->get_node_id();
+    return -1;
+}
+Ref<VFXSceneNode> VFXSceneTreePanel::_row_node_at(float y) const { return _find_node(_row_id_at(y)); }
+
+void VFXSceneTreePanel::_draw_row(const Row &row) {
+    const float y = row.y - scroll_offset;
+    if (y + row_height < _tree_top() || y > get_size().y) return;
+    const int id = row.node->get_node_id();
+    const float left = 7.0f + row.depth * indent_width;
+    const float right = get_size().x - 7.0f;
+    if (selected_ids.count(id)) draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color("#3d526d"));
+    else if (id == drop_target_id) draw_rect(Rect2(2, y, get_size().x - 4, row_height), Color("#405d43"));
+
+    if (row.has_children) {
+        const float cx = left + 6.0f;
+        const float cy = y + row_height * 0.5f;
+        PackedVector2Array tri;
+        if (row.node->get_expanded() || (search_edit && !search_edit->get_text().is_empty())) {
+            tri.push_back(Vector2(cx - 3, cy - 2)); tri.push_back(Vector2(cx + 3, cy - 2)); tri.push_back(Vector2(cx, cy + 2));
+        } else {
+            tri.push_back(Vector2(cx - 2, cy - 4)); tri.push_back(Vector2(cx - 2, cy + 4)); tri.push_back(Vector2(cx + 3, cy));
         }
-
-        if (!filter.is_empty() && !name_matches && !descendant_matches) continue;
-
-        TreeItem* item = tree->create_item(parent_item);
-        item->set_text(0, child->get_node_name());
-        item->set_icon(0, _get_icon_for_type(child->get_node_type()));
-               item->set_metadata(0, child);  // Store the node object directly
-        item->set_editable(0, true);
-        item->set_selectable(0, true);
-        item->set_collapsed(!child->get_expanded());
-
-        // Color tint by type
-        Color type_color = child->get_type_color();
-        item->set_custom_color(0, type_color);
-
-        // Visibility button
-        item->add_button(1, child->get_visible() ? icon_visible : icon_hidden,
-                         child->get_visible() ? 0 : 1, false,
-                         child->get_visible() ? "Hide" : "Show");
-
-        node_to_item[child->get_node_id()] = item;
-        item_to_node[item] = child->get_node_id();
-
-        _build_tree_recursive(item, child);
-    }
-}
-
-Ref<VFXSceneNode> VFXSceneTreePanel::_get_node_for_item(TreeItem* item) {
-    if (!item) return Ref<VFXSceneNode>();
-
-    // Read node directly from metadata
-    Variant meta = item->get_metadata(0);
-    if (meta.get_type() == Variant::OBJECT) {
-        Ref<VFXSceneNode> node = meta;
-        if (node.is_valid()) return node;
+        draw_colored_polygon(tri, Color("#b9c0ca"));
     }
 
-    // Fallback to ID map
-    if (!scene.is_valid()) return Ref<VFXSceneNode>();
-    auto it = item_to_node.find(item);
-    if (it == item_to_node.end()) return Ref<VFXSceneNode>();
-    Ref<VFXSceneNode> root = scene->get_root();
-    if (root.is_null()) return Ref<VFXSceneNode>();
-    return root->find_node_by_id(it->second);
+    Ref<Texture2D> type_icon = _get_icon_for_type(row.node->get_node_type());
+    const float icon_x = left + 16.0f;
+    if (type_icon.is_valid()) draw_texture_rect(type_icon, Rect2(icon_x, y + 5.0f, 17.0f, 17.0f), false);
+    Ref<Font> font = get_theme_default_font();
+    if (font.is_valid()) {
+        Color text_color = row.node->get_type_color();
+        if (selected_ids.count(id)) text_color = Color(1, 1, 1);
+        draw_string(font, Vector2(icon_x + 23.0f, y + 18.5f), row.node->get_node_name(), HORIZONTAL_ALIGNMENT_LEFT, right - icon_x - 48.0f, 14, text_color);
+    }
+    Ref<Texture2D> vis = row.node->get_visible() ? icon_visible : icon_hidden;
+    if (vis.is_valid()) draw_texture_rect(vis, Rect2(right - 18.0f, y + 6.0f, 16.0f, 16.0f), false);
 }
 
-
-TreeItem* VFXSceneTreePanel::_get_item_for_node(int node_id) const {
-    auto it = node_to_item.find(node_id);
-    if (it == node_to_item.end()) return nullptr;
-    return it->second;
+void VFXSceneTreePanel::_draw_tree() {
+    draw_rect(Rect2(0, _tree_top(), get_size().x, get_size().y - _tree_top()), Color("#202124"));
+    for (const Row &row : rows) _draw_row(row);
+    const float viewport = MAX(1.0f, get_size().y - _tree_top());
+    if (content_height > viewport) {
+        const float thumb_h = MAX(24.0f, viewport * viewport / content_height);
+        const float thumb_y = _tree_top() + (viewport - thumb_h) * scroll_offset / MAX(1.0f, content_height - viewport);
+        draw_rect(Rect2(get_size().x - 5.0f, thumb_y, 3.0f, thumb_h), Color(0.65f, 0.68f, 0.72f, 0.65f), true);
+    }
 }
+void VFXSceneTreePanel::_draw() { _draw_tree(); }
 
-// --- Signal handlers ---
-
-void VFXSceneTreePanel::_on_tree_item_selected() {
-    if (syncing) return;
-    last_clicked_item = tree->get_selected();
+void VFXSceneTreePanel::_clear_selection() {
+    selected_ids.clear(); active_id = -1; anchor_id = -1;
     _sync_selection_to_scene();
 }
-
-void VFXSceneTreePanel::_on_tree_nothing_selected() {
-    if (syncing) return;
-    if (scene.is_valid()) {
-        Array all = scene->flatten_tree();
-        for (int i = 0; i < all.size(); i++) {
-            Ref<VFXSceneNode> n = all[i];
-            if (n.is_valid()) n->set_selected(false);
+void VFXSceneTreePanel::_select_node(int id, bool additive, bool range) {
+    if (id < 0) { _clear_selection(); return; }
+    if (range && anchor_id >= 0) {
+        selected_ids.clear();
+        bool in_range = false;
+        for (const Row &row : rows) {
+            const int rid = row.node->get_node_id();
+            if (rid == anchor_id || rid == id) { if (!in_range) in_range = true; else { selected_ids.insert(rid); break; } }
+            if (in_range) selected_ids.insert(rid);
         }
+        selected_ids.insert(anchor_id); selected_ids.insert(id);
+    } else if (additive) {
+        if (selected_ids.count(id)) selected_ids.erase(id); else selected_ids.insert(id);
+        anchor_id = id;
+    } else {
+        selected_ids.clear(); selected_ids.insert(id); anchor_id = id;
     }
-    emit_signal("node_selected", Variant((Object*)nullptr));
-    emit_signal("nodes_selected", Array());
+    active_id = id;
+    _sync_selection_to_scene();
+    queue_redraw();
 }
-
 void VFXSceneTreePanel::_sync_selection_to_scene() {
     if (!scene.is_valid()) return;
-
     Array all = scene->flatten_tree();
-    for (int i = 0; i < all.size(); i++) {
-        Ref<VFXSceneNode> n = all[i];
-        if (n.is_valid()) n->set_selected(false);
-    }
-
-    // Iterate multi-selection via get_next_selected and emit ONE batched
-    // signal. The last CLICKED node (not just the last in tree order)
-    // becomes the "active" one downstream.
-    Array selected_nodes;
-    TreeItem* sel = tree->get_selected();
-    while (sel) {
-        Ref<VFXSceneNode> n = _get_node_for_item(sel);
-        if (n.is_valid()) {
-            n->set_selected(true);
-            selected_nodes.append(n);
-        }
-        sel = tree->get_next_selected(sel);
-    }
-
-    Ref<VFXSceneNode> clicked = _get_node_for_item(last_clicked_item);
-    if (clicked.is_valid()) {
-        int idx = selected_nodes.find(clicked);
-        if (idx >= 0 && idx != selected_nodes.size() - 1) {
-            selected_nodes.remove_at(idx);
-            selected_nodes.append(clicked);
-        }
-    }
-    emit_signal("nodes_selected", selected_nodes);
+    for (int i = 0; i < all.size(); ++i) { Ref<VFXSceneNode> n = all[i]; if (n.is_valid()) n->set_selected(selected_ids.count(n->get_node_id()) != 0); }
+    Array selected;
+    for (const Row &row : rows) if (selected_ids.count(row.node->get_node_id())) selected.append(row.node);
+    Ref<VFXSceneNode> active = _find_node(active_id);
+    if (active.is_valid()) { int idx = selected.find(active); if (idx >= 0 && idx != selected.size() - 1) { selected.remove_at(idx); selected.append(active); } }
+    emit_signal("nodes_selected", selected);
+    Variant active_variant;
+    if (active.is_valid()) active_variant = active.ptr();
+    emit_signal("node_selected", active_variant);
+}
+void VFXSceneTreePanel::_ensure_active_visible() {
+    auto it = row_y_by_id.find(active_id); if (it == row_y_by_id.end()) return;
+    const float top = _tree_top(); const float bottom = get_size().y;
+    if (it->second - scroll_offset < top) scroll_offset = it->second - top;
+    else if (it->second + row_height - scroll_offset > bottom) scroll_offset = it->second + row_height - bottom;
+    _rebuild_rows();
 }
 
-void VFXSceneTreePanel::_on_tree_item_edited() {
-    TreeItem* item = tree->get_edited();
-    if (!item) return;
-    Ref<VFXSceneNode> node = _get_node_for_item(item);
+void VFXSceneTreePanel::_begin_rename(int id) {
+    Ref<VFXSceneNode> node = _find_node(id); if (node.is_null() || !rename_edit) return;
+    rename_id = id;
+    const float y = row_y_by_id.count(id) ? row_y_by_id[id] - scroll_offset : _tree_top();
+    const Row *found = nullptr; for (const Row &r : rows) if (r.node->get_node_id() == id) { found = &r; break; }
+    const float x = found ? 28.0f + found->depth * indent_width : 28.0f;
+    rename_edit->set_position(Vector2(x, y + 2.0f));
+    rename_edit->set_size(Vector2(MAX(80.0f, get_size().x - x - 28.0f), row_height - 4.0f));
+    rename_edit->set_text(node->get_node_name()); rename_edit->set_visible(true); rename_edit->grab_focus(); rename_edit->select_all();
+}
+void VFXSceneTreePanel::_finish_rename() {
+    if (rename_id < 0 || !rename_edit || !rename_edit->is_visible()) return;
+    Ref<VFXSceneNode> node = _find_node(rename_id);
     if (node.is_valid()) {
-        node->set_node_name(item->get_text(0));
+        String old_name = node->get_node_name(); String new_name = rename_edit->get_text().strip_edges();
+        if (!new_name.is_empty() && new_name != old_name) { node->set_node_name(new_name); emit_signal("node_renamed", node, old_name, new_name); }
     }
+    rename_id = -1; rename_edit->set_visible(false); _rebuild_rows();
 }
+void VFXSceneTreePanel::_on_rename_finished(const String &text) { _finish_rename(); }
+void VFXSceneTreePanel::_on_rename_focus_exited() { _finish_rename(); }
 
-void VFXSceneTreePanel::_on_tree_button_clicked(TreeItem* item, int column, int id, int mouse_button_idx) {
-    if (column != 1) return;
-    Ref<VFXSceneNode> node = _get_node_for_item(item);
-    if (node.is_null()) return;
-
-    bool new_vis = !node->get_visible();
-    node->set_visible(new_vis);
-
-    // Update button
-    item->erase_button(column, 0);
-    item->add_button(column, new_vis ? icon_visible : icon_hidden, new_vis ? 0 : 1, false, new_vis ? "Hide" : "Show");
-    emit_signal("node_visibility_changed", node);
+void VFXSceneTreePanel::_show_context_menu(int id, const Vector2 &screen_position) {
+    Ref<VFXSceneNode> node = _find_node(id); if (node.is_null() || !context_menu) return;
+    context_id = id;
+    context_menu->set_item_text(3, node->get_expanded() ? "Collapse" : "Expand");
+    context_menu->set_item_id(3, node->get_expanded() ? ACTION_COLLAPSE : ACTION_EXPAND);
+    context_menu->set_position(Vector2i(get_global_transform().xform(screen_position)));
+    context_menu->popup();
 }
-
-void VFXSceneTreePanel::_on_tree_item_collapsed(TreeItem* item) {
-    if (syncing) return;
-    Ref<VFXSceneNode> node = _get_node_for_item(item);
-    if (node.is_valid()) {
-        node->set_expanded(!item->is_collapsed());
-    }
+void VFXSceneTreePanel::_on_context_id_pressed(int action) {
+    Ref<VFXSceneNode> node = _find_node(context_id); if (node.is_null()) return;
+    if (action == ACTION_RENAME) _begin_rename(context_id);
+    else if (action == ACTION_DELETE) { _select_node(context_id, true, false); _delete_selected(); }
+    else if (action == ACTION_ADD_CHILD) {
+        Ref<VFXSceneNode> added = scene->create_node("New Container", VFXSceneNode::NODE_EMPTY, node);
+        if (added.is_valid()) { _rebuild_rows(); _select_node(added->get_node_id(), false, false); _begin_rename(added->get_node_id()); }
+    } else if (action == ACTION_EXPAND || action == ACTION_COLLAPSE) { node->set_expanded(action == ACTION_EXPAND); _rebuild_rows(); }
 }
-
-void VFXSceneTreePanel::_on_tree_item_activated() {
-    TreeItem* item = tree->get_selected();
-    Ref<VFXSceneNode> node = _get_node_for_item(item);
-    if (node.is_valid()) emit_signal("node_activated", node);
-}
-
-void VFXSceneTreePanel::_on_search_text_changed(const String& text) {
-    mark_dirty();
-}
-
-void VFXSceneTreePanel::_on_add_pressed() {
+void VFXSceneTreePanel::_delete_selected() {
     if (!scene.is_valid()) return;
-    Ref<VFXSceneNode> parent;
-    TreeItem* sel = tree->get_selected();
-    if (sel) parent = _get_node_for_item(sel);
-    Ref<VFXSceneNode> new_node = scene->create_node("NewNode", VFXSceneNode::NODE_EMPTY, parent);
-    if (new_node.is_valid()) {
-        new_node->set_expanded(true);
-        mark_dirty();
+    std::vector<Ref<VFXSceneNode>> victims;
+    for (int id : selected_ids) { Ref<VFXSceneNode> n = _find_node(id); if (n.is_valid() && n != scene->get_root()) victims.push_back(n); }
+    // Delete descendants only through their selected ancestor to avoid stale parent references.
+    for (const Ref<VFXSceneNode> &n : victims) {
+        bool covered = false; VFXSceneNode *p = n->get_parent_node();
+        while (p) { if (selected_ids.count(p->get_node_id())) { covered = true; break; } p = p->get_parent_node(); }
+        if (!covered) { Ref<VFXSceneNode> old_parent = n->get_parent_node(); scene->delete_node(n); emit_signal("node_deleted", n, old_parent); }
     }
+    selected_ids.clear(); active_id = -1; anchor_id = -1; _sync_selection_to_scene(); _rebuild_rows();
 }
+void VFXSceneTreePanel::delete_selected_nodes() { _delete_selected(); }
 
-void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, int mouse_button_idx) {
-    TreeItem* item = tree->get_item_at_position(mouse_pos);
-    if (!item) return;
-    
-    if (mouse_button_idx == MOUSE_BUTTON_RIGHT) {
-        tree->deselect_all();
-        item->select(0);
-        last_clicked_item = item;
-        _sync_selection_to_scene();
-    } else {
-        // LEFT click or touch — also trigger selection
-        // (item_selected signal is unreliable on some touch builds)
-        tree->deselect_all();
-        item->select(0);
-        last_clicked_item = item;
-        _sync_selection_to_scene();
-    }
-}
-
-// --- Drag & Drop Reparenting ---
-
-void VFXSceneTreePanel::_reparent_item(TreeItem* item, TreeItem* new_parent_item) {
-    if (!scene.is_valid() || !item || !new_parent_item) return;
-    if (item == new_parent_item) return;
-
-    Ref<VFXSceneNode> node = _get_node_for_item(item);
-    Ref<VFXSceneNode> new_parent = _get_node_for_item(new_parent_item);
-    if (node.is_null() || new_parent.is_null()) return;
-
-    // Prevent cycles
-    if (new_parent->is_descendant_of(node)) return;
-
-    // Do the reparent in scene
-    Ref<VFXSceneNode> old_parent = node->get_parent_node();
-    if (old_parent.is_valid()) {
-        old_parent->remove_child(node);
-    }
+void VFXSceneTreePanel::_reparent_node(int node_id, int parent_id) {
+    if (!scene.is_valid() || node_id == parent_id) return;
+    Ref<VFXSceneNode> node = _find_node(node_id), new_parent = _find_node(parent_id);
+    if (node.is_null() || new_parent.is_null() || node == scene->get_root() || new_parent->is_descendant_of(node)) return;
+    Ref<VFXSceneNode> old_parent = node->get_parent_node(); if (old_parent.is_null() || old_parent == new_parent) return;
+    const Transform3D world_before = node->get_global_transform();
+    const Transform3D parent_world = new_parent->get_global_transform();
+    old_parent->remove_child(node);
     new_parent->add_child(node);
     node->set_parent_node(new_parent.ptr());
-
+    node->set_local_transform(parent_world.affine_inverse() * world_before);
+    emit_signal("node_reparented", node, old_parent, new_parent);
     emit_signal("nodes_reparented");
-    mark_dirty();
+    _rebuild_rows();
+}
+
+void VFXSceneTreePanel::_on_search_changed(const String &text) { scroll_offset = 0.0f; _rebuild_rows(); }
+void VFXSceneTreePanel::_on_add_pressed() {
+    if (!scene.is_valid()) return;
+    Ref<VFXSceneNode> parent = _find_node(active_id);
+    if (parent.is_null()) parent = scene->get_root();
+    Ref<VFXSceneNode> node = scene->create_node("New Container", VFXSceneNode::NODE_EMPTY, parent);
+    if (node.is_valid()) { parent->set_expanded(true); _rebuild_rows(); _select_node(node->get_node_id(), false, false); _begin_rename(node->get_node_id()); }
+}
+
+void VFXSceneTreePanel::_gui_input(const Ref<InputEvent> &event) {
+    if (event.is_null()) return;
+    if (Ref<InputEventMouseButton> mb = event) {
+        const int button = mb->get_button_index(); const Vector2 pos = mb->get_position();
+        if (button == MOUSE_BUTTON_WHEEL_UP && mb->is_pressed()) { scroll_offset = MAX(0.0f, scroll_offset - row_height * 3.0f); queue_redraw(); accept_event(); return; }
+        if (button == MOUSE_BUTTON_WHEEL_DOWN && mb->is_pressed()) { scroll_offset = MIN(MAX(0.0f, content_height - (get_size().y - _tree_top())), scroll_offset + row_height * 3.0f); queue_redraw(); accept_event(); return; }
+        if (button == MOUSE_BUTTON_LEFT && mb->is_pressed()) {
+            grab_focus(); pointer_down = true; dragging = false; touch_scrolling = false; long_press_fired = false;
+            press_position = pos; last_pointer_position = pos; press_time_msec = Time::get_singleton()->get_ticks_msec();
+            pressed_id = _row_id_at(pos.y); drop_target_id = -1;
+            if (pressed_id >= 0) {
+                Ref<VFXSceneNode> node = _find_node(pressed_id);
+                const float local_x = pos.x - (7.0f + (node.is_valid() && node->get_parent_node() ? 18.0f : 0.0f));
+                const Row *row = nullptr; for (const Row &r : rows) if (r.node->get_node_id() == pressed_id) { row = &r; break; }
+                const float indent = row ? 7.0f + row->depth * indent_width : 7.0f;
+                if (node.is_valid() && node->get_child_count() > 0 && pos.x >= indent && pos.x < indent + 14.0f) {
+                    node->set_expanded(!node->get_expanded()); _rebuild_rows(); pressed_id = -1;
+                } else if (pos.x >= get_size().x - 27.0f) {
+                    node->set_visible(!node->get_visible()); emit_signal("node_visibility_changed", node); queue_redraw(); pressed_id = -1;
+                } else {
+                    Input *input = Input::get_singleton();
+                    const bool additive = input->is_key_pressed(KEY_CTRL) || input->is_key_pressed(KEY_META);
+                    const bool range = input->is_key_pressed(KEY_SHIFT);
+                    _select_node(pressed_id, additive, range);
+                }
+            } else if (pos.y >= _tree_top()) _clear_selection();
+            accept_event(); return;
+        }
+        if (button == MOUSE_BUTTON_LEFT && !mb->is_pressed()) {
+            if (pointer_down && dragging && drop_target_id >= 0 && pressed_id >= 0) _reparent_node(pressed_id, drop_target_id);
+            else if (pointer_down && !long_press_fired && pressed_id >= 0) {
+                const uint64_t now = Time::get_singleton()->get_ticks_msec();
+                if (last_tap_id == pressed_id && now - last_tap_time_msec < 360) _begin_rename(pressed_id);
+                last_tap_id = pressed_id; last_tap_time_msec = now;
+            }
+            pointer_down = false; dragging = false; pressed_id = -1; drop_target_id = -1; queue_redraw(); accept_event(); return;
+        }
+        if (button == MOUSE_BUTTON_RIGHT && mb->is_pressed()) { const int id = _row_id_at(pos.y); if (id >= 0) { _select_node(id, false, false); _show_context_menu(id, pos); } accept_event(); return; }
+    }
+    if (Ref<InputEventMouseMotion> mm = event) {
+        last_pointer_position = mm->get_position();
+        if (pointer_down && pressed_id >= 0 && press_position.distance_to(last_pointer_position) > 7.0f) {
+            dragging = true; if (long_press_fired && context_menu) context_menu->hide(); drop_target_id = _row_id_at(last_pointer_position.y);
+            if (drop_target_id == pressed_id) drop_target_id = -1;
+            queue_redraw(); accept_event();
+        }
+    }
+    if (Ref<InputEventScreenTouch> touch = event) {
+        Vector2 pos = touch->get_position();
+        if (touch->is_pressed()) {
+            pointer_down = true; touch_scrolling = false; dragging = false; long_press_fired = false;
+            press_position = pos; last_pointer_position = pos; press_time_msec = Time::get_singleton()->get_ticks_msec(); pressed_id = _row_id_at(pos.y);
+            if (pressed_id >= 0) _select_node(pressed_id, false, false);
+        } else {
+            if (pointer_down && dragging && drop_target_id >= 0 && pressed_id >= 0) _reparent_node(pressed_id, drop_target_id);
+            else if (pointer_down && long_press_fired) { /* context menu already shown */ }
+            else if (pointer_down && pressed_id >= 0) { const uint64_t now = Time::get_singleton()->get_ticks_msec(); if (last_tap_id == pressed_id && now - last_tap_time_msec < 360) _begin_rename(pressed_id); last_tap_id = pressed_id; last_tap_time_msec = now; }
+            pointer_down = false; dragging = false; pressed_id = -1; drop_target_id = -1;
+        }
+        accept_event(); return;
+    }
+    if (Ref<InputEventScreenDrag> drag = event) {
+        const Vector2 pos = drag->get_position(); const Vector2 delta = drag->get_relative(); last_pointer_position = pos;
+        if (pointer_down && press_position.distance_to(pos) > 10.0f) {
+            // A vertical gesture that starts in the row body scrolls; a horizontal/held gesture can reparent.
+            if (long_press_fired) { dragging = true; touch_scrolling = false; if (context_menu) context_menu->hide(); }
+            else if (!dragging && ABS(delta.y) > ABS(delta.x) * 1.25f && press_position.distance_to(pos) > 18.0f) touch_scrolling = true;
+            if (touch_scrolling) { scroll_offset = CLAMP(scroll_offset - delta.y, 0.0f, MAX(0.0f, content_height - (get_size().y - _tree_top()))); queue_redraw(); }
+            else { dragging = true; drop_target_id = _row_id_at(pos.y); if (drop_target_id == pressed_id) drop_target_id = -1; queue_redraw(); }
+        }
+        accept_event(); return;
+    }
+    if (Ref<InputEventKey> key = event) {
+        if (!key->is_pressed() || key->is_echo()) return;
+        if (key->get_keycode() == KEY_DELETE || key->get_keycode() == KEY_BACKSPACE) { _delete_selected(); accept_event(); }
+        else if (key->get_keycode() == KEY_F2 && active_id >= 0) { _begin_rename(active_id); accept_event(); }
+        else if (key->get_keycode() == KEY_LEFT && active_id >= 0) { Ref<VFXSceneNode> n = _find_node(active_id); if (n.is_valid()) { n->set_expanded(false); _rebuild_rows(); } accept_event(); }
+        else if (key->get_keycode() == KEY_RIGHT && active_id >= 0) { Ref<VFXSceneNode> n = _find_node(active_id); if (n.is_valid()) { n->set_expanded(true); _rebuild_rows(); } accept_event(); }
+    }
 }
