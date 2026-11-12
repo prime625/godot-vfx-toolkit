@@ -14,6 +14,7 @@ void VFXSceneTreePanel::_bind_methods() {
 
     ClassDB::bind_method(D_METHOD("mark_dirty"), &VFXSceneTreePanel::mark_dirty);
     ClassDB::bind_method(D_METHOD("force_rebuild"), &VFXSceneTreePanel::force_rebuild);
+    ClassDB::bind_method(D_METHOD("delete_selected_nodes"), &VFXSceneTreePanel::delete_selected_nodes);
 
     ADD_SIGNAL(MethodInfo("node_selected", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, "VFXSceneNode")));
     ADD_SIGNAL(MethodInfo("nodes_selected", PropertyInfo(Variant::ARRAY, "nodes")));
@@ -57,12 +58,6 @@ void VFXSceneTreePanel::_notification(int p_what) {
         toolbar->add_child(multi_btn);
         multi_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_multi_pressed));
 
-        delete_btn = memnew(Button);
-        delete_btn->set_text("−");
-        delete_btn->set_tooltip_text("Delete selected custom nodes");
-        toolbar->add_child(delete_btn);
-        delete_btn->connect("pressed", callable_mp(this, &VFXSceneTreePanel::_on_delete_pressed));
-
         reparent_btn = memnew(Button);
         reparent_btn->set_text("Parent");
         reparent_btn->set_toggle_mode(true);
@@ -78,7 +73,13 @@ void VFXSceneTreePanel::_notification(int p_what) {
         tree->set_select_mode(Tree::SELECT_MULTI);
         tree->set_allow_reselect(true);
         tree->set_allow_rmb_select(true);
+        tree->set_drop_mode_flags(Tree::DROP_MODE_ON_ITEM);
         add_child(tree);
+        // Forward Godot's native Tree drag-and-drop callbacks to this panel.
+        tree->set_drag_forwarding(
+            callable_mp(this, &VFXSceneTreePanel::_get_tree_drag_data),
+            callable_mp(this, &VFXSceneTreePanel::_can_drop_tree_data),
+            callable_mp(this, &VFXSceneTreePanel::_drop_tree_data));
 
         // Columns: [Name | Visibility button]
         tree->set_columns(2);
@@ -427,19 +428,24 @@ void VFXSceneTreePanel::_on_tree_item_mouse_selected(const Vector2& mouse_pos, i
         bool valid = destination.is_valid() && !selected.is_empty();
         for (int i = 0; valid && i < selected.size(); ++i) {
             Ref<VFXSceneNode> n = selected[i];
-            if (n == destination || destination->is_descendant_of(n)) valid = false;
+            if (!_can_reparent_node(n, destination)) valid = false;
         }
         if (valid) {
+            // If both an ancestor and its child are selected, move only the
+            // ancestor; the child will follow it and must not be detached twice.
+            Array top_level_nodes;
             for (int i = 0; i < selected.size(); ++i) {
-                Ref<VFXSceneNode> n = selected[i];
-                Ref<VFXSceneNode> old_parent = n->get_parent_node();
-                if (old_parent == destination) continue;
-                Transform3D world = n->get_global_transform();
-                if (old_parent.is_valid()) old_parent->remove_child(n);
-                destination->add_child(n);
-                n->set_parent_node(destination.ptr());
-                n->set_local_transform(destination->get_global_transform().affine_inverse() * world);
-                emit_signal("node_reparented", n, old_parent, destination);
+                Ref<VFXSceneNode> candidate = selected[i];
+                bool covered = false;
+                for (int j = 0; j < selected.size(); ++j) {
+                    if (i == j) continue;
+                    Ref<VFXSceneNode> other = selected[j];
+                    if (candidate->is_descendant_of(other)) { covered = true; break; }
+                }
+                if (!covered) top_level_nodes.append(candidate);
+            }
+            for (int i = 0; i < top_level_nodes.size(); ++i) {
+                _reparent_node_preserving_world(top_level_nodes[i], destination);
             }
             emit_signal("nodes_reparented");
             mark_dirty();
@@ -479,6 +485,10 @@ void VFXSceneTreePanel::_on_delete_pressed() {
     _delete_selected_nodes();
 }
 
+void VFXSceneTreePanel::delete_selected_nodes() {
+    _delete_selected_nodes();
+}
+
 void VFXSceneTreePanel::_delete_selected_nodes() {
     if (!scene.is_valid() || !tree) return;
     Array selected_nodes;
@@ -515,25 +525,121 @@ void VFXSceneTreePanel::_delete_selected_nodes() {
 
 // --- Drag & Drop Reparenting ---
 
-void VFXSceneTreePanel::_reparent_item(TreeItem* item, TreeItem* new_parent_item) {
-    if (!scene.is_valid() || !item || !new_parent_item) return;
-    if (item == new_parent_item) return;
+bool VFXSceneTreePanel::_can_reparent_node(const Ref<VFXSceneNode>& node, const Ref<VFXSceneNode>& new_parent) const {
+    if (node.is_null() || new_parent.is_null() || node == new_parent) return false;
+    if (!scene.is_valid() || node == scene->get_root()) return false;
+    return !new_parent->is_descendant_of(node);
+}
 
-    Ref<VFXSceneNode> node = _get_node_for_item(item);
-    Ref<VFXSceneNode> new_parent = _get_node_for_item(new_parent_item);
-    if (node.is_null() || new_parent.is_null()) return;
-
-    // Prevent cycles
-    if (new_parent->is_descendant_of(node)) return;
-
-    // Do the reparent in scene
+void VFXSceneTreePanel::_reparent_node_preserving_world(const Ref<VFXSceneNode>& node, const Ref<VFXSceneNode>& new_parent) {
+    if (!_can_reparent_node(node, new_parent)) return;
     Ref<VFXSceneNode> old_parent = node->get_parent_node();
-    Transform3D world = node->get_global_transform();
+    if (old_parent == new_parent) return;
+
+    Transform3D world_transform = node->get_global_transform();
     if (old_parent.is_valid()) old_parent->remove_child(node);
     new_parent->add_child(node);
     node->set_parent_node(new_parent.ptr());
-    node->set_local_transform(new_parent->get_global_transform().affine_inverse() * world);
+    node->set_local_transform(new_parent->get_global_transform().affine_inverse() * world_transform);
     emit_signal("node_reparented", node, old_parent, new_parent);
+}
+
+void VFXSceneTreePanel::_reparent_item(TreeItem* item, TreeItem* new_parent_item) {
+    if (!scene.is_valid() || !item || !new_parent_item) return;
+    Ref<VFXSceneNode> node = _get_node_for_item(item);
+    Ref<VFXSceneNode> new_parent = _get_node_for_item(new_parent_item);
+    if (!_can_reparent_node(node, new_parent)) return;
+    _reparent_node_preserving_world(node, new_parent);
     emit_signal("nodes_reparented");
     mark_dirty();
+}
+
+Variant VFXSceneTreePanel::_get_tree_drag_data(const Vector2& position) {
+    if (!tree || !scene.is_valid()) return Variant();
+    TreeItem* hovered = tree->get_item_at_position(position);
+    if (!hovered) return Variant();
+
+    Ref<VFXSceneNode> hovered_node = _get_node_for_item(hovered);
+    if (hovered_node.is_null()) return Variant();
+
+    Array ids;
+    bool hovered_is_selected = false;
+    TreeItem* selected_item = tree->get_selected();
+    while (selected_item) {
+        Ref<VFXSceneNode> selected_node = _get_node_for_item(selected_item);
+        if (selected_node.is_valid()) {
+            ids.append(selected_node->get_node_id());
+            if (selected_item == hovered) hovered_is_selected = true;
+        }
+        selected_item = tree->get_next_selected(selected_item);
+    }
+    if (!hovered_is_selected) {
+        ids.clear();
+        ids.append(hovered_node->get_node_id());
+    }
+
+    Dictionary payload;
+    payload["kind"] = "vfx_scene_nodes";
+    payload["ids"] = ids;
+    return payload;
+}
+
+bool VFXSceneTreePanel::_can_drop_tree_data(const Vector2& position, const Variant& data) const {
+    if (!tree || !scene.is_valid() || data.get_type() != Variant::DICTIONARY) return false;
+    Dictionary payload = data;
+    if (String(payload.get("kind", "")) != "vfx_scene_nodes") return false;
+    Array ids = payload.get("ids", Array());
+    if (ids.is_empty()) return false;
+
+    TreeItem* target_item = tree->get_item_at_position(position);
+    if (!target_item) return false;
+    Ref<VFXSceneNode> destination = const_cast<VFXSceneTreePanel*>(this)->_get_node_for_item(target_item);
+    if (destination.is_null()) return false;
+
+    Ref<VFXSceneNode> root = scene->get_root();
+    for (int i = 0; i < ids.size(); ++i) {
+        Ref<VFXSceneNode> moving = root->find_node_by_id((int)ids[i]);
+        if (moving.is_valid() && _can_reparent_node(moving, destination)) return true;
+    }
+    return false;
+}
+
+void VFXSceneTreePanel::_drop_tree_data(const Vector2& position, const Variant& data) {
+    if (!_can_drop_tree_data(position, data)) return;
+    Dictionary payload = data;
+    Array ids = payload.get("ids", Array());
+    TreeItem* target_item = tree->get_item_at_position(position);
+    Ref<VFXSceneNode> destination = _get_node_for_item(target_item);
+    Ref<VFXSceneNode> root = scene->get_root();
+
+    // Resolve first, then remove descendants whose ancestor is also dragged.
+    Array moving_nodes;
+    for (int i = 0; i < ids.size(); ++i) {
+        Ref<VFXSceneNode> n = root->find_node_by_id((int)ids[i]);
+        if (n.is_valid() && _can_reparent_node(n, destination)) moving_nodes.append(n);
+    }
+    Array top_level_nodes;
+    for (int i = 0; i < moving_nodes.size(); ++i) {
+        Ref<VFXSceneNode> candidate = moving_nodes[i];
+        bool covered = false;
+        for (int j = 0; j < moving_nodes.size(); ++j) {
+            if (i == j) continue;
+            Ref<VFXSceneNode> other = moving_nodes[j];
+            if (candidate->is_descendant_of(other)) { covered = true; break; }
+        }
+        if (!covered) top_level_nodes.append(candidate);
+    }
+
+    bool changed = false;
+    for (int i = 0; i < top_level_nodes.size(); ++i) {
+        Ref<VFXSceneNode> n = top_level_nodes[i];
+        Ref<VFXSceneNode> old_parent = n->get_parent_node();
+        if (old_parent == destination) continue;
+        _reparent_node_preserving_world(n, destination);
+        changed = true;
+    }
+    if (changed) {
+        emit_signal("nodes_reparented");
+        mark_dirty();
+    }
 }
