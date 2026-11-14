@@ -1075,7 +1075,8 @@ void VFXEditorNode::set_scene(const Ref<VFXScene>& p_scene) {
     _clear_scene_visuals();
     if (scene.is_valid()) {
         _ensure_scene_container();
-        if (!scene->get_root().is_valid()) scene->create_default_root();
+        // Keep an empty VFXScene genuinely empty. The first real scene node
+        // created by the user/importer becomes the root.
         if (mesh_instance) mesh_instance->set_visible(false);
     } else {
         if (mesh_instance) mesh_instance->set_visible(true);
