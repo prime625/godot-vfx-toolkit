@@ -124,11 +124,46 @@ VFXSceneNode* VFXSceneNode::get_parent_node() const { return parent_node; }
 void VFXSceneNode::_unparent() { parent_node = nullptr; }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
-    if (p_child.is_null() || p_child.ptr() == this) return;
-    if (is_descendant_of(p_child)) return;
-    if (p_child->parent_node != nullptr)
-        p_child->parent_node->remove_child(p_child);
+    if (p_child.is_null() || p_child.ptr() == this) {
+        return;
+    }
+
+    // Never create a cycle: this node cannot be placed below its own child.
+    if (is_descendant_of(p_child)) {
+        return;
+    }
+
+    // If the child is already parented here, do nothing. Removing and
+    // re-inserting it needlessly mutates the vector and can invalidate
+    // references held by tree traversal / editor code.
+    if (p_child->parent_node == this) {
+        return;
+    }
+
+    // Keep a strong reference to the previous parent while detaching.
+    // parent_node itself is a raw pointer, so don't rely on it remaining
+    // alive while the old parent's child array is modified.
+    VFXSceneNode *old_parent_ptr = p_child->parent_node;
+    if (old_parent_ptr != nullptr) {
+        Ref<VFXSceneNode> old_parent(old_parent_ptr);
+        if (old_parent.is_valid()) {
+            old_parent->remove_child(p_child);
+        } else {
+            p_child->parent_node = nullptr;
+        }
+    }
+
+    // remove_child() clears parent_node. Re-check before attaching to avoid
+    // leaving the child in an inconsistent state if it was not in the old
+    // parent's child list.
     p_child->parent_node = this;
+
+    // Defensively prevent duplicate entries in the destination's child list.
+    for (const Ref<VFXSceneNode> &existing : children) {
+        if (existing == p_child) {
+            return;
+        }
+    }
     children.push_back(p_child);
 }
 
