@@ -129,49 +129,43 @@ void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
         return;
     }
 
-    // Refuse the operation if the destination is already below the child.
-    // is_descendant_of() is cycle-safe, so even a damaged parent chain cannot
-    // recurse indefinitely while validating a drag-and-drop operation.
+    // Never create a cycle: this node cannot be placed below its own child.
     if (is_descendant_of(p_child)) {
         return;
     }
 
-    // Keep the destination's existing entry stable. A healthy hierarchy has
-    // both this vector entry and the matching parent pointer; repair the
-    // pointer rather than erasing/reinserting the Ref during a drag.
-    bool already_in_destination = false;
-    for (const Ref<VFXSceneNode> &existing : children) {
-        if (existing == p_child) {
-            already_in_destination = true;
-            break;
-        }
-    }
-
-    VFXSceneNode *old_parent_ptr = p_child->parent_node;
-    if (old_parent_ptr == this && already_in_destination) {
+    // If the child is already parented here, do nothing. Removing and
+    // re-inserting it needlessly mutates the vector and can invalidate
+    // references held by tree traversal / editor code.
+    if (p_child->parent_node == this) {
         return;
     }
 
-    // Hold the old parent strongly while its child vector is modified. The
-    // child argument itself is also a strong Ref for the entire operation.
-    if (old_parent_ptr != nullptr && old_parent_ptr != this) {
+    // Keep a strong reference to the previous parent while detaching.
+    // parent_node itself is a raw pointer, so don't rely on it remaining
+    // alive while the old parent's child array is modified.
+    VFXSceneNode *old_parent_ptr = p_child->parent_node;
+    if (old_parent_ptr != nullptr) {
         Ref<VFXSceneNode> old_parent(old_parent_ptr);
         if (old_parent.is_valid()) {
             old_parent->remove_child(p_child);
+        } else {
+            p_child->parent_node = nullptr;
         }
     }
 
-    // A stale parent pointer may refer to a parent whose child list no longer
-    // contains this node. Clear it before assigning the new relationship.
-    if (p_child->parent_node != nullptr && p_child->parent_node != this) {
-        p_child->parent_node = nullptr;
-    }
-
-    if (!already_in_destination) {
-        children.push_back(p_child);
-    }
-    // Publish the parent pointer only after the destination owns the Ref.
+    // remove_child() clears parent_node. Re-check before attaching to avoid
+    // leaving the child in an inconsistent state if it was not in the old
+    // parent's child list.
     p_child->parent_node = this;
+
+    // Defensively prevent duplicate entries in the destination's child list.
+    for (const Ref<VFXSceneNode> &existing : children) {
+        if (existing == p_child) {
+            return;
+        }
+    }
+    children.push_back(p_child);
 }
 
 void VFXSceneNode::remove_child(const Ref<VFXSceneNode>& p_child) {
@@ -231,22 +225,32 @@ bool VFXSceneNode::is_ancestor_of(const Ref<VFXSceneNode>& p_node) const {
 }
 
 bool VFXSceneNode::is_descendant_of(const Ref<VFXSceneNode>& p_node) const {
-    if (p_node.is_null()) return false;
+    if (p_node.is_null()) {
+        return false;
+    }
 
-    // Walk iteratively instead of recursively. Besides avoiding stack growth,
-    // the visited set makes this safe if an earlier bug left a cyclic parent
-    // chain behind. Treat a repeated pointer as an invalid/cyclic hierarchy.
-    std::unordered_set<const VFXSceneNode*> visited;
+    // Parent links are non-owning raw pointers. Walk them iteratively and
+    // remember every address so a corrupted/cyclic hierarchy cannot recurse
+    // forever and overflow the native stack (as seen in Android tombstones).
+    const VFXSceneNode *target = p_node.ptr();
     const VFXSceneNode *current = parent_node;
+    std::unordered_set<const VFXSceneNode *> visited;
+
     while (current != nullptr) {
-        if (current == p_node.ptr()) {
+        if (current == target) {
             return true;
         }
+
+        // Encountering an already-visited parent means the hierarchy is
+        // cyclic. Fail closed: report the relationship as unsafe so callers
+        // such as add_child() reject any further reparenting on this chain.
         if (!visited.insert(current).second) {
             return true;
         }
+
         current = current->parent_node;
     }
+
     return false;
 }
 
