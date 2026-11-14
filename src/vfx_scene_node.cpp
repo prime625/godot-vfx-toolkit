@@ -1,6 +1,6 @@
 #include "vfx_scene_node.h"
-#include <unordered_set>
 #include <godot_cpp/core/class_db.hpp>
+#include <unordered_set>
 
 using namespace godot;
 
@@ -129,49 +129,49 @@ void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
         return;
     }
 
-    // Reject a cycle before changing either parent's child array.
+    // Refuse the operation if the destination is already below the child.
+    // is_descendant_of() is cycle-safe, so even a damaged parent chain cannot
+    // recurse indefinitely while validating a drag-and-drop operation.
     if (is_descendant_of(p_child)) {
         return;
     }
 
-    VFXSceneNode *old_parent = p_child->parent_node;
-
-    // Repair/ignore an already-correct relationship. Do not erase and append
-    // the same Ref: doing so needlessly changes reference counts.
-    if (old_parent == this) {
-        for (const Ref<VFXSceneNode> &existing : children) {
-            if (existing.ptr() == p_child.ptr()) {
-                return;
-            }
-        }
-        // Parent pointer and child array disagree; repair the array below.
-        p_child->parent_node = nullptr;
-        old_parent = nullptr;
-    }
-
-    // The old parent is still owned by the scene hierarchy while this method
-    // runs. Use its borrowed pointer directly instead of manufacturing a new
-    // Ref from a raw pointer during a live hierarchy mutation.
-    if (old_parent != nullptr) {
-        old_parent->remove_child(p_child);
-
-        // If the old parent did not contain the child, remove_child() could
-        // not clear the raw pointer. Clear it before assigning the new parent.
-        if (p_child->parent_node == old_parent) {
-            p_child->parent_node = nullptr;
-        }
-    }
-
-    // Avoid duplicate Ref entries even if a stale child-array entry exists.
+    // Keep the destination's existing entry stable. A healthy hierarchy has
+    // both this vector entry and the matching parent pointer; repair the
+    // pointer rather than erasing/reinserting the Ref during a drag.
+    bool already_in_destination = false;
     for (const Ref<VFXSceneNode> &existing : children) {
-        if (existing.ptr() == p_child.ptr()) {
-            p_child->parent_node = this;
-            return;
+        if (existing == p_child) {
+            already_in_destination = true;
+            break;
         }
     }
 
+    VFXSceneNode *old_parent_ptr = p_child->parent_node;
+    if (old_parent_ptr == this && already_in_destination) {
+        return;
+    }
+
+    // Hold the old parent strongly while its child vector is modified. The
+    // child argument itself is also a strong Ref for the entire operation.
+    if (old_parent_ptr != nullptr && old_parent_ptr != this) {
+        Ref<VFXSceneNode> old_parent(old_parent_ptr);
+        if (old_parent.is_valid()) {
+            old_parent->remove_child(p_child);
+        }
+    }
+
+    // A stale parent pointer may refer to a parent whose child list no longer
+    // contains this node. Clear it before assigning the new relationship.
+    if (p_child->parent_node != nullptr && p_child->parent_node != this) {
+        p_child->parent_node = nullptr;
+    }
+
+    if (!already_in_destination) {
+        children.push_back(p_child);
+    }
+    // Publish the parent pointer only after the destination owns the Ref.
     p_child->parent_node = this;
-    children.push_back(p_child);
 }
 
 void VFXSceneNode::remove_child(const Ref<VFXSceneNode>& p_child) {
@@ -231,20 +231,19 @@ bool VFXSceneNode::is_ancestor_of(const Ref<VFXSceneNode>& p_node) const {
 }
 
 bool VFXSceneNode::is_descendant_of(const Ref<VFXSceneNode>& p_node) const {
-    if (p_node.is_null()) {
-        return false;
-    }
+    if (p_node.is_null()) return false;
 
-    // Walk iteratively and guard against an already-corrupt parent cycle.
-    // Recursive traversal would otherwise overflow the native stack.
-    std::unordered_set<const VFXSceneNode *> visited;
+    // Walk iteratively instead of recursively. Besides avoiding stack growth,
+    // the visited set makes this safe if an earlier bug left a cyclic parent
+    // chain behind. Treat a repeated pointer as an invalid/cyclic hierarchy.
+    std::unordered_set<const VFXSceneNode*> visited;
     const VFXSceneNode *current = parent_node;
     while (current != nullptr) {
         if (current == p_node.ptr()) {
             return true;
         }
         if (!visited.insert(current).second) {
-            return false;
+            return true;
         }
         current = current->parent_node;
     }
@@ -398,14 +397,8 @@ bool VFXSceneNode::is_visible() const {
 
 Transform3D VFXSceneNode::get_global_transform() const {
     Transform3D global = local_transform;
-    VFXSceneNode *p = parent_node;
-    std::unordered_set<const VFXSceneNode *> visited;
-
+    VFXSceneNode* p = parent_node;
     while (p != nullptr) {
-        // A malformed hierarchy must not cause an infinite native loop.
-        if (!visited.insert(p).second) {
-            break;
-        }
         global = p->local_transform * global;
         p = p->parent_node;
     }
