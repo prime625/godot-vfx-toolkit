@@ -178,8 +178,7 @@ void VFXScene::_import_godot_node(Node* godot_node, VFXSceneNode* parent) {
 Ref<VFXSceneNode> VFXScene::add_primitive(int primitive_type, const Dictionary& params,
                                           const Ref<VFXSceneNode>& parent,
                                           const Transform3D& transform) {
-    if (root.is_null()) create_default_root();
-
+    // No placeholder root: create_node() will make the first real object root.
     Ref<VFXMesh> vmesh = VFXPrimitives::create(primitive_type, params);
     if (vmesh.is_null()) return Ref<VFXSceneNode>();
 
@@ -201,8 +200,7 @@ Ref<VFXSceneNode> VFXScene::add_primitive(int primitive_type, const Dictionary& 
 bool VFXScene::import_glb_model(const String& filepath,
                                 const Ref<VFXSceneNode>& parent,
                                 const Transform3D& transform) {
-    if (root.is_null()) create_default_root();
-
+    // Imported content becomes the scene content; do not add a dummy root.
     Ref<VFXGLBImporter> importer;
     importer.instantiate();
     Dictionary result = importer->import_glb(filepath);
@@ -228,9 +226,18 @@ bool VFXScene::merge_scene(const Ref<VFXScene>& other,
                            const Ref<VFXSceneNode>& parent,
                            const Transform3D& transform) {
     if (other.is_null() || other->get_root().is_null()) return false;
-    if (root.is_null()) create_default_root();
+
+    // When this scene is empty, clone the imported root as the actual root.
+    if (root.is_null() && !parent.is_valid()) {
+        Ref<VFXSceneNode> imported_root = _clone_node_recursive(other->get_root());
+        if (imported_root.is_null()) return false;
+        _reassign_ids_recursive(imported_root);
+        root = imported_root;
+        return true;
+    }
 
     Ref<VFXSceneNode> target = parent.is_valid() ? parent : root;
+    if (target.is_null()) return false;
 
     Array other_children = other->get_root()->get_children();
     for (int i = 0; i < other_children.size(); i++) {
