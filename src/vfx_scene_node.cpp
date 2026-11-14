@@ -255,11 +255,22 @@ bool VFXSceneNode::is_descendant_of(const Ref<VFXSceneNode>& p_node) const {
 }
 
 Ref<VFXSceneNode> VFXSceneNode::_find_node_by_id_recursive(int p_id) const {
-    if (node_id == p_id) return Ref<VFXSceneNode>(const_cast<VFXSceneNode*>(this));
-    for (const auto& c : children) {
-        if (c.is_null()) continue;
-        Ref<VFXSceneNode> found = c->_find_node_by_id_recursive(p_id);
-        if (found.is_valid()) return found;
+    // Iterative traversal avoids native stack overflow and tolerates a
+    // malformed child graph without visiting the same object repeatedly.
+    std::vector<const VFXSceneNode *> pending;
+    std::unordered_set<const VFXSceneNode *> visited;
+    pending.push_back(this);
+
+    while (!pending.empty()) {
+        const VFXSceneNode *current = pending.back();
+        pending.pop_back();
+        if (current == nullptr || !visited.insert(current).second) continue;
+        if (current->node_id == p_id) {
+            return Ref<VFXSceneNode>(const_cast<VFXSceneNode *>(current));
+        }
+        for (auto it = current->children.rbegin(); it != current->children.rend(); ++it) {
+            if (it->is_valid()) pending.push_back(it->ptr());
+        }
     }
     return Ref<VFXSceneNode>();
 }
@@ -270,14 +281,20 @@ Ref<VFXSceneNode> VFXSceneNode::find_node_by_id(int p_id) const {
 
 void VFXSceneNode::_find_node_by_name_recursive(const String& p_name, Ref<VFXSceneNode>& r_result) const {
     if (!r_result.is_null()) return;
-    if (node_name == p_name) {
-        r_result = Ref<VFXSceneNode>(const_cast<VFXSceneNode*>(this));
-        return;
-    }
-    for (const auto& c : children) {
-        if (c.is_null()) continue;
-        c->_find_node_by_name_recursive(p_name, r_result);
-        if (!r_result.is_null()) return;
+    std::vector<const VFXSceneNode *> pending;
+    std::unordered_set<const VFXSceneNode *> visited;
+    pending.push_back(this);
+    while (!pending.empty()) {
+        const VFXSceneNode *current = pending.back();
+        pending.pop_back();
+        if (current == nullptr || !visited.insert(current).second) continue;
+        if (current->node_name == p_name) {
+            r_result = Ref<VFXSceneNode>(const_cast<VFXSceneNode *>(current));
+            return;
+        }
+        for (auto it = current->children.rbegin(); it != current->children.rend(); ++it) {
+            if (it->is_valid()) pending.push_back(it->ptr());
+        }
     }
 }
 
@@ -296,10 +313,20 @@ Ref<VFXSceneNode> VFXSceneNode::find_child_by_name(const String& p_name) const {
 }
 
 void VFXSceneNode::_get_all_descendants_recursive(Array& r_out) const {
-    for (const auto& c : children) {
-        if (c.is_null()) continue;
-        r_out.push_back(c);
-        c->_get_all_descendants_recursive(r_out);
+    // Kept for API/source compatibility; traversal itself is iterative.
+    std::vector<const VFXSceneNode *> pending;
+    std::unordered_set<const VFXSceneNode *> visited;
+    for (auto it = children.rbegin(); it != children.rend(); ++it) {
+        if (it->is_valid()) pending.push_back(it->ptr());
+    }
+    while (!pending.empty()) {
+        const VFXSceneNode *current = pending.back();
+        pending.pop_back();
+        if (current == nullptr || !visited.insert(current).second) continue;
+        r_out.push_back(Ref<VFXSceneNode>(const_cast<VFXSceneNode *>(current)));
+        for (auto it = current->children.rbegin(); it != current->children.rend(); ++it) {
+            if (it->is_valid()) pending.push_back(it->ptr());
+        }
     }
 }
 
@@ -401,8 +428,12 @@ bool VFXSceneNode::is_visible() const {
 
 Transform3D VFXSceneNode::get_global_transform() const {
     Transform3D global = local_transform;
-    VFXSceneNode* p = parent_node;
+    const VFXSceneNode *p = parent_node;
+    std::unordered_set<const VFXSceneNode *> visited;
     while (p != nullptr) {
+        // A repeated parent indicates a corrupt cycle. Stop instead of
+        // looping forever during drag/drop transform preservation.
+        if (!visited.insert(p).second) break;
         global = p->local_transform * global;
         p = p->parent_node;
     }
