@@ -9,6 +9,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -61,16 +62,25 @@ Ref<VFXSceneNode> VFXScene::create_node(const String& name, int type, const Ref<
 }
 
 void VFXScene::delete_node(const Ref<VFXSceneNode>& node) {
-    if (node.is_null()) return;
+    UtilityFunctions::print("[TREE-LIFE] DELETE ENTER node_id=", node.is_valid() ? node->get_node_id() : -999, " node_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(node.ptr())), " root_id=", root.is_valid() ? root->get_node_id() : -1);
+    if (node.is_null()) {
+        UtilityFunctions::print("[TREE-LIFE] DELETE NULL_NODE");
+        return;
+    }
     if (node == root) {
+        UtilityFunctions::print("[TREE-LIFE] DELETE ROOT node_id=", node->get_node_id());
         root = Ref<VFXSceneNode>();
+        UtilityFunctions::print("[TREE-LIFE] DELETE ROOT EXIT");
         return;
     }
     VFXSceneNode* p = node->get_parent_node();
+    UtilityFunctions::print("[TREE-LIFE] DELETE PARENT_PTR node_id=", node->get_node_id(), " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p)));
     if (p) {
         Ref<VFXSceneNode> pr(p);
-        pr->remove_child(node);
+        UtilityFunctions::print("[TREE-LIFE] DELETE REF_PARENT node_id=", pr.is_valid() ? pr->get_node_id() : -1);
+        if (pr.is_valid()) pr->remove_child(node);
     }
+    UtilityFunctions::print("[TREE-LIFE] DELETE EXIT node_id=", node->get_node_id());
 }
 
 void VFXScene::clear() {
