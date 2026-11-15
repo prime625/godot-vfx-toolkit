@@ -1,6 +1,7 @@
 #include "vfx_scene_node.h"
 #include <godot_cpp/core/class_db.hpp>
 #include <unordered_set>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -125,58 +126,97 @@ VFXSceneNode* VFXSceneNode::get_parent_node() const { return parent_node; }
 void VFXSceneNode::_unparent() { parent_node = nullptr; }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
+    auto describe = [](const VFXSceneNode *n) -> String {
+        if (n == nullptr) return String("<null>");
+        return String("id=") + String::num_int64(n->get_node_id()) +
+            " name='" + n->get_node_name() + "'" +
+            " ptr=" + String::num_uint64((uint64_t)n) +
+            " children=" + String::num_int64(n->get_child_count());
+    };
+
+    UtilityFunctions::print("[HIER] add_child ENTER target{", describe(this),
+        "} child{", p_child.is_valid() ? describe(p_child.ptr()) : String("<invalid>"), "}");
+
     if (p_child.is_null() || p_child.ptr() == this) {
+        UtilityFunctions::print("[HIER] add_child REJECT null/self");
         return;
     }
 
-    // Never create a cycle: this node cannot be placed below its own child.
     if (is_descendant_of(p_child)) {
+        UtilityFunctions::print("[HIER] add_child REJECT cycle target{", describe(this),
+            "} child{", describe(p_child.ptr()), "}");
         return;
     }
 
-    // If the child is already parented here, do nothing. Removing and
-    // re-inserting it needlessly mutates the vector and can invalidate
-    // references held by tree traversal / editor code.
     if (p_child->parent_node == this) {
+        UtilityFunctions::print("[HIER] add_child NO-OP already parented target{",
+            describe(this), "} child{", describe(p_child.ptr()), "}");
         return;
     }
 
-    // Keep a strong reference to the previous parent while detaching.
-    // parent_node itself is a raw pointer, so don't rely on it remaining
-    // alive while the old parent's child array is modified.
     VFXSceneNode *old_parent_ptr = p_child->parent_node;
+    UtilityFunctions::print("[HIER] add_child old_parent{", describe(old_parent_ptr), "}");
+
     if (old_parent_ptr != nullptr) {
         Ref<VFXSceneNode> old_parent(old_parent_ptr);
         if (old_parent.is_valid()) {
             old_parent->remove_child(p_child);
         } else {
+            UtilityFunctions::print("[HIER] add_child old parent Ref INVALID; clearing raw parent");
             p_child->parent_node = nullptr;
         }
     }
 
-    // remove_child() clears parent_node. Re-check before attaching to avoid
-    // leaving the child in an inconsistent state if it was not in the old
-    // parent's child list.
+    UtilityFunctions::print("[HIER] add_child AFTER DETACH target{", describe(this),
+        "} child{", describe(p_child.ptr()), "} child_parent{",
+        describe(p_child->parent_node), "}");
+
     p_child->parent_node = this;
 
-    // Defensively prevent duplicate entries in the destination's child list.
     for (const Ref<VFXSceneNode> &existing : children) {
         if (existing == p_child) {
+            UtilityFunctions::print("[HIER] add_child DUPLICATE destination entry; not pushing target{",
+                describe(this), "} child{", describe(p_child.ptr()), "}");
             return;
         }
     }
+
     children.push_back(p_child);
+    UtilityFunctions::print("[HIER] add_child EXIT target{", describe(this),
+        "} child{", describe(p_child.ptr()), "} child_parent{",
+        describe(p_child->parent_node), "} target_child_count=",
+        String::num_int64(get_child_count()));
 }
 
 void VFXSceneNode::remove_child(const Ref<VFXSceneNode>& p_child) {
-    if (p_child.is_null()) return;
+    UtilityFunctions::print("[HIER] remove_child ENTER parent{",
+        String("id=") + String::num_int64(get_node_id()) + " name='" + get_node_name() + "'",
+        "} child{",
+        p_child.is_valid()
+            ? String("id=") + String::num_int64(p_child->get_node_id()) + " name='" + p_child->get_node_name() + "'"
+            : String("<invalid>"),
+        "} count=", String::num_int64(get_child_count()));
+
+    if (p_child.is_null()) {
+        UtilityFunctions::print("[HIER] remove_child NULL child");
+        return;
+    }
+
     for (auto it = children.begin(); it != children.end(); ++it) {
         if ((*it).ptr() == p_child.ptr()) {
             (*it)->_unparent();
             children.erase(it);
+            UtilityFunctions::print("[HIER] remove_child REMOVED parent_id=",
+                String::num_int64(get_node_id()), " remaining=",
+                String::num_int64(get_child_count()), " child_parent_is_null=",
+                p_child->get_parent_node() == nullptr);
             return;
         }
     }
+
+    UtilityFunctions::print("[HIER] remove_child NOT FOUND parent_id=",
+        String::num_int64(get_node_id()), " child_id=",
+        String::num_int64(p_child->get_node_id()));
 }
 
 void VFXSceneNode::remove_child_by_id(int p_child_id) {
