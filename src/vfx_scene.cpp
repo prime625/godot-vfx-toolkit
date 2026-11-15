@@ -32,8 +32,15 @@ void VFXScene::_bind_methods() {
     ClassDB::bind_method(D_METHOD("reassign_ids", "node"), &VFXScene::reassign_ids);
 }
 
-VFXScene::VFXScene() {}
-VFXScene::~VFXScene() {}
+VFXScene::VFXScene() {
+    UtilityFunctions::print("[SCENE-OWNER] CTOR scene_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)));
+}
+VFXScene::~VFXScene() {
+    UtilityFunctions::print("[SCENE-OWNER] DTOR scene_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)),
+        " root_valid=", root.is_valid(),
+        " root_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(root.ptr())),
+        " root_id=", root.is_valid() ? root->get_node_id() : -1);
+}
 
 void VFXScene::create_default_root() {
     if (root.is_valid()) return;
@@ -42,7 +49,13 @@ void VFXScene::create_default_root() {
     root->set_node_type(VFXSceneNode::NODE_EMPTY);
 }
 
-Ref<VFXSceneNode> VFXScene::get_root() const { return root; }
+Ref<VFXSceneNode> VFXScene::get_root() const {
+    UtilityFunctions::print("[SCENE-OWNER] GET_ROOT scene_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)),
+        " root_valid=", root.is_valid(),
+        " root_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(root.ptr())),
+        " root_id=", root.is_valid() ? root->get_node_id() : -1);
+    return root;
+}
 
 Ref<VFXSceneNode> VFXScene::create_node(const String& name, int type, const Ref<VFXSceneNode>& parent) {
     Ref<VFXSceneNode> node;
@@ -80,7 +93,11 @@ void VFXScene::delete_node(const Ref<VFXSceneNode>& node) {
         UtilityFunctions::print("[TREE-LIFE] DELETE REF_PARENT node_id=", pr.is_valid() ? pr->get_node_id() : -1);
         if (pr.is_valid()) pr->remove_child(node);
     }
-    UtilityFunctions::print("[TREE-LIFE] DELETE EXIT node_id=", node->get_node_id());
+    UtilityFunctions::print("[TREE-LIFE] DELETE EXIT node_id=", node->get_node_id(),
+        " scene_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)),
+        " root_valid=", root.is_valid(),
+        " root_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(root.ptr())),
+        " root_id=", root.is_valid() ? root->get_node_id() : -1);
 }
 
 void VFXScene::clear() {
