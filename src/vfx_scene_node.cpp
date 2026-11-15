@@ -1,6 +1,5 @@
 #include "vfx_scene_node.h"
 #include <godot_cpp/core/class_db.hpp>
-#include <unordered_set>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
@@ -102,6 +101,7 @@ void VFXSceneNode::_bind_methods() {
 
 VFXSceneNode::VFXSceneNode() {}
 VFXSceneNode::~VFXSceneNode() {
+    UtilityFunctions::print("[TREE-LIFE] DTOR node_id=", node_id, " name=", node_name, " ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)), " child_count=", (int)children.size(), " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(parent_node)));
     for (auto& c : children) {
         if (c.is_valid()) c->parent_node = nullptr;
     }
@@ -126,97 +126,66 @@ VFXSceneNode* VFXSceneNode::get_parent_node() const { return parent_node; }
 void VFXSceneNode::_unparent() { parent_node = nullptr; }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
-    auto describe = [](const VFXSceneNode *n) -> String {
-        if (n == nullptr) return String("<null>");
-        return String("id=") + String::num_int64(n->get_node_id()) +
-            " name='" + n->get_node_name() + "'" +
-            " ptr=" + String::num_uint64((uint64_t)n) +
-            " children=" + String::num_int64(n->get_child_count());
-    };
-
-    UtilityFunctions::print("[HIER] add_child ENTER target{", describe(this),
-        "} child{", p_child.is_valid() ? describe(p_child.ptr()) : String("<invalid>"), "}");
-
+    UtilityFunctions::print("[TREE-LIFE] ADD ENTER parent_id=", node_id, " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)), " child_id=", p_child.is_valid() ? p_child->node_id : -999, " child_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p_child.ptr())), " count=", (int)children.size());
     if (p_child.is_null() || p_child.ptr() == this) {
-        UtilityFunctions::print("[HIER] add_child REJECT null/self");
         return;
     }
 
+    // Never create a cycle: this node cannot be placed below its own child.
     if (is_descendant_of(p_child)) {
-        UtilityFunctions::print("[HIER] add_child REJECT cycle target{", describe(this),
-            "} child{", describe(p_child.ptr()), "}");
         return;
     }
 
+    // If the child is already parented here, do nothing. Removing and
+    // re-inserting it needlessly mutates the vector and can invalidate
+    // references held by tree traversal / editor code.
     if (p_child->parent_node == this) {
-        UtilityFunctions::print("[HIER] add_child NO-OP already parented target{",
-            describe(this), "} child{", describe(p_child.ptr()), "}");
         return;
     }
 
+    // Keep a strong reference to the previous parent while detaching.
+    // parent_node itself is a raw pointer, so don't rely on it remaining
+    // alive while the old parent's child array is modified.
     VFXSceneNode *old_parent_ptr = p_child->parent_node;
-    UtilityFunctions::print("[HIER] add_child old_parent{", describe(old_parent_ptr), "}");
-
     if (old_parent_ptr != nullptr) {
         Ref<VFXSceneNode> old_parent(old_parent_ptr);
         if (old_parent.is_valid()) {
             old_parent->remove_child(p_child);
         } else {
-            UtilityFunctions::print("[HIER] add_child old parent Ref INVALID; clearing raw parent");
             p_child->parent_node = nullptr;
         }
     }
 
-    UtilityFunctions::print("[HIER] add_child AFTER DETACH target{", describe(this),
-        "} child{", describe(p_child.ptr()), "} child_parent{",
-        describe(p_child->parent_node), "}");
-
+    // remove_child() clears parent_node. Re-check before attaching to avoid
+    // leaving the child in an inconsistent state if it was not in the old
+    // parent's child list.
     p_child->parent_node = this;
 
+    // Defensively prevent duplicate entries in the destination's child list.
     for (const Ref<VFXSceneNode> &existing : children) {
         if (existing == p_child) {
-            UtilityFunctions::print("[HIER] add_child DUPLICATE destination entry; not pushing target{",
-                describe(this), "} child{", describe(p_child.ptr()), "}");
             return;
         }
     }
-
     children.push_back(p_child);
-    UtilityFunctions::print("[HIER] add_child EXIT target{", describe(this),
-        "} child{", describe(p_child.ptr()), "} child_parent{",
-        describe(p_child->parent_node), "} target_child_count=",
-        String::num_int64(get_child_count()));
+    UtilityFunctions::print("[TREE-LIFE] ADD EXIT parent_id=", node_id, " child_id=", p_child->node_id, " count=", (int)children.size(), " child_parent_id=", p_child->parent_node ? p_child->parent_node->node_id : -1);
 }
 
 void VFXSceneNode::remove_child(const Ref<VFXSceneNode>& p_child) {
-    UtilityFunctions::print("[HIER] remove_child ENTER parent{",
-        String("id=") + String::num_int64(get_node_id()) + " name='" + get_node_name() + "'",
-        "} child{",
-        p_child.is_valid()
-            ? String("id=") + String::num_int64(p_child->get_node_id()) + " name='" + p_child->get_node_name() + "'"
-            : String("<invalid>"),
-        "} count=", String::num_int64(get_child_count()));
-
+    UtilityFunctions::print("[TREE-LIFE] REMOVE ENTER parent_id=", node_id, " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)), " child_id=", p_child.is_valid() ? p_child->node_id : -999, " child_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p_child.ptr())), " count=", (int)children.size());
     if (p_child.is_null()) {
-        UtilityFunctions::print("[HIER] remove_child NULL child");
+        UtilityFunctions::print("[TREE-LIFE] REMOVE NULL_CHILD parent_id=", node_id);
         return;
     }
-
     for (auto it = children.begin(); it != children.end(); ++it) {
         if ((*it).ptr() == p_child.ptr()) {
             (*it)->_unparent();
             children.erase(it);
-            UtilityFunctions::print("[HIER] remove_child REMOVED parent_id=",
-                String::num_int64(get_node_id()), " remaining=",
-                String::num_int64(get_child_count()), " child_parent_is_null=",
-                p_child->get_parent_node() == nullptr);
+            UtilityFunctions::print("[TREE-LIFE] REMOVE EXIT parent_id=", node_id, " child_id=", p_child->node_id, " count=", (int)children.size(), " child_parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p_child->parent_node)));
             return;
         }
     }
-
-    UtilityFunctions::print("[HIER] remove_child NOT FOUND parent_id=",
-        String::num_int64(get_node_id()), " child_id=",
-        String::num_int64(p_child->get_node_id()));
+    UtilityFunctions::print("[TREE-LIFE] REMOVE NOT_FOUND parent_id=", node_id, " child_id=", p_child->node_id, " count=", (int)children.size());
 }
 
 void VFXSceneNode::remove_child_by_id(int p_child_id) {
@@ -265,52 +234,19 @@ bool VFXSceneNode::is_ancestor_of(const Ref<VFXSceneNode>& p_node) const {
 }
 
 bool VFXSceneNode::is_descendant_of(const Ref<VFXSceneNode>& p_node) const {
-    if (p_node.is_null()) {
-        return false;
-    }
-
-    // Parent links are non-owning raw pointers. Walk them iteratively and
-    // remember every address so a corrupted/cyclic hierarchy cannot recurse
-    // forever and overflow the native stack (as seen in Android tombstones).
-    const VFXSceneNode *target = p_node.ptr();
-    const VFXSceneNode *current = parent_node;
-    std::unordered_set<const VFXSceneNode *> visited;
-
-    while (current != nullptr) {
-        if (current == target) {
-            return true;
-        }
-
-        // Encountering an already-visited parent means the hierarchy is
-        // cyclic. Fail closed: report the relationship as unsafe so callers
-        // such as add_child() reject any further reparenting on this chain.
-        if (!visited.insert(current).second) {
-            return true;
-        }
-
-        current = current->parent_node;
-    }
-
+    if (p_node.is_null()) return false;
+    if (parent_node == p_node.ptr()) return true;
+    if (parent_node != nullptr)
+        return parent_node->is_descendant_of(p_node);
     return false;
 }
 
 Ref<VFXSceneNode> VFXSceneNode::_find_node_by_id_recursive(int p_id) const {
-    // Iterative traversal avoids native stack overflow and tolerates a
-    // malformed child graph without visiting the same object repeatedly.
-    std::vector<const VFXSceneNode *> pending;
-    std::unordered_set<const VFXSceneNode *> visited;
-    pending.push_back(this);
-
-    while (!pending.empty()) {
-        const VFXSceneNode *current = pending.back();
-        pending.pop_back();
-        if (current == nullptr || !visited.insert(current).second) continue;
-        if (current->node_id == p_id) {
-            return Ref<VFXSceneNode>(const_cast<VFXSceneNode *>(current));
-        }
-        for (auto it = current->children.rbegin(); it != current->children.rend(); ++it) {
-            if (it->is_valid()) pending.push_back(it->ptr());
-        }
+    if (node_id == p_id) return Ref<VFXSceneNode>(const_cast<VFXSceneNode*>(this));
+    for (const auto& c : children) {
+        if (c.is_null()) continue;
+        Ref<VFXSceneNode> found = c->_find_node_by_id_recursive(p_id);
+        if (found.is_valid()) return found;
     }
     return Ref<VFXSceneNode>();
 }
@@ -321,20 +257,14 @@ Ref<VFXSceneNode> VFXSceneNode::find_node_by_id(int p_id) const {
 
 void VFXSceneNode::_find_node_by_name_recursive(const String& p_name, Ref<VFXSceneNode>& r_result) const {
     if (!r_result.is_null()) return;
-    std::vector<const VFXSceneNode *> pending;
-    std::unordered_set<const VFXSceneNode *> visited;
-    pending.push_back(this);
-    while (!pending.empty()) {
-        const VFXSceneNode *current = pending.back();
-        pending.pop_back();
-        if (current == nullptr || !visited.insert(current).second) continue;
-        if (current->node_name == p_name) {
-            r_result = Ref<VFXSceneNode>(const_cast<VFXSceneNode *>(current));
-            return;
-        }
-        for (auto it = current->children.rbegin(); it != current->children.rend(); ++it) {
-            if (it->is_valid()) pending.push_back(it->ptr());
-        }
+    if (node_name == p_name) {
+        r_result = Ref<VFXSceneNode>(const_cast<VFXSceneNode*>(this));
+        return;
+    }
+    for (const auto& c : children) {
+        if (c.is_null()) continue;
+        c->_find_node_by_name_recursive(p_name, r_result);
+        if (!r_result.is_null()) return;
     }
 }
 
@@ -353,20 +283,10 @@ Ref<VFXSceneNode> VFXSceneNode::find_child_by_name(const String& p_name) const {
 }
 
 void VFXSceneNode::_get_all_descendants_recursive(Array& r_out) const {
-    // Kept for API/source compatibility; traversal itself is iterative.
-    std::vector<const VFXSceneNode *> pending;
-    std::unordered_set<const VFXSceneNode *> visited;
-    for (auto it = children.rbegin(); it != children.rend(); ++it) {
-        if (it->is_valid()) pending.push_back(it->ptr());
-    }
-    while (!pending.empty()) {
-        const VFXSceneNode *current = pending.back();
-        pending.pop_back();
-        if (current == nullptr || !visited.insert(current).second) continue;
-        r_out.push_back(Ref<VFXSceneNode>(const_cast<VFXSceneNode *>(current)));
-        for (auto it = current->children.rbegin(); it != current->children.rend(); ++it) {
-            if (it->is_valid()) pending.push_back(it->ptr());
-        }
+    for (const auto& c : children) {
+        if (c.is_null()) continue;
+        r_out.push_back(c);
+        c->_get_all_descendants_recursive(r_out);
     }
 }
 
@@ -468,12 +388,8 @@ bool VFXSceneNode::is_visible() const {
 
 Transform3D VFXSceneNode::get_global_transform() const {
     Transform3D global = local_transform;
-    const VFXSceneNode *p = parent_node;
-    std::unordered_set<const VFXSceneNode *> visited;
+    VFXSceneNode* p = parent_node;
     while (p != nullptr) {
-        // A repeated parent indicates a corrupt cycle. Stop instead of
-        // looping forever during drag/drop transform preservation.
-        if (!visited.insert(p).second) break;
         global = p->local_transform * global;
         p = p->parent_node;
     }
