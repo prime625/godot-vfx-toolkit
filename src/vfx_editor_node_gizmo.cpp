@@ -682,7 +682,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         gizmo_transform.set_basis(new_basis);
     }
 
-    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+    if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
 
     if (edit_mode != MODE_OBJECT && !mesh_edit_verts.empty() && mesh.is_valid()) {
         Transform3D delta = gizmo_transform * gizmo_drag_start_transform.affine_inverse();
@@ -780,7 +780,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
         skeleton->update_transforms();
         gizmo_transform = _get_bone_gizmo_transform(selected_bone);
-        if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+        if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
         _build_skeleton_mesh();
 
         // Reskin: scene-mode visuals are only rebuilt via _sync_scene_visuals()
@@ -839,7 +839,7 @@ void VFXEditorNode::gizmo_end_drag() {
     // Resync gizmo transform with actual object/bone/mesh selection
     _update_gizmo_for_selection();
     _build_gizmo_mesh();
-    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+    if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
     _update_origin_indicator();
     _update_scene_visual_transforms();
 }
@@ -1041,7 +1041,7 @@ void VFXEditorNode::_build_gizmo_mesh() {
     mat->set_cull_mode(StandardMaterial3D::CULL_DISABLED);
     gizmo_node->set_material_override(mat);
     gizmo_node->set_mesh(am);
-    gizmo_node->set_transform(_get_visual_gizmo_transform());
+    gizmo_node->set_global_transform(_get_visual_gizmo_transform());
 }
 
 
