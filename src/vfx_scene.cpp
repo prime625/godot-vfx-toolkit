@@ -73,6 +73,12 @@ Ref<VFXSceneNode> VFXScene::create_node(const String& name, int type, const Ref<
 }
 
 void VFXScene::delete_node(const Ref<VFXSceneNode>& node) {
+    // Keep the scene root, target node and parent alive for the entire detach.
+    // The hierarchy stores children as Ref<> but parent_node is a raw pointer.
+    // A GDScript call can otherwise expose a last-reference release while the
+    // parent child-array is being mutated.
+    Ref<VFXSceneNode> root_keep_alive = root;
+    Ref<VFXSceneNode> node_keep_alive = node;
     UtilityFunctions::print("[REF-COUNT] DELETE ENTER node_id=", node.is_valid() ? node->get_node_id() : -999,
         " node_refs=", node.is_valid() ? node->get_reference_count() : -1,
         " root_id=", root.is_valid() ? root->get_node_id() : -1,
@@ -103,6 +109,14 @@ void VFXScene::delete_node(const Ref<VFXSceneNode>& node) {
                 " node_refs=", node->get_reference_count());
         }
     }
+
+    // Deleting a non-root node must never alter the scene's root ownership.
+    // Restore from the strong local guard if an unexpected callback cleared it.
+    if (root_keep_alive.is_valid() && root.is_null()) {
+        root = root_keep_alive;
+        UtilityFunctions::print("[TREE-LIFE] DELETE RESTORED_ROOT id=", root->get_node_id());
+    }
+
     UtilityFunctions::print("[REF-COUNT] DELETE EXIT node_id=", node->get_node_id(),
         " node_refs=", node->get_reference_count(),
         " root_refs=", root.is_valid() ? root->get_reference_count() : -1,
