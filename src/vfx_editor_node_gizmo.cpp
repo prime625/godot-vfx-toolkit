@@ -801,6 +801,11 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             local = parent->get_global_transform().affine_inverse() * global;
         }
         active_scene_node->set_local_transform(local);
+        // Read back the authoritative scene-node world transform after the
+        // parent-local conversion. The gizmo, pivot marker, mesh visuals and
+        // viewport raycast must all follow this exact transform.
+        gizmo_transform = active_scene_node->get_global_transform();
+        global = gizmo_transform;
 
         // Multi-select: every other selected node gets the same world-space
         // delta (delta = new_active_global * active_start^-1), converted
@@ -823,9 +828,11 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
         // Immediate transform update — children follow parent without frame delay
         _update_scene_visual_transforms();
-        // The pivot marker is a separate viewport object; keep it attached to
-        // the selected node's world-space origin during the same drag frame.
-        _update_origin_indicator();
+        if (gizmo_node) {
+            gizmo_node->set_global_transform(_get_visual_gizmo_transform());
+        }
+        // _update_scene_visual_transforms() also refreshes the pivot marker,
+        // keeping it synchronized with the visible mesh during every drag.
         mark_scene_dirty();
         return;
     }
