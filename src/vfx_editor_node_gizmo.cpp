@@ -823,6 +823,9 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
 
         // Immediate transform update — children follow parent without frame delay
         _update_scene_visual_transforms();
+        // The pivot marker is a separate viewport object; keep it attached to
+        // the selected node's world-space origin during the same drag frame.
+        _update_origin_indicator();
         mark_scene_dirty();
         return;
     }
@@ -837,6 +840,8 @@ void VFXEditorNode::gizmo_end_drag() {
     _update_gizmo_for_selection();
     _build_gizmo_mesh();
     if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+    _update_origin_indicator();
+    _update_scene_visual_transforms();
 }
 
 bool VFXEditorNode::is_gizmo_dragging() const {
