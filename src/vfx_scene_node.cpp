@@ -26,6 +26,7 @@ void VFXSceneNode::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::INT, "node_type"), "set_node_type", "get_node_type");
 
     ClassDB::bind_method(D_METHOD("get_parent_node"), &VFXSceneNode::get_parent_node);
+    ClassDB::bind_method(D_METHOD("get_parent_ref"), &VFXSceneNode::get_parent_ref);
 
     ClassDB::bind_method(D_METHOD("add_child", "child"), &VFXSceneNode::add_child);
     ClassDB::bind_method(D_METHOD("remove_child", "child"), &VFXSceneNode::remove_child);
@@ -122,16 +123,16 @@ int VFXSceneNode::get_node_type() const { return static_cast<int>(node_type); }
 
 void VFXSceneNode::set_parent_node(VFXSceneNode* p_parent) { parent_node = p_parent; }
 VFXSceneNode* VFXSceneNode::get_parent_node() const { return parent_node; }
+Ref<VFXSceneNode> VFXSceneNode::get_parent_ref() const {
+    // Returning Ref<> ensures the caller owns the parent for the full lifetime
+    // of its GDScript variable / C++ temporary. Never expose the raw back-pointer
+    // to GDScript: it is non-owning and can otherwise outlive its parent.
+    return parent_node ? Ref<VFXSceneNode>(parent_node) : Ref<VFXSceneNode>();
+}
 
 void VFXSceneNode::_unparent() { parent_node = nullptr; }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
-    // Hold both endpoints strongly during detach + attach. parent_node is a
-    // raw back-pointer and removing the old parent's Ref from its child list
-    // can otherwise release an endpoint during a reparent operation.
-    Ref<VFXSceneNode> destination_keep_alive(this);
-    Ref<VFXSceneNode> child_keep_alive = p_child;
-
     UtilityFunctions::print("[REF-COUNT] ADD ENTER parent_id=", node_id,
         " parent_refs=", get_reference_count(),
         " child_id=", p_child.is_valid() ? p_child->node_id : -999,
