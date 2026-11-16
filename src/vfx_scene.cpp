@@ -73,7 +73,10 @@ Ref<VFXSceneNode> VFXScene::create_node(const String& name, int type, const Ref<
 }
 
 void VFXScene::delete_node(const Ref<VFXSceneNode>& node) {
-    UtilityFunctions::print("[TREE-LIFE] DELETE ENTER node_id=", node.is_valid() ? node->get_node_id() : -999, " node_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(node.ptr())), " root_id=", root.is_valid() ? root->get_node_id() : -1);
+    UtilityFunctions::print("[REF-COUNT] DELETE ENTER node_id=", node.is_valid() ? node->get_node_id() : -999,
+        " node_refs=", node.is_valid() ? node->get_reference_count() : -1,
+        " root_id=", root.is_valid() ? root->get_node_id() : -1,
+        " root_refs=", root.is_valid() ? root->get_reference_count() : -1);
     if (node.is_null()) {
         UtilityFunctions::print("[TREE-LIFE] DELETE NULL_NODE");
         return;
@@ -88,10 +91,21 @@ void VFXScene::delete_node(const Ref<VFXSceneNode>& node) {
     UtilityFunctions::print("[TREE-LIFE] DELETE PARENT_PTR node_id=", node->get_node_id(), " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p)));
     if (p) {
         Ref<VFXSceneNode> pr(p);
-        UtilityFunctions::print("[TREE-LIFE] DELETE REF_PARENT node_id=", pr.is_valid() ? pr->get_node_id() : -1);
-        if (pr.is_valid()) pr->remove_child(node);
+        UtilityFunctions::print("[REF-COUNT] DELETE PARENT node_id=", node->get_node_id(),
+            " parent_valid=", pr.is_valid(),
+            " parent_id=", pr.is_valid() ? pr->get_node_id() : -1,
+            " parent_refs=", pr.is_valid() ? pr->get_reference_count() : -1,
+            " node_refs=", node->get_reference_count());
+        if (pr.is_valid()) {
+            pr->remove_child(node);
+            UtilityFunctions::print("[REF-COUNT] DELETE AFTER_REMOVE parent_id=", pr->get_node_id(),
+                " parent_refs=", pr->get_reference_count(),
+                " node_refs=", node->get_reference_count());
+        }
     }
-    UtilityFunctions::print("[TREE-LIFE] DELETE EXIT node_id=", node->get_node_id(),
+    UtilityFunctions::print("[REF-COUNT] DELETE EXIT node_id=", node->get_node_id(),
+        " node_refs=", node->get_reference_count(),
+        " root_refs=", root.is_valid() ? root->get_reference_count() : -1,
         " scene_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)),
         " root_valid=", root.is_valid(),
         " root_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(root.ptr())),
