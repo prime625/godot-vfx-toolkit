@@ -126,7 +126,11 @@ VFXSceneNode* VFXSceneNode::get_parent_node() const { return parent_node; }
 void VFXSceneNode::_unparent() { parent_node = nullptr; }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
-    UtilityFunctions::print("[TREE-LIFE] ADD ENTER parent_id=", node_id, " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)), " child_id=", p_child.is_valid() ? p_child->node_id : -999, " child_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p_child.ptr())), " count=", (int)children.size());
+    UtilityFunctions::print("[REF-COUNT] ADD ENTER parent_id=", node_id,
+        " parent_refs=", get_reference_count(),
+        " child_id=", p_child.is_valid() ? p_child->node_id : -999,
+        " child_refs=", p_child.is_valid() ? p_child->get_reference_count() : -1,
+        " children=", (int)children.size());
     if (p_child.is_null() || p_child.ptr() == this) {
         return;
     }
@@ -149,8 +153,16 @@ void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
     VFXSceneNode *old_parent_ptr = p_child->parent_node;
     if (old_parent_ptr != nullptr) {
         Ref<VFXSceneNode> old_parent(old_parent_ptr);
+        UtilityFunctions::print("[REF-COUNT] ADD OLD_PARENT child_id=", p_child->node_id,
+            " old_parent_valid=", old_parent.is_valid(),
+            " old_parent_id=", old_parent.is_valid() ? old_parent->node_id : -1,
+            " old_parent_refs=", old_parent.is_valid() ? old_parent->get_reference_count() : -1,
+            " child_refs=", p_child->get_reference_count());
         if (old_parent.is_valid()) {
             old_parent->remove_child(p_child);
+            UtilityFunctions::print("[REF-COUNT] ADD AFTER_OLD_REMOVE old_parent_id=", old_parent->node_id,
+                " old_parent_refs=", old_parent->get_reference_count(),
+                " child_refs=", p_child->get_reference_count());
         } else {
             p_child->parent_node = nullptr;
         }
@@ -168,11 +180,17 @@ void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
         }
     }
     children.push_back(p_child);
-    UtilityFunctions::print("[TREE-LIFE] ADD EXIT parent_id=", node_id, " child_id=", p_child->node_id, " count=", (int)children.size(), " child_parent_id=", p_child->parent_node ? p_child->parent_node->node_id : -1);
+    UtilityFunctions::print("[REF-COUNT] ADD EXIT parent_id=", node_id,
+        " parent_refs=", get_reference_count(), " child_id=", p_child->node_id,
+        " child_refs=", p_child->get_reference_count(), " children=", (int)children.size());
 }
 
 void VFXSceneNode::remove_child(const Ref<VFXSceneNode>& p_child) {
-    UtilityFunctions::print("[TREE-LIFE] REMOVE ENTER parent_id=", node_id, " parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)), " child_id=", p_child.is_valid() ? p_child->node_id : -999, " child_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p_child.ptr())), " count=", (int)children.size());
+    UtilityFunctions::print("[REF-COUNT] REMOVE ENTER parent_id=", node_id,
+        " parent_refs=", get_reference_count(),
+        " child_id=", p_child.is_valid() ? p_child->node_id : -999,
+        " child_refs=", p_child.is_valid() ? p_child->get_reference_count() : -1,
+        " children=", (int)children.size());
     if (p_child.is_null()) {
         UtilityFunctions::print("[TREE-LIFE] REMOVE NULL_CHILD parent_id=", node_id);
         return;
@@ -180,8 +198,13 @@ void VFXSceneNode::remove_child(const Ref<VFXSceneNode>& p_child) {
     for (auto it = children.begin(); it != children.end(); ++it) {
         if ((*it).ptr() == p_child.ptr()) {
             (*it)->_unparent();
+            UtilityFunctions::print("[REF-COUNT] REMOVE BEFORE_ERASE parent_id=", node_id,
+                " parent_refs=", get_reference_count(), " child_id=", p_child->node_id,
+                " child_refs=", p_child->get_reference_count(), " children=", (int)children.size());
             children.erase(it);
-            UtilityFunctions::print("[TREE-LIFE] REMOVE EXIT parent_id=", node_id, " child_id=", p_child->node_id, " count=", (int)children.size(), " child_parent_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(p_child->parent_node)));
+            UtilityFunctions::print("[REF-COUNT] REMOVE AFTER_ERASE parent_id=", node_id,
+                " parent_refs=", get_reference_count(), " child_id=", p_child->node_id,
+                " child_refs=", p_child->get_reference_count(), " children=", (int)children.size());
             return;
         }
     }
