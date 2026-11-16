@@ -1094,8 +1094,16 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
 
     if (active_scene_node.is_null()) {
         clear_selection();
+        // Do not leave the previous object's data wired into edit tools after
+        // the active scene-tree item is deleted or deselected.
+        set_vfx_mesh(Ref<VFXMesh>());
+        set_vfx_skeleton(Ref<VFXSkeleton>());
+        set_vfx_skin(Ref<VFXSkin>());
+        set_vfx_animator(Ref<VFXAnimator>());
+        set_gizmo_transform(Transform3D());
         _update_gizmo_visibility();
         _update_origin_indicator();
+        _update_scene_visual_transforms();
         mark_scene_dirty();
         emit_signal("mesh_changed", Ref<VFXMesh>());
         return;
@@ -1364,7 +1372,14 @@ Ref<ArrayMesh> VFXEditorNode::_build_array_mesh_for_node(const Ref<VFXMesh>& p_m
 
 void VFXEditorNode::_sync_scene_visuals() {
     if (scene.is_null() || !scene_container) return;
-    if (!scene->get_root().is_valid()) return;
+    if (!scene->get_root().is_valid()) {
+        // Deleting the root empties the scene. Hide every cached viewport mesh
+        // instead of returning early and leaving orphaned geometry on screen.
+        for (const auto& pair : scene_visuals) {
+            if (pair.value) pair.value->set_visible(false);
+        }
+        return;
+    }
 
     std::unordered_set<uint64_t> used;
     _sync_node_visual_recursive(scene->get_root(), used);
