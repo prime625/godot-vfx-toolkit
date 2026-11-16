@@ -290,8 +290,8 @@ void VFXEditorNode::_notification(int p_what) {
         _ensure_gizmo_node();
         _ensure_skeleton_visual();
         _ensure_selection_visual();
-        _ensure_origin_indicator();
         _ensure_scene_container();
+        _ensure_origin_indicator();
 
         // Create scene tree panel (hidden by default, UI script toggles visibility)
         /*
@@ -424,7 +424,11 @@ void VFXEditorNode::_ensure_origin_indicator() {
         origin_indicator->set_cast_shadows_setting(GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
         origin_indicator->set_visible(false);
 
-        add_child(origin_indicator);
+        // Keep the pivot marker in the same transform space as scene mesh
+        // visuals. Both are children of SceneContainer and are driven from
+        // VFXSceneNode global transforms.
+        _ensure_scene_container();
+        scene_container->add_child(origin_indicator);
         origin_indicator->set_owner(this);
     }
 }
@@ -433,12 +437,9 @@ void VFXEditorNode::_update_origin_indicator() {
     if (!origin_indicator) return;
     if (active_scene_node.is_valid() && edit_mode == MODE_OBJECT) {
         Vector3 pos = active_scene_node->get_global_transform().get_origin();
-        // pos is the VFX scene node's WORLD-space origin. The indicator is a
-        // child of the editor viewport node, so assigning it as a local
-        // position makes it drift whenever the viewport node has a transform.
-        Transform3D indicator_world = origin_indicator->get_global_transform();
-        indicator_world.set_origin(pos);
-        origin_indicator->set_global_transform(indicator_world);
+        // Match the marker to the same world-space origin used by the
+        // corresponding SceneVisual mesh instance.
+        origin_indicator->set_global_position(pos);
 
         if (camera) {
             float dist = camera->get_global_transform().get_origin().distance_to(pos);
@@ -1003,6 +1004,7 @@ int VFXEditorNode::get_gizmo_mode() const { return gizmo_mode; }
 void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
     gizmo_transform = t;
     if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
+    _update_origin_indicator();
 }
 
 Transform3D VFXEditorNode::get_gizmo_transform() const { return gizmo_transform; }
@@ -1025,8 +1027,13 @@ void VFXEditorNode::set_selected_bone(int idx) {
             gizmo_node->set_global_transform(_get_visual_gizmo_transform());
             _build_gizmo_mesh();
         }
-    } else if (gizmo_node) {
-        gizmo_node->set_visible(false);
+    } else {
+        // Clearing a bone selection must not hide the ordinary object gizmo.
+        // Scene-tree selection calls set_selected_bone(-1) after selecting its
+        // active node, so visibility must be derived from the remaining
+        // object/mesh selection rather than forced off here.
+        _update_gizmo_for_selection();
+        _update_gizmo_visibility();
     }
     _build_skeleton_mesh();
 }
@@ -1218,6 +1225,13 @@ bool VFXEditorNode::import_model(const String& filepath, const Ref<VFXSceneNode>
 }
 
 Ref<VFXSceneNode> VFXEditorNode::raycast_scene_node(const Vector3& ray_origin, const Vector3& ray_dir) {
+    // Bring the rendered instances and pivot marker up to date before picking.
+    // The raycast below uses each VFXSceneNode global transform, so this keeps
+    // the visible geometry and the hit-test on the same frame of transforms.
+    if (scene.is_valid()) {
+        _update_scene_visual_transforms();
+    }
+
     float closest = 1e20f;
     Ref<VFXSceneNode> best;
 
@@ -1410,6 +1424,9 @@ void VFXEditorNode::_update_scene_visual_transforms() {
     if (scene.is_null() || !scene_container) return;
     if (!scene->get_root().is_valid()) return;
     _update_scene_visual_transforms_recursive(scene->get_root());
+    // The pivot is a separate MeshInstance3D; refresh it from the same active
+    // node transform after every scene-visual synchronization.
+    _update_origin_indicator();
 }
 
 void VFXEditorNode::_update_scene_visual_transforms_recursive(const Ref<VFXSceneNode>& p_node) {
