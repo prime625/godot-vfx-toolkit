@@ -286,7 +286,7 @@ void VFXEditorNode::_update_gizmo_for_selection() {
    }
 
    if (gizmo_node) {
-       gizmo_node->set_transform(_get_visual_gizmo_transform());
+       gizmo_node->set_global_transform(_get_visual_gizmo_transform());
        _build_gizmo_mesh();
    }
 }
