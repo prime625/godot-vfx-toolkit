@@ -77,7 +77,8 @@ public:
 
     // Hierarchy
     void set_parent_node(VFXSceneNode* p_parent);
-    VFXSceneNode* get_parent_node() const;
+    VFXSceneNode* get_parent_node() const; // Internal/raw compatibility accessor. Do not expose to GDScript.
+    Ref<VFXSceneNode> get_parent_ref() const; // Safe reference-counted accessor for GDScript.
     void add_child(const Ref<VFXSceneNode>& p_child);
     void remove_child(const Ref<VFXSceneNode>& p_child);
     void remove_child_by_id(int p_child_id);
