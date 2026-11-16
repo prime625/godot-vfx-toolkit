@@ -433,7 +433,12 @@ void VFXEditorNode::_update_origin_indicator() {
     if (!origin_indicator) return;
     if (active_scene_node.is_valid() && edit_mode == MODE_OBJECT) {
         Vector3 pos = active_scene_node->get_global_transform().get_origin();
-        origin_indicator->set_position(pos);
+        // pos is the VFX scene node's WORLD-space origin. The indicator is a
+        // child of the editor viewport node, so assigning it as a local
+        // position makes it drift whenever the viewport node has a transform.
+        Transform3D indicator_world = origin_indicator->get_global_transform();
+        indicator_world.set_origin(pos);
+        origin_indicator->set_global_transform(indicator_world);
 
         if (camera) {
             float dist = camera->get_global_transform().get_origin().distance_to(pos);
@@ -539,7 +544,7 @@ void VFXEditorNode::_update_gizmo_scale() {
         gizmo_screen_scale = world_size;
         if (gizmo_node && gizmo_node->is_visible()) {
             _build_gizmo_mesh();
-            gizmo_node->set_transform(_get_visual_gizmo_transform());
+            gizmo_node->set_global_transform(_get_visual_gizmo_transform());
         }
     } else {
         gizmo_screen_scale = world_size;
@@ -555,7 +560,16 @@ void VFXEditorNode::_update_gizmo_visibility() {
     if (!gizmo_node) return;
     bool has_mesh_selection = selected_vertex >= 0 || selected_edge >= 0 || selected_face >= 0 ||
                               !selected_vertices.empty() || !selected_edges.empty() || !selected_faces.empty();
-    bool show = !gizmo_locked && (active_scene_node.is_valid() || has_mesh_selection || selected_bone >= 0);
+    // Object gizmos belong to scene nodes, not just mesh nodes. Empty,
+    // transform-only and armature parents must expose the same object gizmo.
+    bool has_object_target = (edit_mode == MODE_OBJECT && active_scene_node.is_valid());
+    bool show = !gizmo_locked && (has_object_target || has_mesh_selection || selected_bone >= 0);
+    if (show && has_object_target) {
+        gizmo_node->set_global_transform(_get_visual_gizmo_transform());
+        // Rebuild here because selection can change from a mesh node to an
+        // empty node without changing edit mode or the gizmo mode.
+        _build_gizmo_mesh();
+    }
     gizmo_node->set_visible(show);
 }
 
@@ -988,7 +1002,7 @@ int VFXEditorNode::get_gizmo_mode() const { return gizmo_mode; }
 
 void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
     gizmo_transform = t;
-    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+    if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
 }
 
 Transform3D VFXEditorNode::get_gizmo_transform() const { return gizmo_transform; }
@@ -1008,7 +1022,7 @@ void VFXEditorNode::set_selected_bone(int idx) {
     if (skeleton.is_valid() && idx >= 0) {
         gizmo_transform = _get_bone_gizmo_transform(idx);
         if (gizmo_node) {
-            gizmo_node->set_transform(_get_visual_gizmo_transform());
+            gizmo_node->set_global_transform(_get_visual_gizmo_transform());
             _build_gizmo_mesh();
         }
     } else if (gizmo_node) {
@@ -1405,7 +1419,7 @@ void VFXEditorNode::_update_scene_visual_transforms_recursive(const Ref<VFXScene
         uint64_t id = p_node->get_instance_id();
         MeshInstance3D** ptr = scene_visuals.getptr(id);
         if (ptr) {
-            (*ptr)->set_transform(p_node->get_global_transform());
+            (*ptr)->set_global_transform(p_node->get_global_transform());
         }
     }
 
@@ -1424,7 +1438,7 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 
         MeshInstance3D* visual = _get_scene_visual(id);
         visual->set_visible(true);
-        visual->set_transform(p_node->get_global_transform());
+        visual->set_global_transform(p_node->get_global_transform());
 
         Ref<VFXMesh> vmesh = p_node->get_mesh();
         Ref<ArrayMesh> am = _build_array_mesh_for_node(vmesh, p_node->get_skeleton(), p_node->get_skin(), show_weights, visualize_bone);
@@ -1748,7 +1762,7 @@ float VFXEditorNode::get_gizmo_priority() const { return gizmo_priority; }
 
 void VFXEditorNode::set_gizmo_screen_scale(float scale) {
     gizmo_screen_scale = scale;
-    if (gizmo_node) gizmo_node->set_transform(_get_visual_gizmo_transform());
+    if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
 }
 float VFXEditorNode::get_gizmo_screen_scale() const {
     return gizmo_screen_scale;
