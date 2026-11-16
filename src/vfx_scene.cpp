@@ -50,10 +50,8 @@ void VFXScene::create_default_root() {
 }
 
 Ref<VFXSceneNode> VFXScene::get_root() const {
-    UtilityFunctions::print("[SCENE-OWNER] GET_ROOT scene_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(this)),
-        " root_valid=", root.is_valid(),
-        " root_ptr=", String::num_uint64(reinterpret_cast<uint64_t>(root.ptr())),
-        " root_id=", root.is_valid() ? root->get_node_id() : -1);
+    // Intentionally quiet: this getter is called frequently during normal UI updates.
+    // Logging every call floods Android logs and hides the actual tree lifetime events.
     return root;
 }
 
