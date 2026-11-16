@@ -126,6 +126,12 @@ VFXSceneNode* VFXSceneNode::get_parent_node() const { return parent_node; }
 void VFXSceneNode::_unparent() { parent_node = nullptr; }
 
 void VFXSceneNode::add_child(const Ref<VFXSceneNode>& p_child) {
+    // Hold both endpoints strongly during detach + attach. parent_node is a
+    // raw back-pointer and removing the old parent's Ref from its child list
+    // can otherwise release an endpoint during a reparent operation.
+    Ref<VFXSceneNode> destination_keep_alive(this);
+    Ref<VFXSceneNode> child_keep_alive = p_child;
+
     UtilityFunctions::print("[REF-COUNT] ADD ENTER parent_id=", node_id,
         " parent_refs=", get_reference_count(),
         " child_id=", p_child.is_valid() ? p_child->node_id : -999,
