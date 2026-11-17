@@ -232,13 +232,26 @@ void VFXSkeleton::set_bone_pose(int bone_id, const Transform3D& pose) {
 
 void VFXSkeleton::set_bone_model_transform(int bone_id, const Transform3D& world_pose) {
     if (bone_id < 0 || bone_id >= (int)bones.size()) return;
+
+    // A parent may have been moved/rotated immediately before this placement.
+    // Never convert a model-space target through a stale cached parent pose.
+    // This matters especially in the mobile rigging workflow, where each tap
+    // creates a child under the currently selected bone.
+    update_transforms();
+
     int p = bones[bone_id].parent_id;
-    Transform3D parent_inv = (p >= 0) ? bones[p].model_transform.affine_inverse() : Transform3D();
+    Transform3D parent_inv = (p >= 0)
+        ? bones[p].model_transform.affine_inverse()
+        : Transform3D();
     Transform3D local = parent_inv * world_pose;
     bones[bone_id].local_position = local.get_origin();
     bones[bone_id].local_rotation = local.get_basis().get_rotation_quaternion();
     bones[bone_id].local_scale = local.get_basis().get_scale();
     dirty = true;
+
+    // Publish the new model transform immediately so the next child placement,
+    // bone picker, gizmo and skeleton drawing all see the same pose this frame.
+    update_transforms();
 }
 
 void VFXSkeleton::reset_to_bind_pose() {
