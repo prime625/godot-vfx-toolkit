@@ -1187,16 +1187,36 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
         int pos_acc = -1, norm_acc = -1, uv_acc = -1, col_acc = -1;
         int joints_acc = -1, weights_acc = -1;
 
+        // glTF texture infos can select a UV set with texCoord. The VFXMesh
+        // currently stores one UV stream, so use the base-colour texture's
+        // requested set (or TEXCOORD_0 when no material/set is specified).
+        int requested_uv_set = 0;
+        if (prim.material >= 0 && prim.material < (int)materials.size()) {
+            requested_uv_set = MAX(0, materials[prim.material].pbr.base_color_texture.tex_coord);
+        }
+        const String requested_uv_attribute = "TEXCOORD_" + String::num_int64(requested_uv_set);
         Array attr_keys = prim.attributes.keys();
+        bool requested_uv_found = false;
         for (int i = 0; i < attr_keys.size(); i++) {
             String key = attr_keys[i];
             int idx = prim.attributes[key];
             if (key == "POSITION") pos_acc = idx;
             else if (key == "NORMAL") norm_acc = idx;
-            else if (key == "TEXCOORD_0") uv_acc = idx;
+            else if (key == requested_uv_attribute) {
+                uv_acc = idx;
+                requested_uv_found = true;
+            }
             else if (key == "COLOR_0") col_acc = idx;
             else if (key == "JOINTS_0") joints_acc = idx;
             else if (key == "WEIGHTS_0") weights_acc = idx;
+        }
+        // Gracefully fall back to TEXCOORD_0 if a material requests a UV set
+        // that this primitive does not provide.
+        if (!requested_uv_found && requested_uv_set != 0 && prim.attributes.has("TEXCOORD_0")) {
+            uv_acc = prim.attributes["TEXCOORD_0"];
+            UtilityFunctions::push_warning(
+                "VFXGLBImporter: material requests TEXCOORD_" + String::num_int64(requested_uv_set) +
+                " but the primitive has no matching attribute; using TEXCOORD_0");
         }
 
         if (pos_acc < 0) {
@@ -1260,9 +1280,10 @@ Ref<VFXMesh> VFXGLBImporter::_build_mesh(const GLBMesh& glb_mesh, String& out_er
         for (int i = 0; i < normals.size(); i++) {
             normals[i] = _gltf_to_godot_n(normals[i]);
         }
-        for (int i = 0; i < uvs.size(); i++) {
-            uvs[i].y = 1.0f - uvs[i].y;
-        }
+        // Preserve glTF UVs exactly. glTF and Godot both use the same UV
+        // convention for imported 3D textures; flipping V here changes valid
+        // atlas coordinates (including negative/repeated UV ranges) and makes
+        // manually assigned textures appear mirrored or incorrectly mapped.
 
         int vert_base = mesh->get_vertex_count();
         for (int i = 0; i < positions.size(); i++) {
