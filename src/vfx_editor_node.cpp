@@ -106,6 +106,8 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("curve_to_mesh", "radius", "segments", "rings"), &VFXEditorNode::curve_to_mesh);
 
     ClassDB::bind_method(D_METHOD("set_gizmo_mode", "mode"), &VFXEditorNode::set_gizmo_mode);
+    ClassDB::bind_method(D_METHOD("set_rigging_mode", "enabled"), &VFXEditorNode::set_rigging_mode);
+    ClassDB::bind_method(D_METHOD("get_rigging_mode"), &VFXEditorNode::get_rigging_mode);
     ClassDB::bind_method(D_METHOD("get_gizmo_mode"), &VFXEditorNode::get_gizmo_mode);
     ClassDB::bind_method(D_METHOD("set_gizmo_transform", "t"), &VFXEditorNode::set_gizmo_transform);
     ClassDB::bind_method(D_METHOD("get_gizmo_transform"), &VFXEditorNode::get_gizmo_transform);
@@ -1007,6 +1009,10 @@ int VFXEditorNode::get_falloff_mode() const { return falloff_mode; }
 // ============================================================================
 void VFXEditorNode::set_gizmo_mode(int mode) {
     gizmo_mode = mode;
+    if (selected_bone >= 0 && skeleton.is_valid()) {
+        gizmo_transform = _get_bone_gizmo_transform(selected_bone);
+        if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
+    }
     gizmo_hover_axis = GIZMO_NONE;
     if (gizmo_node && gizmo_node->is_visible()) {
         _build_gizmo_mesh();
@@ -1015,6 +1021,17 @@ void VFXEditorNode::set_gizmo_mode(int mode) {
 }
 
 int VFXEditorNode::get_gizmo_mode() const { return gizmo_mode; }
+
+void VFXEditorNode::set_rigging_mode(bool enabled) {
+    rigging_mode = enabled;
+    if (selected_bone >= 0 && skeleton.is_valid()) {
+        gizmo_transform = _get_bone_gizmo_transform(selected_bone);
+        if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
+        _build_gizmo_mesh();
+    }
+}
+
+bool VFXEditorNode::get_rigging_mode() const { return rigging_mode; }
 
 void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
     gizmo_transform = t;
@@ -1826,9 +1843,13 @@ Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
     Transform3D bone_local = skeleton->get_bone_model_transform(bone_idx);
     int parent = skeleton->get_bone_parent(bone_idx);
 
-    Vector3 gizmo_origin = (parent >= 0)
-        ? armature.xform(skeleton->get_bone_model_transform(parent).get_origin())
-        : armature.xform(bone_local.get_origin());
+    // In Rigging + Translate, place the gizmo on the selected bone's tail
+    // (its own joint/model origin), so dragging edits the endpoint directly.
+    // Rotation/Scale and every other editor tab retain the head pivot.
+    const bool use_tail_pivot = rigging_mode && gizmo_mode == GIZMO_TRANSLATE;
+    Vector3 gizmo_origin = (use_tail_pivot || parent < 0)
+        ? armature.xform(bone_local.get_origin())
+        : armature.xform(skeleton->get_bone_model_transform(parent).get_origin());
 
     Transform3D result;
     result.set_origin(gizmo_origin);
