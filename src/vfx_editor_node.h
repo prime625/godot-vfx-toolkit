@@ -168,6 +168,7 @@ private:
     int selected_edge = -1;
     int selected_vertex = -1;
     bool gizmo_local = false;
+    bool rigging_mode = false; // enables the tail-pivot Translate behavior only in Rigging tab
 
     // === SELECTION SETS ===
     std::unordered_set<int> selected_faces;
@@ -374,6 +375,8 @@ public:
 
     // === GIZMO ===
     void set_gizmo_mode(int mode);
+    void set_rigging_mode(bool enabled);
+    bool get_rigging_mode() const;
     int get_gizmo_mode() const;
     void set_gizmo_transform(const Transform3D& t);
     Transform3D get_gizmo_transform() const;
