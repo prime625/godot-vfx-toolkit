@@ -42,6 +42,7 @@ void VFXEditorNode::_bind_methods() {
 
     ClassDB::bind_method(D_METHOD("set_vfx_animator", "anim"), &VFXEditorNode::set_vfx_animator);
     ClassDB::bind_method(D_METHOD("get_vfx_animator"), &VFXEditorNode::get_vfx_animator);
+    ClassDB::bind_method(D_METHOD("clear_vfx_animation_context"), &VFXEditorNode::clear_vfx_animation_context);
     ClassDB::bind_method(D_METHOD("apply_animation_frame"), &VFXEditorNode::apply_animation_frame);
     ClassDB::bind_method(D_METHOD("set_animator_auto_apply", "enabled"), &VFXEditorNode::set_animator_auto_apply);
     ClassDB::bind_method(D_METHOD("get_animator_auto_apply"), &VFXEditorNode::get_animator_auto_apply);
@@ -314,8 +315,8 @@ void VFXEditorNode::_notification(int p_what) {
             mesh_instance->set_visible(!scene.is_valid());
         }
 
-        if (animator.is_valid() && animator->is_clip_playing()) {
-            animator->advance(get_process_delta_time());
+        if (playback_animator.is_valid() && playback_animator->is_clip_playing()) {
+            playback_animator->advance(get_process_delta_time());
             if (animator_auto_apply) {
                 apply_animation_frame();
             }
@@ -594,6 +595,9 @@ void VFXEditorNode::refresh_mesh() {
 
 void VFXEditorNode::set_vfx_skeleton(const Ref<VFXSkeleton>& p_sk) {
     skeleton = p_sk;
+    // A null active skeleton means the selected object has no skeleton; it
+    // must not detach the skeleton currently being animated.
+    if (p_sk.is_valid()) playback_skeleton = p_sk;
     if (skin.is_valid()) skin->set_skeleton(skeleton);
 }
 
@@ -628,36 +632,47 @@ void VFXEditorNode::auto_weight() {
 
 void VFXEditorNode::set_vfx_animator(const Ref<VFXAnimator>& p_anim) {
     animator = p_anim;
+    // Only a real animator assignment changes playback ownership. Passing null
+    // is commonly part of selection cleanup and must not stop playback.
+    if (p_anim.is_valid()) playback_animator = p_anim;
 }
 
-Ref<VFXAnimator> VFXEditorNode::get_vfx_animator() const { return animator; }
+Ref<VFXAnimator> VFXEditorNode::get_vfx_animator() const { return playback_animator; }
+
+void VFXEditorNode::clear_vfx_animation_context() {
+    animator.unref();
+    playback_animator.unref();
+    playback_skeleton.unref();
+}
 
 void VFXEditorNode::set_animator_auto_apply(bool p_enable) { animator_auto_apply = p_enable; }
 bool VFXEditorNode::get_animator_auto_apply() const { return animator_auto_apply; }
 
 void VFXEditorNode::apply_animation_frame() {
-    if (animator.is_null()) return;
-    int clip = animator->get_current_clip();
+    const Ref<VFXAnimator>& anim = playback_animator;
+    const Ref<VFXSkeleton>& anim_skeleton = playback_skeleton;
+    if (anim.is_null()) return;
+    int clip = anim->get_current_clip();
     if (clip < 0) return;
-    float t = animator->get_playback_time();
-    int curve_count = animator->get_curve_count(clip);
+    float t = anim->get_playback_time();
+    int curve_count = anim->get_curve_count(clip);
     bool skel_changed = false;
 
     for (int c = 0; c < curve_count; c++) {
-        int kind = animator->get_curve_kind(clip, c);
+        int kind = anim->get_curve_kind(clip, c);
         if (kind == VFXAnimator::CURVE_SCALAR) continue;
 
-        int bone = animator->get_curve_bone_id(clip, c);
-        int node_id = animator->get_curve_node_id(clip, c);
+        int bone = anim->get_curve_bone_id(clip, c);
+        int node_id = anim->get_curve_node_id(clip, c);
 
         if (bone >= 0) {
-            if (skeleton.is_null() || bone >= skeleton->get_bone_count()) continue;
+            if (anim_skeleton.is_null() || bone >= anim_skeleton->get_bone_count()) continue;
             if (kind == VFXAnimator::CURVE_ROTATION) {
-                skeleton->set_bone_local_rotation(bone, animator->sample_quaternion(clip, c, t));
+                anim_skeleton->set_bone_local_rotation(bone, anim->sample_quaternion(clip, c, t));
             } else if (kind == VFXAnimator::CURVE_SCALE) {
-                skeleton->set_bone_local_scale(bone, animator->sample_vector(clip, c, t));
+                anim_skeleton->set_bone_local_scale(bone, anim->sample_vector(clip, c, t));
             } else {
-                skeleton->set_bone_local_position(bone, animator->sample_vector(clip, c, t));
+                anim_skeleton->set_bone_local_position(bone, anim->sample_vector(clip, c, t));
             }
             skel_changed = true;
         } else if (node_id >= 0) {
@@ -665,18 +680,18 @@ void VFXEditorNode::apply_animation_frame() {
             Ref<VFXSceneNode> node = scene->get_root()->find_node_by_id(node_id);
             if (node.is_null()) continue;
             if (kind == VFXAnimator::CURVE_ROTATION) {
-                node->set_local_rotation(animator->sample_quaternion(clip, c, t));
+                node->set_local_rotation(anim->sample_quaternion(clip, c, t));
             } else if (kind == VFXAnimator::CURVE_SCALE) {
-                node->set_local_scale(animator->sample_vector(clip, c, t));
+                node->set_local_scale(anim->sample_vector(clip, c, t));
             } else {
-                node->set_local_position(animator->sample_vector(clip, c, t));
+                node->set_local_position(anim->sample_vector(clip, c, t));
             }
             mark_scene_dirty();
         }
     }
 
     if (skel_changed) {
-        skeleton->update_transforms();
+        anim_skeleton->update_transforms();
         refresh_mesh();
         // Scene mode: the on-screen skinned mesh is a scene-container instance,
         // NOT mesh_instance (which refresh_mesh() updates and which is hidden in
@@ -1142,10 +1157,21 @@ void VFXEditorNode::set_active_scene_node(const Ref<VFXSceneNode>& p_node) {
         }
     }
 
+    // Keep the previous playback skeleton paired with its animator when the
+    // newly selected node has no animator of its own. The active editing
+    // skeleton below may still change to match the selected node.
+    Ref<VFXSkeleton> retained_playback_skeleton = playback_skeleton;
+
     if (src->has_mesh())      set_vfx_mesh(src->get_mesh());         else set_vfx_mesh(Ref<VFXMesh>());
     if (src->has_skeleton())  set_vfx_skeleton(src->get_skeleton()); else set_vfx_skeleton(Ref<VFXSkeleton>());
     if (src->has_skin())      set_vfx_skin(src->get_skin());         else set_vfx_skin(Ref<VFXSkin>());
     if (src->has_animator())  set_vfx_animator(src->get_animator()); else set_vfx_animator(Ref<VFXAnimator>());
+
+    if (!src->has_animator()) {
+        playback_skeleton = retained_playback_skeleton;
+    } else if (!src->has_skeleton()) {
+        playback_skeleton.unref();
+    }
 
     emit_signal("mesh_changed", src->get_mesh());
     set_gizmo_transform(active_scene_node->get_global_transform());
