@@ -96,7 +96,11 @@ private:
     Ref<VFXMesh> mesh;
     Ref<VFXSkeleton> skeleton;
     Ref<VFXSkin> skin;
+    // Active editing components may change with selection. Playback references
+    // must survive selection clearing and selecting nodes without animation.
     Ref<VFXAnimator> animator;
+    Ref<VFXAnimator> playback_animator;
+    Ref<VFXSkeleton> playback_skeleton;
     bool animator_auto_apply = true;
     Ref<VFXCurve> active_curve;
     Ref<VFXTexturePainter> painter;
@@ -296,6 +300,9 @@ public:
     // === ANIMATOR ===
     void set_vfx_animator(const Ref<VFXAnimator>& p_anim);
     Ref<VFXAnimator> get_vfx_animator() const;
+    // Explicitly discard the retained playback target (e.g. before importing
+    // or replacing a scene). Selection changes should not call this.
+    void clear_vfx_animation_context();
     // Applies the current clip at the current playback time to the
     // skeleton (bone curves) and scene nodes (node curves). Call after
     // seek()/advance() or let auto-apply handle it during playback.
