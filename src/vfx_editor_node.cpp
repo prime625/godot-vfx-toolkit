@@ -1843,12 +1843,12 @@ Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
     Transform3D bone_local = skeleton->get_bone_model_transform(bone_idx);
     int parent = skeleton->get_bone_parent(bone_idx);
 
-    // In Rigging + Translate, place the gizmo on the selected bone's tail
-    // (its own joint/model origin), so dragging edits the endpoint directly.
-    // Rotation/Scale and every other editor tab retain the head pivot.
-    const bool use_tail_pivot = rigging_mode && gizmo_mode == GIZMO_TRANSLATE;
-    Vector3 gizmo_origin = (use_tail_pivot || parent < 0)
-        ? armature.xform(bone_local.get_origin())
+    // Keep the gizmo at the selected bone's HEAD (the parent joint).
+    // Translation still changes this bone's local endpoint/origin; the
+    // skeleton hierarchy then carries all connected descendants with it.
+    // Root bones use the armature origin as their head.
+    Vector3 gizmo_origin = (parent < 0)
+        ? armature.get_origin()
         : armature.xform(skeleton->get_bone_model_transform(parent).get_origin());
 
     Transform3D result;
