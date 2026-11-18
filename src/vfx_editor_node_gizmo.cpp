@@ -393,11 +393,24 @@ void VFXEditorNode::gizmo_begin_drag(int axis, const Vector3& ray_origin, const 
     // full delta is re-added onto the current pose on every motion event and
     // the bone flies ~N x too far (N = number of motion events).
     gizmo_drag_start_bone_local = Transform3D();
+    gizmo_drag_start_bone_parent_local = Transform3D();
     if (edit_mode == MODE_OBJECT && selected_bone >= 0 && skeleton.is_valid()) {
+        skeleton->update_transforms();
         Basis rot_basis(skeleton->get_bone_local_rotation(selected_bone));
         rot_basis = rot_basis.scaled(skeleton->get_bone_local_scale(selected_bone));
         gizmo_drag_start_bone_local.set_basis(rot_basis);
         gizmo_drag_start_bone_local.set_origin(skeleton->get_bone_local_position(selected_bone));
+
+        // In Rigging mode a connected bone's head is its parent's endpoint.
+        // Save that parent pose too, so dragging moves the shared joint and
+        // therefore the selected bone plus its complete descendant chain.
+        int bone_parent = skeleton->get_bone_parent(selected_bone);
+        if (rigging_mode && bone_parent >= 0) {
+            Basis parent_basis(skeleton->get_bone_local_rotation(bone_parent));
+            parent_basis = parent_basis.scaled(skeleton->get_bone_local_scale(bone_parent));
+            gizmo_drag_start_bone_parent_local.set_basis(parent_basis);
+            gizmo_drag_start_bone_parent_local.set_origin(skeleton->get_bone_local_position(bone_parent));
+        }
     }
 
     if (edit_mode != MODE_OBJECT && mesh.is_valid()) {
@@ -731,13 +744,35 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
         new_local.set_basis(new_basis);
 
         if (gizmo_mode == GIZMO_TRANSLATE) {
-            // Move the bone ABSOLUTELY: start-of-drag local origin + the total
-            // delta the gizmo moved. Use affine_inverse() (true inverse) instead
-            // of Basis::xform_inv() (transpose), which is wrong when the parent
-            // chain has scale and would amplify/shrink the delta.
+            // Apply the total drag delta absolutely (not incrementally).
             Vector3 delta_world = gizmo_transform.get_origin() - gizmo_drag_start_transform.get_origin();
-            Vector3 delta_local = parent_world.affine_inverse().basis.xform(delta_world);
-            new_local.set_origin(gizmo_drag_start_bone_local.get_origin() + delta_local);
+
+            if (rigging_mode && parent >= 0) {
+                // A connected bone's head is the parent's tail. Move that
+                // shared joint by translating the parent endpoint in its own
+                // parent's space. The selected bone's local pose stays fixed,
+                // so its head, tail and all descendants travel together
+                // without changing the selected bone's length or orientation.
+                int grandparent = skeleton->get_bone_parent(parent);
+                Transform3D parent_parent_world = (grandparent >= 0)
+                    ? armature * skeleton->get_bone_model_transform(grandparent)
+                    : armature;
+                Vector3 delta_local = parent_parent_world.affine_inverse().basis.xform(delta_world);
+
+                Transform3D moved_parent = gizmo_drag_start_bone_parent_local;
+                moved_parent.set_origin(gizmo_drag_start_bone_parent_local.get_origin() + delta_local);
+                skeleton->set_bone_pose(parent, moved_parent);
+
+                // Keep the selected bone's own local offset unchanged. Its
+                // parent joint movement carries the whole connected branch.
+                new_local.set_origin(gizmo_drag_start_bone_local.get_origin());
+            } else {
+                // Outside Rigging mode retain the existing endpoint/tail
+                // translation behaviour exactly as before. Root bones also
+                // use this path because they have no parent joint to move.
+                Vector3 delta_local = parent_world.affine_inverse().basis.xform(delta_world);
+                new_local.set_origin(gizmo_drag_start_bone_local.get_origin() + delta_local);
+            }
         }
         else {
             // For rotation/scale: pivot around bone head, from the START pose.
