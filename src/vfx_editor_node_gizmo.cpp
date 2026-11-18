@@ -747,7 +747,7 @@ void VFXEditorNode::gizmo_drag(const Vector3& ray_origin, const Vector3& ray_dir
             // Apply the total drag delta absolutely (not incrementally).
             Vector3 delta_world = gizmo_transform.get_origin() - gizmo_drag_start_transform.get_origin();
 
-            if (rigging_mode && parent >= 0) {
+            if (rigging_mode && !humanoid_landmark_mode && parent >= 0) {
                 // A connected bone's head is the parent's tail. Move that
                 // shared joint by translating the parent endpoint in its own
                 // parent's space. The selected bone's local pose stays fixed,
