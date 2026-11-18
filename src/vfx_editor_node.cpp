@@ -1660,6 +1660,15 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
                 }
                 return SCENE_NODE_HIT;
             }
+            // While an animation clip is playing, an empty viewport press must
+            // not tear down the active mesh/skeleton/animator context. The
+            // Animation workspace relies on those resources throughout playback;
+            // clearing them here triggers expensive mesh_changed/UI refresh work
+            // on a simple tap (including taps that originate on viewport overlays
+            // such as the navigation joysticks).
+            if (playback_animator.is_valid() && playback_animator->is_clip_playing()) {
+                return -1;
+            }
             set_active_scene_node(Ref<VFXSceneNode>());
         } else {
             // Empty click while a bone is selected -> deselect it
