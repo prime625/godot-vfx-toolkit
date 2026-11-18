@@ -168,7 +168,7 @@ private:
     int selected_edge = -1;
     int selected_vertex = -1;
     bool gizmo_local = false;
-    bool rigging_mode = false; // enables the tail-pivot Translate behavior only in Rigging tab
+    bool rigging_mode = false; // enables whole-bone Translate behavior only in Rigging tab
 
     // === SELECTION SETS ===
     std::unordered_set<int> selected_faces;
@@ -189,6 +189,7 @@ private:
     Transform3D gizmo_transform;
     Transform3D gizmo_drag_start_transform;
     Transform3D gizmo_drag_start_bone_local;   // bone local pose at drag start (absolute deltas)
+    Transform3D gizmo_drag_start_bone_parent_local; // parent pose for whole-bone rigging translation
     Quaternion gizmo_drag_start_rotation;
     Vector3 gizmo_drag_start_scale;
     Plane gizmo_drag_plane;
