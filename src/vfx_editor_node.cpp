@@ -317,45 +317,34 @@ void VFXEditorNode::_notification(int p_what) {
             mesh_instance->set_visible(!scene.is_valid());
         }
 
-        const bool playback_active = playback_animator.is_valid() && playback_animator->is_clip_playing();
-        if (playback_active) {
+        if (playback_animator.is_valid() && playback_animator->is_clip_playing()) {
             playback_animator->advance(get_process_delta_time());
             if (animator_auto_apply) {
-                // apply_animation_frame() already refreshes the skinned mesh and
-                // rebuilds the skeleton overlay when animated bones change.
-                // Do not repeat those expensive rebuilds again below this frame.
                 apply_animation_frame();
             }
         }
 
-        // Scene visuals: update transforms every frame (cheap), full rebuild only when dirty.
-        // In direct-mesh mode, animated frames are refreshed by apply_animation_frame();
-        // rebuilding the same ArrayMesh again here doubles the per-frame mesh work.
+        // Scene visuals: update transforms every frame (cheap), full rebuild only when dirty
         if (scene.is_valid()) {
             _update_scene_visual_transforms();
             if (scene_visuals_dirty) {
                 scene_visuals_dirty = false;
                 _sync_scene_visuals();
             }
-        } else if (mesh.is_valid() && auto_update && !playback_active) {
+        } else if (mesh.is_valid() && auto_update) {
             _update_godot_mesh();
         }
 
+
         if (show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
-            // During playback, apply_animation_frame() rebuilds this only when
-            // animated bone transforms actually change. Rebuilding it here too
-            // was a second full procedural skeleton-mesh build every frame.
-            if (!playback_active) {
-                _build_skeleton_mesh();
-            }
+            _build_skeleton_mesh();
             if (skel_visual) skel_visual->set_visible(true);
         } else if (skel_visual) {
             skel_visual->set_visible(false);
         }
 
         if (mesh.is_valid() && show_wireframe) {
-            // Selection/wireframe geometry is refreshed by selection and mesh
-            // editing operations. It does not need a full rebuild every frame.
+            _build_selection_mesh();
             if (selection_visual) selection_visual->set_visible(true);
         } else if (selection_visual) {
             selection_visual->set_visible(false);
@@ -1625,6 +1614,17 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
         if (selected_bone < 0) {
             Ref<VFXSceneNode> hit = raycast_scene_node(ray_origin, ray_dir);
             if (hit.is_valid()) {
+                // Tapping the already-active, sole-selected node must not
+                // re-run the full activation pipeline. set_active_scene_node()
+                // rewires mesh/skin/skeleton/animator and rebuilds editor state;
+                // doing that for a repeat tap causes a noticeable playback hitch.
+                // Keep the multi-select toggle behavior when other nodes are
+                // also selected.
+                if (hit == active_scene_node && selected_scene_nodes.size() <= 1 &&
+                        is_scene_node_selected(hit)) {
+                    return SCENE_NODE_HIT;
+                }
+
                 // Multi-select (SELECTION_MODE_MULTI): tapping an unselected
                 // node adds it to the selection; tapping the active node
                 // again removes it (and activates the previous one).
