@@ -3,6 +3,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 using namespace godot;
 
@@ -573,41 +574,99 @@ void VFXSkin::flood_fill_bone(int bone_idx, float weight) {
 
 void VFXSkin::auto_weight_from_bones(int max_bones_per_vertex) {
     if (mesh.is_null() || skeleton.is_null()) return;
-    if (!skeleton->get_bone_count()) return;
+    const int bone_count = skeleton->get_bone_count();
+    if (bone_count <= 0) return;
 
     skeleton->update_transforms();
-    int vc = mesh->get_vertex_count();
-    int bc = skeleton->get_bone_count();
+    const int vertex_count = mesh->get_vertex_count();
+    if (vertex_count <= 0) return;
 
-    for (int vi = 0; vi < vc; vi++) {
-        Vector3 pos = mesh->get_vertex_position(vi);
+    // Build bone segments in mesh/model space. A bone is represented by the
+    // line from its joint to each direct child joint, rather than by a point
+    // at its head. This gives much more useful initial weights along limbs.
+    struct BoneSegment {
+        Vector3 a;
+        Vector3 b;
+        int bone_index;
+    };
+    std::vector<BoneSegment> segments;
+    segments.reserve(bone_count * 2);
+    std::vector<bool> has_child(bone_count, false);
 
-        std::vector<std::pair<float, int>> bone_dists;
-        bone_dists.reserve(bc);
-        for (int bi = 0; bi < bc; bi++) {
-            Vector3 bone_pos = skeleton->get_bone_model_transform(bi).get_origin();
-            float d = pos.distance_to(bone_pos);
-            bone_dists.push_back({d, bi});
+    for (int child = 0; child < bone_count; ++child) {
+        const int parent = skeleton->get_bone_parent(child);
+        if (parent < 0 || parent >= bone_count) continue;
+        has_child[parent] = true;
+        segments.push_back({
+            skeleton->get_bone_model_transform(parent).get_origin(),
+            skeleton->get_bone_model_transform(child).get_origin(),
+            parent
+        });
+    }
+
+    // Terminal bones (head, hands, toes, etc.) still need an influence region.
+    for (int bi = 0; bi < bone_count; ++bi) {
+        if (!has_child[bi]) {
+            const Vector3 joint = skeleton->get_bone_model_transform(bi).get_origin();
+            segments.push_back({joint, joint, bi});
         }
-        std::sort(bone_dists.begin(), bone_dists.end());
+    }
 
-        int num = std::min(max_bones_per_vertex, (int)bone_dists.size());
-        int bidx[4] = {-1, -1, -1, -1};
-        float w[4] = {0, 0, 0, 0};
+    const int influence_limit = std::max(1, std::min(max_bones_per_vertex, std::min(4, bone_count)));
+    for (int vi = 0; vi < vertex_count; ++vi) {
+        const Vector3 vertex = mesh->get_vertex_position(vi);
+
+        // Keep only the nearest segment for each bone. A branching joint can
+        // own multiple child segments, but must not occupy multiple slots.
+        std::vector<float> bone_distances(bone_count, std::numeric_limits<float>::max());
+        for (const BoneSegment &segment : segments) {
+            const Vector3 ab = segment.b - segment.a;
+            const float length_sq = ab.length_squared();
+            float t = 0.0f;
+            if (length_sq > 1e-10f) {
+                t = CLAMP((vertex - segment.a).dot(ab) / length_sq, 0.0f, 1.0f);
+            }
+            const Vector3 closest = segment.a + ab * t;
+            const float distance = vertex.distance_to(closest);
+            if (distance < bone_distances[segment.bone_index]) {
+                bone_distances[segment.bone_index] = distance;
+            }
+        }
+
+        std::vector<std::pair<float, int>> ranked;
+        ranked.reserve(bone_count);
+        for (int bi = 0; bi < bone_count; ++bi) {
+            ranked.push_back({bone_distances[bi], bi});
+        }
+        std::partial_sort(ranked.begin(), ranked.begin() + influence_limit, ranked.end(),
+            [](const std::pair<float, int> &lhs, const std::pair<float, int> &rhs) {
+                return lhs.first < rhs.first;
+            });
+
+        int indices[4] = {-1, -1, -1, -1};
+        float weights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        const float nearest = ranked[0].first;
         float total = 0.0f;
 
-        for (int i = 0; i < num; i++) {
-            bidx[i] = bone_dists[i].second;
-            w[i] = 1.0f / (bone_dists[i].first + 0.0001f);
-            total += w[i];
+        // Exact-on-segment vertices should be dominated by that segment's
+        // bone. Otherwise inverse-square falloff blends nearby joints smoothly.
+        if (nearest < 1e-5f) {
+            indices[0] = ranked[0].second;
+            weights[0] = 1.0f;
+        } else {
+            for (int i = 0; i < influence_limit; ++i) {
+                indices[i] = ranked[i].second;
+                const float d = ranked[i].first + 0.015f;
+                weights[i] = 1.0f / (d * d);
+                total += weights[i];
+            }
+            if (total > 1e-12f) {
+                for (int i = 0; i < influence_limit; ++i) weights[i] /= total;
+            }
         }
 
-        if (total > 0.0001f) {
-            for (int i = 0; i < 4; i++) w[i] /= total;
-        }
-
-        mesh->set_vertex_bones(vi, bidx[0], bidx[1], bidx[2], bidx[3]);
-        mesh->set_vertex_weights(vi, w[0], w[1], w[2], w[3]);
+        mesh->set_vertex_bones(vi, indices[0], indices[1], indices[2], indices[3]);
+        mesh->set_vertex_weights(vi, weights[0], weights[1], weights[2], weights[3]);
     }
     grid_dirty = true;
 }
