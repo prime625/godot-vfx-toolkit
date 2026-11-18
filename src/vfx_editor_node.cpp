@@ -1844,8 +1844,8 @@ Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
     int parent = skeleton->get_bone_parent(bone_idx);
 
     // Keep the gizmo at the selected bone's HEAD (the parent joint).
-    // Translation still changes this bone's local endpoint/origin; the
-    // skeleton hierarchy then carries all connected descendants with it.
+    // In Rigging mode the drag moves this shared joint; in other tabs the
+    // existing endpoint/tail translation behaviour is preserved.
     // Root bones use the armature origin as their head.
     Vector3 gizmo_origin = (parent < 0)
         ? armature.get_origin()
