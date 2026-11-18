@@ -108,6 +108,8 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_gizmo_mode", "mode"), &VFXEditorNode::set_gizmo_mode);
     ClassDB::bind_method(D_METHOD("set_rigging_mode", "enabled"), &VFXEditorNode::set_rigging_mode);
     ClassDB::bind_method(D_METHOD("get_rigging_mode"), &VFXEditorNode::get_rigging_mode);
+    ClassDB::bind_method(D_METHOD("set_humanoid_landmark_mode", "enabled"), &VFXEditorNode::set_humanoid_landmark_mode);
+    ClassDB::bind_method(D_METHOD("get_humanoid_landmark_mode"), &VFXEditorNode::get_humanoid_landmark_mode);
     ClassDB::bind_method(D_METHOD("get_gizmo_mode"), &VFXEditorNode::get_gizmo_mode);
     ClassDB::bind_method(D_METHOD("set_gizmo_transform", "t"), &VFXEditorNode::set_gizmo_transform);
     ClassDB::bind_method(D_METHOD("get_gizmo_transform"), &VFXEditorNode::get_gizmo_transform);
@@ -1033,6 +1035,17 @@ void VFXEditorNode::set_rigging_mode(bool enabled) {
 
 bool VFXEditorNode::get_rigging_mode() const { return rigging_mode; }
 
+void VFXEditorNode::set_humanoid_landmark_mode(bool enabled) {
+    humanoid_landmark_mode = enabled;
+    if (selected_bone >= 0 && skeleton.is_valid()) {
+        gizmo_transform = _get_bone_gizmo_transform(selected_bone);
+        if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
+        _build_gizmo_mesh();
+    }
+}
+
+bool VFXEditorNode::get_humanoid_landmark_mode() const { return humanoid_landmark_mode; }
+
 void VFXEditorNode::set_gizmo_transform(const Transform3D& t) {
     gizmo_transform = t;
     if (gizmo_node) gizmo_node->set_global_transform(_get_visual_gizmo_transform());
@@ -1660,15 +1673,6 @@ int VFXEditorNode::on_touch_down(const Vector3& ray_origin, const Vector3& ray_d
                 }
                 return SCENE_NODE_HIT;
             }
-            // While an animation clip is playing, an empty viewport press must
-            // not tear down the active mesh/skeleton/animator context. The
-            // Animation workspace relies on those resources throughout playback;
-            // clearing them here triggers expensive mesh_changed/UI refresh work
-            // on a simple tap (including taps that originate on viewport overlays
-            // such as the navigation joysticks).
-            if (playback_animator.is_valid() && playback_animator->is_clip_playing()) {
-                return -1;
-            }
             set_active_scene_node(Ref<VFXSceneNode>());
         } else {
             // Empty click while a bone is selected -> deselect it
@@ -1863,13 +1867,20 @@ Transform3D VFXEditorNode::_get_bone_gizmo_transform(int bone_idx) const {
     Transform3D bone_local = skeleton->get_bone_model_transform(bone_idx);
     int parent = skeleton->get_bone_parent(bone_idx);
 
-    // Keep the gizmo at the selected bone's HEAD (the parent joint).
-    // In Rigging mode the drag moves this shared joint; in other tabs the
-    // existing endpoint/tail translation behaviour is preserved.
-    // Root bones use the armature origin as their head.
-    Vector3 gizmo_origin = (parent < 0)
-        ? armature.get_origin()
-        : armature.xform(skeleton->get_bone_model_transform(parent).get_origin());
+    // In guided Humanoid placement the selected screen landmark is the
+    // selected bone's own model-space joint, so the gizmo must sit exactly
+    // on that visible point. Normal Rigging mode keeps its shared-parent-joint
+    // behavior for individual bone editing.
+    Vector3 gizmo_origin;
+    if (humanoid_landmark_mode) {
+        gizmo_origin = armature.xform(bone_local.get_origin());
+    } else {
+        // Keep the gizmo at the selected bone's HEAD (the parent joint).
+        // Root bones use the armature origin as their head.
+        gizmo_origin = (parent < 0)
+            ? armature.get_origin()
+            : armature.xform(skeleton->get_bone_model_transform(parent).get_origin());
+    }
 
     Transform3D result;
     result.set_origin(gizmo_origin);
