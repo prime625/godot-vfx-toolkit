@@ -50,6 +50,10 @@ private:
     std::vector<int> uv_bins[UV_GRID_SIZE * UV_GRID_SIZE];
     std::vector<unsigned int> uv_candidate_marks;
     unsigned int uv_candidate_generation = 1;
+    // Reused UV-bin gather buffers; avoid allocating temporary vectors on every touch update.
+    std::vector<int> stamp_xbins;
+    std::vector<int> stamp_ybins;
+    std::vector<int> stamp_candidates;
     // Reused per-stamp buffers: allocating and zero-initializing these for every
     // pointer event caused avoidable allocator/CPU pressure on mobile.
     std::vector<float> stamp_best_z;
