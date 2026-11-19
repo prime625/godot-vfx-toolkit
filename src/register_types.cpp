@@ -18,6 +18,7 @@
 #include "vfx_glb_importer.h"
 #include "vfx_fbx_importer.h"
 #include "vfx_primitives.h"
+#include "polypixel_vfx_data.h"
 
 
 void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
@@ -36,6 +37,7 @@ void initialize_vfx_toolkit(ModuleInitializationLevel p_level) {
 		ClassDB::register_class<VFXSceneNode>();
 		ClassDB::register_class<VFXSceneTreePanel>();
 		ClassDB::register_class<VFXUVEditorViewport>();
+		ClassDB::register_class<PolyPixelVFXData>();
 		ClassDB::register_class<VFXParticles3D>();
 		ClassDB::register_class<VFXGLBImporter>();
 		ClassDB::register_class<VFXFBXImporter>();
