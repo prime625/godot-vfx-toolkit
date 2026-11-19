@@ -297,6 +297,15 @@ Dictionary VFXGLBImporter::import_glb(const String& path, bool smooth_linear_cur
 
             vfx_nodes[i]->set_node_type(VFXSceneNode::NODE_MESH);
             vfx_nodes[i]->set_mesh(mesh);
+            // Keep the imported GLB material on the scene node as well as on
+            // the VFXMesh resource. Rendering and the texture painter resolve
+            // the active material from VFXSceneNode; previously the importer
+            // only populated VFXMesh::material, leaving the scene node with a
+            // null material and causing imported meshes to enter painting
+            // without their actual source material/texture.
+            if (mesh->get_material().is_valid()) {
+                vfx_nodes[i]->set_material(mesh->get_material());
+            }
             mesh_nodes_array.append(vfx_nodes[i]);
 
             if (!first_mesh.is_valid()) first_mesh = mesh;
