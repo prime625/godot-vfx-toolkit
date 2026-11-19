@@ -36,6 +36,14 @@ private:
         float umin, umax, vmin, vmax;
     };
     std::vector<CachedTriangle> cached_triangles;
+    struct BVHNode {
+        Vector3 bmin, bmax;
+        int left = -1, right = -1;
+        int start = 0, count = 0;
+    };
+    std::vector<int> bvh_triangle_indices;
+    std::vector<BVHNode> bvh_nodes;
+    int _build_bvh_node(int start, int end);
     // UV-space acceleration grid. Each bin stores only triangles whose UV
     // bounds overlap that region (including wrapped integer UV tiles).
     static constexpr int UV_GRID_SIZE = 32;
@@ -47,6 +55,7 @@ private:
     std::vector<float> stamp_best_z;
     std::vector<float> stamp_best_t;
     void _rebuild_triangle_cache();
+    bool _ray_aabb(const Vector3& origin, const Vector3& dir, const Vector3& bmin, const Vector3& bmax, float max_t) const;
 
     Color brush_color = Color(1.0f, 0.0f, 0.0f, 1.0f);
     float brush_radius = 16.0f;    // pixels on the texture (legacy splat path)
