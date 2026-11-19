@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <vector>
 #include <cstdint>
+#include <numeric>
 
 using namespace godot;
 
@@ -68,6 +69,8 @@ void VFXTexturePainter::set_mesh(const Ref<VFXMesh>& p_mesh) {
 
 void VFXTexturePainter::_rebuild_triangle_cache() {
     cached_triangles.clear();
+    bvh_triangle_indices.clear();
+    bvh_nodes.clear();
     for (auto& bin : uv_bins) bin.clear();
     uv_candidate_marks.clear();
     if (mesh.is_null()) return;
@@ -89,6 +92,12 @@ void VFXTexturePainter::_rebuild_triangle_cache() {
             cached_triangles.push_back(t);
         }
     }
+
+    // Build a 3D BVH once per mesh assignment. Pointer-move raycasts then
+    // visit only nodes intersected by the ray instead of testing every face.
+    bvh_triangle_indices.resize(cached_triangles.size());
+    std::iota(bvh_triangle_indices.begin(), bvh_triangle_indices.end(), 0);
+    if (!bvh_triangle_indices.empty()) _build_bvh_node(0, (int)bvh_triangle_indices.size());
 
     // Insert each triangle into the 0..1 UV bins for every integer tile it
     // overlaps. This keeps negative/out-of-range GLB UVs working as before.
@@ -195,33 +204,108 @@ void VFXTexturePainter::stroke_end() {
     has_last_anchor = false;
 }
 
+int VFXTexturePainter::_build_bvh_node(int start, int end) {
+    BVHNode node;
+    const float inf = 1e30f;
+    node.bmin = Vector3(inf, inf, inf);
+    node.bmax = Vector3(-inf, -inf, -inf);
+    Vector3 cmin(inf, inf, inf), cmax(-inf, -inf, -inf);
+    for (int i = start; i < end; ++i) {
+        const CachedTriangle& t = cached_triangles[(size_t)bvh_triangle_indices[(size_t)i]];
+        Vector3 p[3] = {t.p0, t.p1, t.p2};
+        for (int k = 0; k < 3; ++k) {
+            node.bmin.x = std::min(node.bmin.x, p[k].x); node.bmin.y = std::min(node.bmin.y, p[k].y); node.bmin.z = std::min(node.bmin.z, p[k].z);
+            node.bmax.x = std::max(node.bmax.x, p[k].x); node.bmax.y = std::max(node.bmax.y, p[k].y); node.bmax.z = std::max(node.bmax.z, p[k].z);
+        }
+        Vector3 c = (t.p0 + t.p1 + t.p2) / 3.0f;
+        cmin.x = std::min(cmin.x, c.x); cmin.y = std::min(cmin.y, c.y); cmin.z = std::min(cmin.z, c.z);
+        cmax.x = std::max(cmax.x, c.x); cmax.y = std::max(cmax.y, c.y); cmax.z = std::max(cmax.z, c.z);
+    }
+    const int node_index = (int)bvh_nodes.size();
+    bvh_nodes.push_back(node);
+    const int count = end - start;
+    if (count <= 8) {
+        bvh_nodes[(size_t)node_index].start = start;
+        bvh_nodes[(size_t)node_index].count = count;
+        return node_index;
+    }
+    Vector3 extent = cmax - cmin;
+    int axis = (extent.y > extent.x) ? 1 : 0;
+    if ((axis == 0 ? extent.x : extent.y) < extent.z) axis = 2;
+    const int mid = start + count / 2;
+    auto coord = [this, axis](int idx) {
+        const CachedTriangle& t = cached_triangles[(size_t)idx];
+        Vector3 c = (t.p0 + t.p1 + t.p2) / 3.0f;
+        return axis == 0 ? c.x : (axis == 1 ? c.y : c.z);
+    };
+    std::nth_element(bvh_triangle_indices.begin() + start, bvh_triangle_indices.begin() + mid,
+                     bvh_triangle_indices.begin() + end,
+                     [&coord](int a, int b) { return coord(a) < coord(b); });
+    int left = _build_bvh_node(start, mid);
+    int right = _build_bvh_node(mid, end);
+    bvh_nodes[(size_t)node_index].left = left;
+    bvh_nodes[(size_t)node_index].right = right;
+    return node_index;
+}
+
+bool VFXTexturePainter::_ray_aabb(const Vector3& origin, const Vector3& dir,
+                                 const Vector3& bmin, const Vector3& bmax, float max_t) const {
+    float tmin = 0.0f, tmax = max_t;
+    for (int axis = 0; axis < 3; ++axis) {
+        const float o = axis == 0 ? origin.x : (axis == 1 ? origin.y : origin.z);
+        const float d = axis == 0 ? dir.x : (axis == 1 ? dir.y : dir.z);
+        const float mn = axis == 0 ? bmin.x : (axis == 1 ? bmin.y : bmin.z);
+        const float mx = axis == 0 ? bmax.x : (axis == 1 ? bmax.y : bmax.z);
+        if (std::abs(d) < 1e-8f) { if (o < mn || o > mx) return false; }
+        else {
+            float a = (mn - o) / d, b = (mx - o) / d;
+            if (a > b) std::swap(a, b);
+            tmin = std::max(tmin, a); tmax = std::min(tmax, b);
+            if (tmin > tmax) return false;
+        }
+    }
+    return true;
+}
+
 bool VFXTexturePainter::_raycast_mesh_uv(const Vector3& ray_origin, const Vector3& ray_dir,
                                          Vector2& out_uv, Vector3& out_normal, Vector3& out_pos) const {
-    if (mesh.is_null() || cached_triangles.empty()) return false;
+    if (mesh.is_null() || cached_triangles.empty() || bvh_nodes.empty()) return false;
     Vector3 dir = ray_dir.normalized();
     float closest = 1e20f;
     bool found = false;
-    for (const CachedTriangle& tri : cached_triangles) {
-        if (paint_top_only && tri.normal.dot(Vector3(0, 1, 0)) < top_threshold) continue;
-        Vector3 edge1 = tri.p1 - tri.p0, edge2 = tri.p2 - tri.p0;
-        Vector3 h = dir.cross(edge2);
-        float a = edge1.dot(h);
-        if (a > -0.00001f && a < 0.00001f) continue;
-        float f = 1.0f / a;
-        Vector3 q0 = ray_origin - tri.p0;
-        float u = f * q0.dot(h);
-        if (u < 0.0f || u > 1.0f) continue;
-        Vector3 q = q0.cross(edge1);
-        float v = f * dir.dot(q);
-        if (v < 0.0f || u + v > 1.0f) continue;
-        float t = f * edge2.dot(q);
-        if (t > 0.00001f && t < closest) {
-            closest = t;
-            float w = 1.0f - u - v;
-            out_uv = tri.uv0 * w + tri.uv1 * u + tri.uv2 * v;
-            out_pos = ray_origin + dir * t;
-            out_normal = tri.normal;
-            found = true;
+    int stack[128]; int stack_size = 0;
+    stack[stack_size++] = 0;
+    while (stack_size > 0) {
+        const BVHNode& node = bvh_nodes[(size_t)stack[--stack_size]];
+        if (!_ray_aabb(ray_origin, dir, node.bmin, node.bmax, closest)) continue;
+        if (node.count > 0) {
+            for (int i = node.start; i < node.start + node.count; ++i) {
+                const CachedTriangle& tri = cached_triangles[(size_t)bvh_triangle_indices[(size_t)i]];
+                if (paint_top_only && tri.normal.dot(Vector3(0, 1, 0)) < top_threshold) continue;
+                Vector3 edge1 = tri.p1 - tri.p0, edge2 = tri.p2 - tri.p0;
+                Vector3 h = dir.cross(edge2);
+                float a = edge1.dot(h);
+                if (a > -0.00001f && a < 0.00001f) continue;
+                float f = 1.0f / a;
+                Vector3 q0 = ray_origin - tri.p0;
+                float u = f * q0.dot(h);
+                if (u < 0.0f || u > 1.0f) continue;
+                Vector3 q = q0.cross(edge1);
+                float v = f * dir.dot(q);
+                if (v < 0.0f || u + v > 1.0f) continue;
+                float t = f * edge2.dot(q);
+                if (t > 0.00001f && t < closest) {
+                    closest = t;
+                    float w = 1.0f - u - v;
+                    out_uv = tri.uv0 * w + tri.uv1 * u + tri.uv2 * v;
+                    out_pos = ray_origin + dir * t;
+                    out_normal = tri.normal;
+                    found = true;
+                }
+            }
+        } else {
+            if (node.left >= 0 && stack_size < 126) stack[stack_size++] = node.left;
+            if (node.right >= 0 && stack_size < 126) stack[stack_size++] = node.right;
         }
     }
     return found;
