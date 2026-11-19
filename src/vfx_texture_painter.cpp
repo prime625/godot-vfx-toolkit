@@ -468,19 +468,16 @@ bool VFXTexturePainter::_uv_at_world_point(const Vector3& world_pos, Vector2& ou
 void VFXTexturePainter::_paint_line_3d(const Vector2& from_uv, const Vector3& from_world,
                                           const Vector2& to_uv, const Vector3& to_world,
                                           float radius_world) {
-    float seg = (to_world - from_world).length();
-    int steps = (int)(seg / (radius_world * 0.5f)) + 1;
-    if (steps > 64) steps = 64;
-    if (steps < 1) steps = 1;
-
-    for (int i = 1; i <= steps; ++i) {
-        float t = (float)i / (float)steps;
-        Vector3 q = from_world.lerp(to_world, t);
-        Vector2 uv;
-        if (_uv_at_world_point(q, uv)) {
-            _paint_splat_3d(uv, q, radius_world);
-        }
-    }
+    // Input is coalesced to at most one latest pointer position per frame by
+    // editor.gd. The old implementation subdivided every frame segment into
+    // as many as 64 steps; each step searched every mesh face for a UV and
+    // then scanned the mesh again to stamp. On dense meshes this multiplied
+    // the cost of a single drag update dramatically. Consecutive frame stamps
+    // already provide stroke continuity at normal frame rates, so stamp only
+    // the newest hit here. This also avoids painting across unrelated UV
+    // islands because the 3D-filtered stamp remains unchanged.
+    (void)from_uv;
+    (void)from_world;
     _paint_splat_3d(to_uv, to_world, radius_world);
 }
 
