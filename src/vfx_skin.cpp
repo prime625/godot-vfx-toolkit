@@ -714,9 +714,20 @@ PackedVector3Array VFXSkin::compute_skinned_positions() const {
     if (mesh.is_null() || skeleton.is_null()) return PackedVector3Array();
 
     skeleton->update_transforms();
-    int vc = mesh->get_vertex_count();
+    const int vc = mesh->get_vertex_count();
+    const int bone_count = skeleton->get_bone_count();
     PackedVector3Array result;
     result.resize(vc);
+
+    // Build each final skinning matrix ONCE per bone, not once per vertex
+    // influence. The old inner loop performed an affine inverse for as many
+    // as four influences on every vertex, which dominated CPU playback cost.
+    std::vector<Transform3D> skin_matrices;
+    skin_matrices.resize(bone_count);
+    for (int b = 0; b < bone_count; ++b) {
+        const Transform3D bind_pose = skeleton->get_bone_bind_pose(b);
+        skin_matrices[b] = skeleton->get_bone_model_transform(b) * bind_pose.affine_inverse();
+    }
 
     for (int vi = 0; vi < vc; vi++) {
         int bones[4];
@@ -724,16 +735,15 @@ PackedVector3Array VFXSkin::compute_skinned_positions() const {
         mesh->get_vertex_skinning(vi, bones, weights);
 
         Vector3 skinned;
-        Vector3 pos = mesh->get_vertex_position(vi);
+        const Vector3 pos = mesh->get_vertex_position(vi);
         float total_w = 0.0f;
 
         for (int j = 0; j < 4; j++) {
-            int bidx = bones[j];
-            float w = weights[j];
-            if (bidx < 0 || w < 0.0001f) continue;
+            const int bidx = bones[j];
+            const float w = weights[j];
+            if (bidx < 0 || bidx >= bone_count || w < 0.0001f) continue;
 
-            Transform3D skin_mat = skeleton->get_bone_model_transform(bidx) * skeleton->get_bone_bind_pose(bidx).affine_inverse();
-            skinned += skin_mat.xform(pos) * w;
+            skinned += skin_matrices[bidx].xform(pos) * w;
             total_w += w;
         }
         // If no valid weights, keep original position (don't snap to origin)
