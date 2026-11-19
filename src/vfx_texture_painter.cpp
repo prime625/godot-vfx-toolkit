@@ -73,6 +73,12 @@ void VFXTexturePainter::_rebuild_triangle_cache() {
     bvh_nodes.clear();
     for (auto& bin : uv_bins) bin.clear();
     uv_candidate_marks.clear();
+    stamp_xbins.clear();
+    stamp_ybins.clear();
+    stamp_candidates.clear();
+    stamp_xbins.reserve(UV_GRID_SIZE);
+    stamp_ybins.reserve(UV_GRID_SIZE);
+    stamp_candidates.reserve(4096);
     if (mesh.is_null()) return;
     std::vector<vfx::HEVertex*> verts;
     const int face_count = mesh->get_face_count();
@@ -446,9 +452,12 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
 
     // Gather unique triangles from only the UV bins touched by this stamp.
     // The brush may cross the 0/1 seam, so wrapped bin coordinates are used.
-    std::vector<int> xbins, ybins;
-    xbins.reserve(UV_GRID_SIZE);
-    ybins.reserve(UV_GRID_SIZE);
+    std::vector<int>& xbins = stamp_xbins;
+    std::vector<int>& ybins = stamp_ybins;
+    std::vector<int>& candidates = stamp_candidates;
+    xbins.clear();
+    ybins.clear();
+    candidates.clear();
     auto add_unique = [](std::vector<int>& values, int value) {
         if (std::find(values.begin(), values.end(), value) == values.end()) values.push_back(value);
     };
@@ -466,7 +475,6 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
         std::fill(uv_candidate_marks.begin(), uv_candidate_marks.end(), 0);
         uv_candidate_generation = 1;
     }
-    std::vector<int> candidates;
     for (int by : ybins) {
         for (int bx : xbins) {
             const std::vector<int>& bin = uv_bins[(size_t)by * UV_GRID_SIZE + bx];
@@ -638,17 +646,35 @@ bool VFXTexturePainter::_uv_at_world_point(const Vector3& world_pos, Vector2& ou
 void VFXTexturePainter::_paint_line_3d(const Vector2& from_uv, const Vector3& from_world,
                                           const Vector2& to_uv, const Vector3& to_world,
                                           float radius_world) {
-    // Input is coalesced to at most one latest pointer position per frame by
-    // editor.gd. The old implementation subdivided every frame segment into
-    // as many as 64 steps; each step searched every mesh face for a UV and
-    // then scanned the mesh again to stamp. On dense meshes this multiplied
-    // the cost of a single drag update dramatically. Consecutive frame stamps
-    // already provide stroke continuity at normal frame rates, so stamp only
-    // the newest hit here. This also avoids painting across unrelated UV
-    // islands because the 3D-filtered stamp remains unchanged.
-    (void)from_uv;
-    (void)from_world;
-    _paint_splat_3d(to_uv, to_world, radius_world);
+    // Keep ordinary frame-to-frame movement cheap: the current stamp already
+    // covers small gaps. For faster drags, add only enough intermediate stamps
+    // to keep spacing below roughly 65% of the brush radius.
+    const Vector3 delta_world = to_world - from_world;
+    const float distance = delta_world.length();
+    const float spacing = std::max(radius_world * 0.65f, 1e-5f);
+    if (distance <= spacing) {
+        _paint_splat_3d(to_uv, to_world, radius_world);
+        return;
+    }
+
+    int steps = (int)ceilf(distance / spacing);
+    // Bound work during extreme frame stalls or when the pointer jumps a long
+    // distance. The endpoint is always painted; normal drags should stay well
+    // below this cap.
+    steps = std::max(1, std::min(steps, 12));
+
+    // Interpolate over the shortest wrapped UV path so crossing a 0/1 seam
+    // does not draw a long streak through the middle of the texture.
+    Vector2 uv_delta = to_uv - from_uv;
+    uv_delta.x -= roundf(uv_delta.x);
+    uv_delta.y -= roundf(uv_delta.y);
+
+    for (int i = 1; i <= steps; ++i) {
+        const float t = (float)i / (float)steps;
+        const Vector3 sample_world = from_world + delta_world * t;
+        const Vector2 sample_uv = from_uv + uv_delta * t;
+        _paint_splat_3d(sample_uv, sample_world, radius_world);
+    }
 }
 
 void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
