@@ -313,11 +313,22 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
 
     // Per-texel: best (closest-to-camera) candidate only â€” this is what
     // stops back-facing parts of the SAME island from painting through.
-    std::vector<float> best_z(cell_count, -1e30f);
-    std::vector<float> best_t(cell_count, 1.0f);
+    // Reuse the scratch storage across pointer events instead of allocating two
+    // large vectors for every brush stamp. resize() only grows when necessary.
+    stamp_best_z.resize(cell_count);
+    stamp_best_t.resize(cell_count);
+    std::fill(stamp_best_z.begin(), stamp_best_z.end(), -1e30f);
+    std::fill(stamp_best_t.begin(), stamp_best_t.end(), 1.0f);
+    std::vector<float>& best_z = stamp_best_z;
+    std::vector<float>& best_t = stamp_best_t;
 
     const float r2 = radius_world * radius_world;
     const Transform3D cam_inv = camera_transform.affine_inverse();
+    // These bounds are identical for every triangle; calculate them once.
+    const float brush_u_min = (float)x0 / (float)tw;
+    const float brush_u_max = (float)x1 / (float)tw;
+    const float brush_v_min = (float)y0 / (float)th;
+    const float brush_v_max = (float)y1 / (float)th;
 
     for (const CachedTriangle& tri : cached_triangles) {
         const float umin = tri.umin, umax = tri.umax, vmin = tri.vmin, vmax = tri.vmax;
@@ -325,10 +336,6 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
         // UVs may live in arbitrary integer tiles (for example this GLB has
         // V approximately [-2,-1]). Compute the integer shifts that can
         // actually overlap this brush region instead of assuming only -1..1.
-        const float brush_u_min = (float)x0 / (float)tw;
-        const float brush_u_max = (float)x1 / (float)tw;
-        const float brush_v_min = (float)y0 / (float)th;
-        const float brush_v_max = (float)y1 / (float)th;
         const int su_min = (int)ceilf(brush_u_min - umax);
         const int su_max = (int)floorf(brush_u_max - umin);
         const int sv_min = (int)ceilf(brush_v_min - vmax);
