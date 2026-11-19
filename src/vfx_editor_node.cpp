@@ -331,7 +331,11 @@ void VFXEditorNode::_notification(int p_what) {
             _update_scene_visual_transforms();
             if (scene_visuals_dirty) {
                 scene_visuals_dirty = false;
+                animation_visuals_dirty = false;
                 _sync_scene_visuals();
+            } else if (animation_visuals_dirty) {
+                animation_visuals_dirty = false;
+                _sync_animated_node_visual_recursive(scene->get_root(), playback_skeleton);
             }
         } else if (mesh.is_valid() && auto_update) {
             _update_godot_mesh();
@@ -696,15 +700,13 @@ void VFXEditorNode::apply_animation_frame() {
 
     if (skel_changed) {
         anim_skeleton->update_transforms();
-        refresh_mesh();
-        // Scene mode: the on-screen skinned mesh is a scene-container instance,
-        // NOT mesh_instance (which refresh_mesh() updates and which is hidden in
-        // scene mode). Without this flag _sync_scene_visuals() never runs, so
-        // the mesh only re-skins when some unrelated action marks the scene dirty
-        // (e.g. a tap). The flag is only consumed when scene.is_valid(), so it's
-        // harmless in direct mode.
         if (scene.is_valid()) {
-            mark_scene_dirty();
+            // Only the visual(s) driven by this skeleton need new vertex data.
+            // Do not call refresh_mesh() here: it rebuilds the hidden direct-mode
+            // mesh, and a full scene sync would rebuild every unrelated object.
+            animation_visuals_dirty = true;
+        } else {
+            refresh_mesh();
         }
         if (show_skeleton) _build_skeleton_mesh();
     }
@@ -1571,6 +1573,35 @@ void VFXEditorNode::_sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node,
 
     for (int i = 0; i < p_node->get_child_count(); ++i) {
         _sync_node_visual_recursive(p_node->get_child(i), r_used);
+    }
+}
+
+// Rebuild only scene visuals whose skin is driven by the skeleton currently
+// being animated. Static scene objects keep their existing ArrayMesh instances.
+void VFXEditorNode::_sync_animated_node_visual_recursive(
+        const Ref<VFXSceneNode>& p_node,
+        const Ref<VFXSkeleton>& p_skeleton) {
+    if (p_node.is_null() || !p_node->is_visible()) return;
+
+    if (p_skeleton.is_valid() &&
+            p_node->get_node_type() == VFXSceneNode::NODE_MESH &&
+            p_node->has_mesh() &&
+            p_node->get_skeleton() == p_skeleton &&
+            p_node->get_skin().is_valid()) {
+        const uint64_t id = p_node->get_instance_id();
+        MeshInstance3D* visual = _get_scene_visual(id);
+        Ref<ArrayMesh> updated = _build_array_mesh_for_node(
+                p_node->get_mesh(), p_node->get_skeleton(),
+                p_node->get_skin(), show_weights, visualize_bone);
+        if (updated.is_valid() && updated->get_surface_count() > 0) {
+            visual->set_mesh(updated);
+            // Preserve the current viewport material override. The animation
+            // changes vertex positions, not the node's material assignment.
+        }
+    }
+
+    for (int i = 0; i < p_node->get_child_count(); ++i) {
+        _sync_animated_node_visual_recursive(p_node->get_child(i), p_skeleton);
     }
 }
 
