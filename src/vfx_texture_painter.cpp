@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <cstdint>
 
 using namespace godot;
 
@@ -458,21 +459,62 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
         }
     }
 
+    // Work directly on the contiguous RGBA8 image buffer. Calling Image's
+    // get_pixel()/set_pixel() for every covered texel repeatedly crosses the
+    // engine API boundary and performs format conversion. One buffer access
+    // per stamp is considerably cheaper on mobile CPUs.
+    if (texture->get_format() != Image::FORMAT_RGBA8) {
+        texture->convert(Image::FORMAT_RGBA8);
+    }
+    PackedByteArray pixel_data = texture->get_data();
+    const int64_t expected_bytes = (int64_t)tw * (int64_t)th * 4;
+    if (pixel_data.size() < expected_bytes) return;
+    uint8_t *pixels = pixel_data.ptrw();
+    if (pixels == nullptr) return;
+
+    const float stamp_alpha = brush_opacity;
+    const float stamp_r = brush_color.r;
+    const float stamp_g = brush_color.g;
+    const float stamp_b = brush_color.b;
+    const float stamp_a = brush_color.a;
+    const float erase_r = background_color.r;
+    const float erase_g = background_color.g;
+    const float erase_b = background_color.b;
+    const float erase_a = background_color.a;
+    const float mode_scale = (brush_mode == BRUSH_SMUDGE) ? 0.3f : 1.0f;
+
     for (int y = y0; y <= y1; ++y) {
         for (int x = x0; x <= x1; ++x) {
-            size_t idx = (size_t)(y - y0) * (size_t)bw + (size_t)(x - x0);
+            const size_t idx = (size_t)(y - y0) * (size_t)bw + (size_t)(x - x0);
             if (best_z[idx] < -1e29f) continue;
 
-            float soft = 1.0f - best_t[idx];
-            float hard = (best_t[idx] < 1.0f) ? 1.0f : 0.0f;
-            float falloff = vfx::lerp(soft, hard, brush_hardness);
+            const float soft = 1.0f - best_t[idx];
+            const float hard = (best_t[idx] < 1.0f) ? 1.0f : 0.0f;
+            const float falloff = vfx::lerp(soft, hard, brush_hardness);
             if (falloff <= 0.0f) continue;
 
-            int xi = ((x % tw) + tw) % tw;
-            int yi = ((y % th) + th) % th;
-            _blend_pixel(xi, yi, falloff);
+            const int xi = ((x % tw) + tw) % tw;
+            const int yi = ((y % th) + th) % th;
+            const size_t pixel_index = ((size_t)yi * (size_t)tw + (size_t)xi) * 4;
+            const float alpha = vfx::clampf(stamp_alpha * falloff * mode_scale, 0.0f, 1.0f);
+            const float inv_alpha = 1.0f - alpha;
+
+            float target_r = stamp_r, target_g = stamp_g, target_b = stamp_b, target_a = stamp_a;
+            if (brush_mode == BRUSH_ERASE) {
+                target_r = erase_r; target_g = erase_g;
+                target_b = erase_b; target_a = erase_a;
+            }
+
+            pixels[pixel_index + 0] = (uint8_t)(vfx::clampf((pixels[pixel_index + 0] / 255.0f) * inv_alpha + target_r * alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+            pixels[pixel_index + 1] = (uint8_t)(vfx::clampf((pixels[pixel_index + 1] / 255.0f) * inv_alpha + target_g * alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+            pixels[pixel_index + 2] = (uint8_t)(vfx::clampf((pixels[pixel_index + 2] / 255.0f) * inv_alpha + target_b * alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+            pixels[pixel_index + 3] = (uint8_t)(vfx::clampf((pixels[pixel_index + 3] / 255.0f) * inv_alpha + target_a * alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
         }
     }
+
+    // Commit the edited bytes once instead of issuing one set_pixel() call
+    // for every painted texel.
+    texture->set_data(tw, th, texture->has_mipmaps(), Image::FORMAT_RGBA8, pixel_data);
 }
 
 // Find the UV of the surface point closest to a world position (used to walk
