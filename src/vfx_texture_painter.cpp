@@ -322,10 +322,19 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
     for (const CachedTriangle& tri : cached_triangles) {
         const float umin = tri.umin, umax = tri.umax, vmin = tri.vmin, vmax = tri.vmax;
 
-        // The unwrap may sit on integer offsets (e.g. V in [-1,0]); test the
-        // three shifted copies of the face bbox against the wrapped region.
-        for (int su = -1; su <= 1; ++su) {
-            for (int sv = -1; sv <= 1; ++sv) {
+        // UVs may live in arbitrary integer tiles (for example this GLB has
+        // V approximately [-2,-1]). Compute the integer shifts that can
+        // actually overlap this brush region instead of assuming only -1..1.
+        const float brush_u_min = (float)x0 / (float)tw;
+        const float brush_u_max = (float)x1 / (float)tw;
+        const float brush_v_min = (float)y0 / (float)th;
+        const float brush_v_max = (float)y1 / (float)th;
+        const int su_min = (int)ceilf(brush_u_min - umax);
+        const int su_max = (int)floorf(brush_u_max - umin);
+        const int sv_min = (int)ceilf(brush_v_min - vmax);
+        const int sv_max = (int)floorf(brush_v_max - vmin);
+        for (int su = su_min; su <= su_max; ++su) {
+            for (int sv = sv_min; sv <= sv_max; ++sv) {
                 int tx0 = std::max(x0, (int)floorf((umin + (float)su) * (float)tw));
                 int tx1 = std::min(x1, (int)ceilf ((umax + (float)su) * (float)tw));
                 int ty0 = std::max(y0, (int)floorf((vmin + (float)sv) * (float)th));
