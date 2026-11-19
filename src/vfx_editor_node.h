@@ -212,6 +212,7 @@ private:
     // === SCENE VISUALS ===
     HashMap<uint64_t, MeshInstance3D*> scene_visuals;
     bool scene_visuals_dirty = true;
+    bool animation_visuals_dirty = false;
 
     // === INTERNAL HELPERS ===
     void _ensure_mesh_instance();
@@ -258,6 +259,7 @@ private:
     Ref<ArrayMesh> _build_array_mesh_for_node(const Ref<VFXMesh>& p_mesh, const Ref<VFXSkeleton>& p_sk, const Ref<VFXSkin>& p_skin, bool p_show_weights, int p_viz_bone);
     void _sync_scene_visuals();
     void _sync_node_visual_recursive(const Ref<VFXSceneNode>& p_node, std::unordered_set<uint64_t>& r_used);
+    void _sync_animated_node_visual_recursive(const Ref<VFXSceneNode>& p_node, const Ref<VFXSkeleton>& p_skeleton);
     void _update_scene_visual_transforms();
     void _update_scene_visual_transforms_recursive(const Ref<VFXSceneNode>& p_node);
     // Gizmo raycast / drag
