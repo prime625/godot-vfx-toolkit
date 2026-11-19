@@ -11,6 +11,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include "vfx_mesh.h"
 #include "vfx_math.h"
+#include <vector>
 
 using namespace godot;
 
@@ -27,6 +28,15 @@ public:
 private:
     Ref<VFXMesh> mesh;
     Ref<Image> texture;
+
+    struct CachedTriangle {
+        Vector3 p0, p1, p2;
+        Vector2 uv0, uv1, uv2;
+        Vector3 normal;
+        float umin, umax, vmin, vmax;
+    };
+    std::vector<CachedTriangle> cached_triangles;
+    void _rebuild_triangle_cache();
 
     Color brush_color = Color(1.0f, 0.0f, 0.0f, 1.0f);
     float brush_radius = 16.0f;    // pixels on the texture (legacy splat path)
