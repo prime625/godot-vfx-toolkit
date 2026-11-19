@@ -2,6 +2,7 @@
 #define VFX_PARTICLES_H
 
 #include <godot_cpp/classes/node3d.hpp>
+#include "polypixel_vfx_data.h"
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/mesh.hpp>
@@ -91,7 +92,7 @@ private:
 	float explosiveness_ratio = 0.0f;
 	float randomness_ratio = 0.0f;
 	bool one_shot = false;
-	bool emitting = true;
+	bool emitting = false;
 
 	// Collision
 	CollisionMode collision_mode = COLLISION_NONE;
@@ -122,6 +123,7 @@ private:
 
 	// Material
 	Ref<Material> material;
+	Ref<PolyPixelVFXData> vfx_data;
 	void _apply_material();
 
 	// Rendering
@@ -166,6 +168,10 @@ protected:
 public:
 	VFXParticles3D();
 	~VFXParticles3D();
+
+	// Runtime resource assignment
+	void set_vfx_data(const Ref<PolyPixelVFXData>& data);
+	Ref<PolyPixelVFXData> get_vfx_data() const;
 
 	// Core control
 	void set_amount(int p_amount);
