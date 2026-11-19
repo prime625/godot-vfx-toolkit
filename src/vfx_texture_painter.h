@@ -36,6 +36,10 @@ private:
         float umin, umax, vmin, vmax;
     };
     std::vector<CachedTriangle> cached_triangles;
+    // Reused per-stamp buffers: allocating and zero-initializing these for every
+    // pointer event caused avoidable allocator/CPU pressure on mobile.
+    std::vector<float> stamp_best_z;
+    std::vector<float> stamp_best_t;
     void _rebuild_triangle_cache();
 
     Color brush_color = Color(1.0f, 0.0f, 0.0f, 1.0f);
