@@ -67,6 +67,8 @@ void VFXTexturePainter::set_mesh(const Ref<VFXMesh>& p_mesh) {
 
 void VFXTexturePainter::_rebuild_triangle_cache() {
     cached_triangles.clear();
+    for (auto& bin : uv_bins) bin.clear();
+    uv_candidate_marks.clear();
     if (mesh.is_null()) return;
     std::vector<vfx::HEVertex*> verts;
     const int face_count = mesh->get_face_count();
@@ -84,6 +86,33 @@ void VFXTexturePainter::_rebuild_triangle_cache() {
             t.vmin = std::min(t.uv0.y, std::min(t.uv1.y, t.uv2.y));
             t.vmax = std::max(t.uv0.y, std::max(t.uv1.y, t.uv2.y));
             cached_triangles.push_back(t);
+        }
+    }
+
+    // Insert each triangle into the 0..1 UV bins for every integer tile it
+    // overlaps. This keeps negative/out-of-range GLB UVs working as before.
+    uv_candidate_marks.assign(cached_triangles.size(), 0);
+    for (int ti = 0; ti < (int)cached_triangles.size(); ++ti) {
+        const CachedTriangle& t = cached_triangles[(size_t)ti];
+        const int su0 = (int)ceilf(-t.umax);
+        const int su1 = (int)floorf(1.0f - t.umin);
+        const int sv0 = (int)ceilf(-t.vmax);
+        const int sv1 = (int)floorf(1.0f - t.vmin);
+        for (int su = su0; su <= su1; ++su) {
+            for (int sv = sv0; sv <= sv1; ++sv) {
+                float u0 = std::max(0.0f, t.umin + (float)su);
+                float u1 = std::min(1.0f, t.umax + (float)su);
+                float v0 = std::max(0.0f, t.vmin + (float)sv);
+                float v1 = std::min(1.0f, t.vmax + (float)sv);
+                if (u0 > u1 || v0 > v1) continue;
+                int bx0 = std::max(0, std::min(UV_GRID_SIZE - 1, (int)floorf(u0 * UV_GRID_SIZE)));
+                int bx1 = std::max(0, std::min(UV_GRID_SIZE - 1, (int)floorf(u1 * UV_GRID_SIZE)));
+                int by0 = std::max(0, std::min(UV_GRID_SIZE - 1, (int)floorf(v0 * UV_GRID_SIZE)));
+                int by1 = std::max(0, std::min(UV_GRID_SIZE - 1, (int)floorf(v1 * UV_GRID_SIZE)));
+                for (int by = by0; by <= by1; ++by)
+                    for (int bx = bx0; bx <= bx1; ++bx)
+                        uv_bins[(size_t)by * UV_GRID_SIZE + bx].push_back(ti);
+            }
         }
     }
 }
@@ -330,7 +359,42 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
     const float brush_v_min = (float)y0 / (float)th;
     const float brush_v_max = (float)y1 / (float)th;
 
-    for (const CachedTriangle& tri : cached_triangles) {
+    // Gather unique triangles from only the UV bins touched by this stamp.
+    // The brush may cross the 0/1 seam, so wrapped bin coordinates are used.
+    std::vector<int> xbins, ybins;
+    xbins.reserve(UV_GRID_SIZE);
+    ybins.reserve(UV_GRID_SIZE);
+    auto add_unique = [](std::vector<int>& values, int value) {
+        if (std::find(values.begin(), values.end(), value) == values.end()) values.push_back(value);
+    };
+    const int xspan = std::min(bw, tw);
+    const int yspan = std::min(bh, th);
+    for (int i = 0; i < xspan; ++i) {
+        int px = ((x0 + i) % tw + tw) % tw;
+        add_unique(xbins, std::min(UV_GRID_SIZE - 1, px * UV_GRID_SIZE / tw));
+    }
+    for (int i = 0; i < yspan; ++i) {
+        int py = ((y0 + i) % th + th) % th;
+        add_unique(ybins, std::min(UV_GRID_SIZE - 1, py * UV_GRID_SIZE / th));
+    }
+    if (++uv_candidate_generation == 0) {
+        std::fill(uv_candidate_marks.begin(), uv_candidate_marks.end(), 0);
+        uv_candidate_generation = 1;
+    }
+    std::vector<int> candidates;
+    for (int by : ybins) {
+        for (int bx : xbins) {
+            const std::vector<int>& bin = uv_bins[(size_t)by * UV_GRID_SIZE + bx];
+            for (int ti : bin) {
+                if (uv_candidate_marks[(size_t)ti] == uv_candidate_generation) continue;
+                uv_candidate_marks[(size_t)ti] = uv_candidate_generation;
+                candidates.push_back(ti);
+            }
+        }
+    }
+
+    for (int triangle_index : candidates) {
+        const CachedTriangle& tri = cached_triangles[(size_t)triangle_index];
         const float umin = tri.umin, umax = tri.umax, vmin = tri.vmin, vmax = tri.vmax;
 
         // UVs may live in arbitrary integer tiles (for example this GLB has
