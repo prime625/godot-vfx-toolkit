@@ -73,12 +73,6 @@ void VFXTexturePainter::_rebuild_triangle_cache() {
     bvh_nodes.clear();
     for (auto& bin : uv_bins) bin.clear();
     uv_candidate_marks.clear();
-    stamp_xbins.clear();
-    stamp_ybins.clear();
-    stamp_candidates.clear();
-    stamp_xbins.reserve(UV_GRID_SIZE);
-    stamp_ybins.reserve(UV_GRID_SIZE);
-    stamp_candidates.reserve(4096);
     if (mesh.is_null()) return;
     std::vector<vfx::HEVertex*> verts;
     const int face_count = mesh->get_face_count();
@@ -452,12 +446,9 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
 
     // Gather unique triangles from only the UV bins touched by this stamp.
     // The brush may cross the 0/1 seam, so wrapped bin coordinates are used.
-    std::vector<int>& xbins = stamp_xbins;
-    std::vector<int>& ybins = stamp_ybins;
-    std::vector<int>& candidates = stamp_candidates;
-    xbins.clear();
-    ybins.clear();
-    candidates.clear();
+    std::vector<int> xbins, ybins;
+    xbins.reserve(UV_GRID_SIZE);
+    ybins.reserve(UV_GRID_SIZE);
     auto add_unique = [](std::vector<int>& values, int value) {
         if (std::find(values.begin(), values.end(), value) == values.end()) values.push_back(value);
     };
@@ -475,6 +466,7 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
         std::fill(uv_candidate_marks.begin(), uv_candidate_marks.end(), 0);
         uv_candidate_generation = 1;
     }
+    std::vector<int> candidates;
     for (int by : ybins) {
         for (int bx : xbins) {
             const std::vector<int>& bin = uv_bins[(size_t)by * UV_GRID_SIZE + bx];
@@ -646,35 +638,24 @@ bool VFXTexturePainter::_uv_at_world_point(const Vector3& world_pos, Vector2& ou
 void VFXTexturePainter::_paint_line_3d(const Vector2& from_uv, const Vector3& from_world,
                                           const Vector2& to_uv, const Vector3& to_world,
                                           float radius_world) {
-    // Keep ordinary frame-to-frame movement cheap: the current stamp already
-    // covers small gaps. For faster drags, add only enough intermediate stamps
-    // to keep spacing below roughly 65% of the brush radius.
+    // A full 3D stamp is expensive, so do not oversample the stroke. The
+    // endpoint stamp covers normal frame-to-frame movement. For a larger gap,
+    // add at most ONE midpoint stamp, then the endpoint: two raster passes
+    // maximum per input event instead of the previous 8-12 (or more).
     const Vector3 delta_world = to_world - from_world;
     const float distance = delta_world.length();
-    const float spacing = std::max(radius_world * 0.65f, 1e-5f);
-    if (distance <= spacing) {
-        _paint_splat_3d(to_uv, to_world, radius_world);
-        return;
+    const float spacing = std::max(radius_world * 1.75f, 1e-5f);
+
+    if (distance > spacing * 1.5f) {
+        Vector2 uv_delta = to_uv - from_uv;
+        uv_delta.x -= roundf(uv_delta.x);
+        uv_delta.y -= roundf(uv_delta.y);
+        const Vector2 midpoint_uv = from_uv + uv_delta * 0.5f;
+        const Vector3 midpoint_world = from_world + delta_world * 0.5f;
+        _paint_splat_3d(midpoint_uv, midpoint_world, radius_world);
     }
 
-    int steps = (int)ceilf(distance / spacing);
-    // Bound work during extreme frame stalls or when the pointer jumps a long
-    // distance. The endpoint is always painted; normal drags should stay well
-    // below this cap.
-    steps = std::max(1, std::min(steps, 12));
-
-    // Interpolate over the shortest wrapped UV path so crossing a 0/1 seam
-    // does not draw a long streak through the middle of the texture.
-    Vector2 uv_delta = to_uv - from_uv;
-    uv_delta.x -= roundf(uv_delta.x);
-    uv_delta.y -= roundf(uv_delta.y);
-
-    for (int i = 1; i <= steps; ++i) {
-        const float t = (float)i / (float)steps;
-        const Vector3 sample_world = from_world + delta_world * t;
-        const Vector2 sample_uv = from_uv + uv_delta * t;
-        _paint_splat_3d(sample_uv, sample_world, radius_world);
-    }
+    _paint_splat_3d(to_uv, to_world, radius_world);
 }
 
 void VFXTexturePainter::_paint_line_uv(const Vector2& from, const Vector2& to) {
