@@ -22,6 +22,8 @@ using namespace godot;
 // ============================================================================
 
 void VFXParticles3D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_vfx_data", "data"), &VFXParticles3D::set_vfx_data);
+	ClassDB::bind_method(D_METHOD("get_vfx_data"), &VFXParticles3D::get_vfx_data);
 	// Core
 	ClassDB::bind_method(D_METHOD("set_amount", "amount"), &VFXParticles3D::set_amount);
 	ClassDB::bind_method(D_METHOD("get_amount"), &VFXParticles3D::get_amount);
@@ -107,50 +109,10 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restart"), &VFXParticles3D::restart);
 	ClassDB::bind_method(D_METHOD("emit_burst", "count"), &VFXParticles3D::emit_burst);
 
-	// Properties
-	ADD_GROUP("Emission", "");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "amount", PROPERTY_HINT_RANGE, "1,100000,1"), "set_amount", "get_amount");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lifetime", PROPERTY_HINT_RANGE, "0.01,600.0,0.01,or_greater"), "set_lifetime", "get_lifetime");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lifetime_randomness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_lifetime_randomness", "get_lifetime_randomness");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "explosiveness_ratio", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_explosiveness_ratio", "get_explosiveness_ratio");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "randomness_ratio", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_randomness_ratio", "get_randomness_ratio");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "emission_shape", PROPERTY_HINT_ENUM, "Point,Sphere,Box"), "set_emission_shape", "get_emission_shape");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "emission_sphere_radius", PROPERTY_HINT_RANGE, "0.01,128.0,0.01,or_greater"), "set_emission_sphere_radius", "get_emission_sphere_radius");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "emission_box_extents"), "set_emission_box_extents", "get_emission_box_extents");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "direction"), "set_direction", "get_direction");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spread", PROPERTY_HINT_RANGE, "0,180.0,0.1"), "set_spread", "get_spread");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flatness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_flatness", "get_flatness");
-
-	ADD_GROUP("Particle Flags", "");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "one_shot"), "set_one_shot", "get_one_shot");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "emitting"), "set_emitting", "get_emitting");
-
-	ADD_GROUP("Physics", "");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "gravity"), "set_gravity", "get_gravity");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "initial_velocity_min", PROPERTY_HINT_RANGE, "-1000.0,1000.0,0.01,or_lesser,or_greater"), "set_initial_velocity_min", "get_initial_velocity_min");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "initial_velocity_max", PROPERTY_HINT_RANGE, "-1000.0,1000.0,0.01,or_lesser,or_greater"), "set_initial_velocity_max", "get_initial_velocity_max");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "damping_min", PROPERTY_HINT_RANGE, "0,100.0,0.01,or_greater"), "set_damping_min", "get_damping_min");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "damping_max", PROPERTY_HINT_RANGE, "0,100.0,0.01,or_greater"), "set_damping_max", "get_damping_max");
-
-	ADD_GROUP("Appearance", "");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_amount_min", PROPERTY_HINT_RANGE, "0,1000.0,0.01,or_greater"), "set_scale_amount_min", "get_scale_amount_min");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "scale_amount_max", PROPERTY_HINT_RANGE, "0,1000.0,0.01,or_greater"), "set_scale_amount_max", "get_scale_amount_max");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scale_curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_scale_curve", "get_scale_curve");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "color_ramp", PROPERTY_HINT_RESOURCE_TYPE, "Gradient"), "set_color_ramp", "get_color_ramp");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "billboard_mode", PROPERTY_HINT_ENUM, "Camera,Y to Velocity,None,Fixed Y"), "set_billboard_mode", "get_billboard_mode");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "draw_mesh", PROPERTY_HINT_RESOURCE_TYPE, "Mesh"), "set_draw_mesh", "get_draw_mesh");
-
-	ADD_GROUP("Material", "");
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material", PROPERTY_HINT_RESOURCE_TYPE, "StandardMaterial3D,ShaderMaterial,CanvasItemMaterial"), "set_material", "get_material");
-
-	ADD_GROUP("Collision", "");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mode", PROPERTY_HINT_ENUM, "Disabled,Raycast,Plane,Sphere"), "set_collision_mode", "get_collision_mode");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_bounce", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_collision_bounce", "get_collision_bounce");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_friction", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_collision_friction", "get_collision_friction");
-	ADD_PROPERTY(PropertyInfo(Variant::PLANE, "collision_plane"), "set_collision_plane", "get_collision_plane");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "collision_sphere_center"), "set_collision_sphere_center", "get_collision_sphere_center");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_sphere_radius", PROPERTY_HINT_RANGE, "0.01,128.0,0.01,or_greater"), "set_collision_sphere_radius", "get_collision_sphere_radius");
+	// Godot is the playback host, not the VFX authoring environment.
+	// All effect parameters are compiled into PolyPixelVFXData.
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "vfx_data", PROPERTY_HINT_RESOURCE_TYPE, "PolyPixelVFXData"),
+			"set_vfx_data", "get_vfx_data");
 
 	// Constants
 	ClassDB::bind_integer_constant(get_class_static(), "", "EMISSION_POINT", EMISSION_POINT);
@@ -170,6 +132,17 @@ void VFXParticles3D::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_Y_TO_VELOCITY", BILLBOARD_Y_TO_VELOCITY);
 	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_NONE", BILLBOARD_NONE);
 	ClassDB::bind_integer_constant(get_class_static(), "", "BILLBOARD_FIXED_Y", BILLBOARD_FIXED_Y);
+}
+
+void VFXParticles3D::set_vfx_data(const Ref<PolyPixelVFXData> &data) {
+	vfx_data = data;
+	if (vfx_data.is_valid() && !vfx_data->is_valid()) {
+		UtilityFunctions::push_warning("PolyPixel VFX: assigned data has an unsupported version or invalid PPVFX signature.");
+	}
+}
+
+Ref<PolyPixelVFXData> VFXParticles3D::get_vfx_data() const {
+	return vfx_data;
 }
 
 // ============================================================================
