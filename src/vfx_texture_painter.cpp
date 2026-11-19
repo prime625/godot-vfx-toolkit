@@ -59,7 +59,34 @@ void VFXTexturePainter::_bind_methods() {
 VFXTexturePainter::VFXTexturePainter() {}
 VFXTexturePainter::~VFXTexturePainter() {}
 
-void VFXTexturePainter::set_mesh(const Ref<VFXMesh>& p_mesh) { mesh = p_mesh; }
+void VFXTexturePainter::set_mesh(const Ref<VFXMesh>& p_mesh) {
+    if (mesh == p_mesh) return;
+    mesh = p_mesh;
+    _rebuild_triangle_cache();
+}
+
+void VFXTexturePainter::_rebuild_triangle_cache() {
+    cached_triangles.clear();
+    if (mesh.is_null()) return;
+    std::vector<vfx::HEVertex*> verts;
+    const int face_count = mesh->get_face_count();
+    for (int fi = 0; fi < face_count; ++fi) {
+        verts.clear();
+        mesh->get_face_vertices(fi, verts);
+        if (verts.size() < 3) continue;
+        for (size_t i = 1; i + 1 < verts.size(); ++i) {
+            CachedTriangle t;
+            t.p0 = verts[0]->position; t.p1 = verts[i]->position; t.p2 = verts[i + 1]->position;
+            t.uv0 = verts[0]->uv; t.uv1 = verts[i]->uv; t.uv2 = verts[i + 1]->uv;
+            t.normal = (t.p1 - t.p0).cross(t.p2 - t.p0).normalized();
+            t.umin = std::min(t.uv0.x, std::min(t.uv1.x, t.uv2.x));
+            t.umax = std::max(t.uv0.x, std::max(t.uv1.x, t.uv2.x));
+            t.vmin = std::min(t.uv0.y, std::min(t.uv1.y, t.uv2.y));
+            t.vmax = std::max(t.uv0.y, std::max(t.uv1.y, t.uv2.y));
+            cached_triangles.push_back(t);
+        }
+    }
+}
 Ref<VFXMesh> VFXTexturePainter::get_mesh() const { return mesh; }
 
 void VFXTexturePainter::create_texture(int width, int height, const Color& fill_color) {
@@ -140,63 +167,31 @@ void VFXTexturePainter::stroke_end() {
 
 bool VFXTexturePainter::_raycast_mesh_uv(const Vector3& ray_origin, const Vector3& ray_dir,
                                          Vector2& out_uv, Vector3& out_normal, Vector3& out_pos) const {
-    if (mesh.is_null()) return false;
-
+    if (mesh.is_null() || cached_triangles.empty()) return false;
     Vector3 dir = ray_dir.normalized();
     float closest = 1e20f;
     bool found = false;
-
-    int face_count = mesh->get_face_count();
-    for (int fi = 0; fi < face_count; ++fi) {
-        std::vector<vfx::HEVertex*> verts;
-        mesh->get_face_vertices(fi, verts);
-        if (verts.size() < 3) continue;
-
-        // Top-surface filter: reject faces pointing too far from world-up
-        if (paint_top_only) {
-            Vector3 e1 = verts[1]->position - verts[0]->position;
-            Vector3 e2 = verts[2]->position - verts[0]->position;
-            Vector3 fn = e1.cross(e2).normalized();
-            if (fn.dot(Vector3(0, 1, 0)) < top_threshold) continue;
-        }
-
-        // Triangulate polygon fan and test each triangle
-        for (size_t i = 1; i + 1 < verts.size(); ++i) {
-            const Vector3& v0 = verts[0]->position;
-            const Vector3& v1 = verts[i]->position;
-            const Vector3& v2 = verts[i + 1]->position;
-
-            Vector3 edge1 = v1 - v0;
-            Vector3 edge2 = v2 - v0;
-            Vector3 h = dir.cross(edge2);
-            float a = edge1.dot(h);
-            if (a > -0.00001f && a < 0.00001f) continue;
-
-            float f = 1.0f / a;
-            Vector3 s = ray_origin - v0;
-            float u = f * s.dot(h);
-            if (u < 0.0f || u > 1.0f) continue;
-
-            Vector3 q = s.cross(edge1);
-            float v = f * dir.dot(q);
-            if (v < 0.0f || u + v > 1.0f) continue;
-
-            float t = f * edge2.dot(q);
-            if (t > 0.00001f && t < closest) {
-                closest = t;
-                // Barycentric interpolation of UVs
-                float w = 1.0f - u - v;
-                const Vector2& uv0 = verts[0]->uv;
-                const Vector2& uv1 = verts[i]->uv;
-                const Vector2& uv2 = verts[i + 1]->uv;
-                out_uv = uv0 * w + uv1 * u + uv2 * v;
-                out_pos = ray_origin + dir * t;
-
-                Vector3 e1n = v1 - v0;
-                Vector3 e2n = v2 - v0;
-                out_normal = e1n.cross(e2n).normalized();
-                found = true;
-            }
+    for (const CachedTriangle& tri : cached_triangles) {
+        if (paint_top_only && tri.normal.dot(Vector3(0, 1, 0)) < top_threshold) continue;
+        Vector3 edge1 = tri.p1 - tri.p0, edge2 = tri.p2 - tri.p0;
+        Vector3 h = dir.cross(edge2);
+        float a = edge1.dot(h);
+        if (a > -0.00001f && a < 0.00001f) continue;
+        float f = 1.0f / a;
+        Vector3 q0 = ray_origin - tri.p0;
+        float u = f * q0.dot(h);
+        if (u < 0.0f || u > 1.0f) continue;
+        Vector3 q = q0.cross(edge1);
+        float v = f * dir.dot(q);
+        if (v < 0.0f || u + v > 1.0f) continue;
+        float t = f * edge2.dot(q);
+        if (t > 0.00001f && t < closest) {
+            closest = t;
+            float w = 1.0f - u - v;
+            out_uv = tri.uv0 * w + tri.uv1 * u + tri.uv2 * v;
+            out_pos = ray_origin + dir * t;
+            out_normal = tri.normal;
+            found = true;
         }
     }
     return found;
@@ -324,20 +319,8 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
     const float r2 = radius_world * radius_world;
     const Transform3D cam_inv = camera_transform.affine_inverse();
 
-    int face_count = mesh->get_face_count();
-    for (int fi = 0; fi < face_count; ++fi) {
-        std::vector<vfx::HEVertex*> verts;
-        mesh->get_face_vertices(fi, verts);
-        const int nv = (int)verts.size();
-        if (nv < 3) continue;
-
-        float umin = 1e30f, umax = -1e30f, vmin = 1e30f, vmax = -1e30f;
-        for (int i = 0; i < nv; ++i) {
-            umin = std::min(umin, verts[i]->uv.x);
-            umax = std::max(umax, verts[i]->uv.x);
-            vmin = std::min(vmin, verts[i]->uv.y);
-            vmax = std::max(vmax, verts[i]->uv.y);
-        }
+    for (const CachedTriangle& tri : cached_triangles) {
+        const float umin = tri.umin, umax = tri.umax, vmin = tri.vmin, vmax = tri.vmax;
 
         // The unwrap may sit on integer offsets (e.g. V in [-1,0]); test the
         // three shifted copies of the face bbox against the wrapped region.
@@ -350,18 +333,18 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
                 if (tx0 > tx1 || ty0 > ty1) continue;
 
                 const Vector2 shift((float)su, (float)sv);
-                for (int i = 1; i + 1 < nv; ++i) {
-                    const Vector2 tuv0 = verts[0]->uv + shift;
-                    const Vector2 tuv1 = verts[i]->uv + shift;
-                    const Vector2 tuv2 = verts[i + 1]->uv + shift;
+                {
+                    const Vector2 tuv0 = tri.uv0 + shift;
+                    const Vector2 tuv1 = tri.uv1 + shift;
+                    const Vector2 tuv2 = tri.uv2 + shift;
                     const Vector2 e1 = tuv1 - tuv0;
                     const Vector2 e2 = tuv2 - tuv0;
                     const float D = e1.x * e2.y - e1.y * e2.x;
                     if (fabsf(D) < 1e-10f) continue;
 
-                    const Vector3& p0 = verts[0]->position;
-                    const Vector3& p1 = verts[i]->position;
-                    const Vector3& p2 = verts[i + 1]->position;
+                    const Vector3& p0 = tri.p0;
+                    const Vector3& p1 = tri.p1;
+                    const Vector3& p2 = tri.p2;
 
                     for (int y = ty0; y <= ty1; ++y) {
                         for (int x = tx0; x <= tx1; ++x) {
@@ -415,48 +398,29 @@ void VFXTexturePainter::_paint_splat_3d(const Vector2& uv, const Vector3& anchor
 // Find the UV of the surface point closest to a world position (used to walk
 // a stroke segment across the mesh without ever leaving the surface).
 bool VFXTexturePainter::_uv_at_world_point(const Vector3& world_pos, Vector2& out_uv) const {
-    if (mesh.is_null()) return false;
-
+    if (mesh.is_null() || cached_triangles.empty()) return false;
     Vector3 lp = mesh_node_transform.affine_inverse().xform(world_pos);
     float best_dist = 1e30f;
     bool found = false;
-
-    int face_count = mesh->get_face_count();
-    for (int fi = 0; fi < face_count; ++fi) {
-        std::vector<vfx::HEVertex*> verts;
-        mesh->get_face_vertices(fi, verts);
-        if (verts.size() < 3) continue;
-
-        for (size_t i = 1; i + 1 < verts.size(); ++i) {
-            const Vector3& p0 = verts[0]->position;
-            const Vector3& p1 = verts[i]->position;
-            const Vector3& p2 = verts[i + 1]->position;
-
-            Vector3 n = (p1 - p0).cross(p2 - p0);
-            float nl = n.length();
-            if (nl < 1e-12f) continue;
-            n /= nl;
-
-            float dn = n.dot(lp - p0);
-            Vector3 q = lp - n * dn;   // project onto triangle plane
-
-            Vector3 e1 = p1 - p0, e2 = p2 - p0, d = q - p0;
-            float d00 = e1.dot(e1), d01 = e1.dot(e2), d11 = e2.dot(e2);
-            float d20 = d.dot(e1), d21 = d.dot(e2);
-            float den = d00 * d11 - d01 * d01;
-            if (fabsf(den) < 1e-12f) continue;
-
-            float a = (d11 * d20 - d01 * d21) / den;
-            float b = (d00 * d21 - d01 * d20) / den;
-            float w0 = 1.0f - a - b;
-            if (a < -1e-3f || b < -1e-3f || w0 < -1e-3f) continue;
-
-            float ad = fabsf(dn);
-            if (ad < best_dist) {
-                best_dist = ad;
-                out_uv = verts[0]->uv * w0 + verts[i]->uv * a + verts[i + 1]->uv * b;
-                found = true;
-            }
+    for (const CachedTriangle& tri : cached_triangles) {
+        Vector3 n = tri.normal;
+        if (n.length_squared() < 1e-12f) continue;
+        float dn = n.dot(lp - tri.p0);
+        Vector3 q = lp - n * dn;
+        Vector3 e1 = tri.p1 - tri.p0, e2 = tri.p2 - tri.p0, d = q - tri.p0;
+        float d00 = e1.dot(e1), d01 = e1.dot(e2), d11 = e2.dot(e2);
+        float d20 = d.dot(e1), d21 = d.dot(e2);
+        float den = d00 * d11 - d01 * d01;
+        if (fabsf(den) < 1e-12f) continue;
+        float a = (d11 * d20 - d01 * d21) / den;
+        float b = (d00 * d21 - d01 * d20) / den;
+        float w0 = 1.0f - a - b;
+        if (a < -1e-3f || b < -1e-3f || w0 < -1e-3f) continue;
+        float ad = fabsf(dn);
+        if (ad < best_dist) {
+            best_dist = ad;
+            out_uv = tri.uv0 * w0 + tri.uv1 * a + tri.uv2 * b;
+            found = true;
         }
     }
     return found;
