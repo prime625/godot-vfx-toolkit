@@ -58,11 +58,13 @@ float AnimationCurve::sample_scalar(float time) const {
     if (keys.empty()) return 0.0f;
     if (keys.size() == 1) return keys[0].value;
 
-    size_t i = 0;
-    for (; i < keys.size() - 1; i++) {
-        if (time >= keys[i].time && time <= keys[i+1].time) break;
-    }
-    if (i >= keys.size() - 1) return keys.back().value;
+    // Binary-search the active segment. The old linear scan examined every
+    // key on every playback frame, which became expensive on dense clips.
+    if (time <= keys.front().time) return keys.front().value;
+    if (time >= keys.back().time) return keys.back().value;
+    auto upper = std::upper_bound(keys.begin(), keys.end(), time,
+        [](float t, const Keyframe& key) { return t < key.time; });
+    size_t i = static_cast<size_t>(std::distance(keys.begin(), upper) - 1);
 
     const Keyframe& k0 = keys[i];
     const Keyframe& k1 = keys[i+1];
@@ -95,11 +97,12 @@ Vector3 AnimationCurve::sample_vector(float time) const {
     if (keys.empty()) return Vector3();
     if (keys.size() == 1) return keys[0].vec_value;
 
-    size_t i = 0;
-    for (; i < keys.size() - 1; i++) {
-        if (time >= keys[i].time && time <= keys[i+1].time) break;
-    }
-    if (i >= keys.size() - 1) return keys.back().vec_value;
+    // O(log N) segment lookup keeps dense vector curves inexpensive to sample.
+    if (time <= keys.front().time) return keys.front().vec_value;
+    if (time >= keys.back().time) return keys.back().vec_value;
+    auto upper = std::upper_bound(keys.begin(), keys.end(), time,
+        [](float t, const Keyframe& key) { return t < key.time; });
+    size_t i = static_cast<size_t>(std::distance(keys.begin(), upper) - 1);
 
     const Keyframe& k0 = keys[i];
     const Keyframe& k1 = keys[i+1];
@@ -134,16 +137,22 @@ Quaternion AnimationCurve::sample_quaternion(float time) const {
             : Basis::from_euler(keys[0].vec_value).get_rotation_quaternion();
     }
 
-    size_t i = 0;
-    for (; i < keys.size() - 1; i++) {
-        if (time >= keys[i].time && time <= keys[i + 1].time) break;
+    // Clamp outside the keyed interval and binary-search the active segment.
+    if (time <= keys.front().time) {
+        const Keyframe& first = keys.front();
+        return first.has_quaternion
+            ? first.quat_value.normalized()
+            : Basis::from_euler(first.vec_value).get_rotation_quaternion();
     }
-    if (i >= keys.size() - 1) {
+    if (time >= keys.back().time) {
         const Keyframe& last = keys.back();
         return last.has_quaternion
             ? last.quat_value.normalized()
             : Basis::from_euler(last.vec_value).get_rotation_quaternion();
     }
+    auto upper = std::upper_bound(keys.begin(), keys.end(), time,
+        [](float t, const Keyframe& key) { return t < key.time; });
+    size_t i = static_cast<size_t>(std::distance(keys.begin(), upper) - 1);
 
     const Keyframe& k0 = keys[i];
     const Keyframe& k1 = keys[i + 1];
