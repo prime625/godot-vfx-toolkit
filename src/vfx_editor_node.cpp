@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <vector>
 #include <unordered_set>
+#include <unordered_map>
 
 using namespace godot;
 
@@ -342,11 +343,13 @@ void VFXEditorNode::_notification(int p_what) {
         }
 
 
-        if (show_skeleton && skeleton.is_valid() && skeleton->get_bone_count() > 0) {
-            _build_skeleton_mesh();
-            if (skel_visual) skel_visual->set_visible(true);
-        } else if (skel_visual) {
-            skel_visual->set_visible(false);
+        // The skeleton visual is rebuilt by apply_animation_frame() when an
+        // animated pose actually changes, and by explicit editing operations.
+        // Rebuilding it unconditionally here recreated the debug mesh every
+        // editor frame (including while paused), causing avoidable CPU/GPU work.
+        if (skel_visual) {
+            skel_visual->set_visible(show_skeleton && skeleton.is_valid() &&
+                    skeleton->get_bone_count() > 0);
         }
 
         if (mesh.is_valid() && show_wireframe) {
@@ -665,6 +668,11 @@ void VFXEditorNode::apply_animation_frame() {
     float t = anim->get_playback_time();
     int curve_count = anim->get_curve_count(clip);
     bool skel_changed = false;
+    bool scene_nodes_changed = false;
+    // A scene object commonly has separate position/rotation/scale curves.
+    // Resolve its ID once per frame instead of recursively walking the scene
+    // tree for every property curve.
+    std::unordered_map<int, Ref<VFXSceneNode>> node_lookup_cache;
 
     for (int c = 0; c < curve_count; c++) {
         int kind = anim->get_curve_kind(clip, c);
@@ -685,7 +693,14 @@ void VFXEditorNode::apply_animation_frame() {
             skel_changed = true;
         } else if (node_id >= 0) {
             if (scene.is_null() || scene->get_root().is_null()) continue;
-            Ref<VFXSceneNode> node = scene->get_root()->find_node_by_id(node_id);
+            Ref<VFXSceneNode> node;
+            auto cached = node_lookup_cache.find(node_id);
+            if (cached != node_lookup_cache.end()) {
+                node = cached->second;
+            } else {
+                node = scene->get_root()->find_node_by_id(node_id);
+                node_lookup_cache.emplace(node_id, node);
+            }
             if (node.is_null()) continue;
             if (kind == VFXAnimator::CURVE_ROTATION) {
                 node->set_local_rotation(anim->sample_quaternion(clip, c, t));
@@ -694,8 +709,12 @@ void VFXEditorNode::apply_animation_frame() {
             } else {
                 node->set_local_position(anim->sample_vector(clip, c, t));
             }
-            mark_scene_dirty();
+            scene_nodes_changed = true;
         }
+    }
+
+    if (scene_nodes_changed) {
+        mark_scene_dirty();
     }
 
     if (skel_changed) {
