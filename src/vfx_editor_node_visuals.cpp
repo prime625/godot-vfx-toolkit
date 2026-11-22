@@ -13,7 +13,11 @@ using namespace godot;
 void VFXEditorNode::_update_godot_mesh() {
     _ensure_mesh_instance();
     if (scene.is_valid()) {
+        // In scene-tree mode the visible mesh is owned by the scene visual
+        // cache, not mesh_instance. Mesh-edit tools still call this method
+        // after changing VFXMesh data, so invalidate that cache immediately.
         if (mesh_instance) mesh_instance->set_visible(false);
+        mark_scene_dirty();
         return;
     }
     if (mesh.is_null()) return;
