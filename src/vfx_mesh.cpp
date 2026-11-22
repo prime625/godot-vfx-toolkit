@@ -685,37 +685,55 @@ void VFXMesh::subdivide_face(int face_idx) {
 }
 
 void VFXMesh::loop_cut(int face_idx, int va, int vb, float t) {
+    // Quad-aware single-face loop cut. The cut runs from the selected boundary
+    // edge to its opposite edge and preserves two editable quads (no diagonal).
+    // Full multi-face edge-loop propagation is handled by the editor operation.
     if (face_idx < 0 || face_idx >= (int)faces.size() || faces[face_idx]->deleted) return;
     std::vector<vfx::HEVertex*> verts;
     get_face_vertices(face_idx, verts);
-    int n = verts.size();
-    if (n < 4) return;
+    if (verts.size() != 4) return;
 
-    int a = -1, b = -1;
-    for (int i = 0; i < n; i++) {
-        if (verts[i]->id == (uint32_t)va) a = i;
-        if (verts[i]->id == (uint32_t)vb) b = i;
+    int edge = -1;
+    for (int i = 0; i < 4; ++i) {
+        int a = (int)verts[i]->id;
+        int b = (int)verts[(i + 1) % 4]->id;
+        if ((a == va && b == vb) || (a == vb && b == va)) { edge = i; break; }
     }
-    if (a < 0 || b < 0) return;
+    if (edge < 0) return;
+    t = vfx::clampf(t, 0.001f, 0.999f);
 
-    Vector3 mid = vertices[va]->position.lerp(vertices[vb]->position, t);
-    Vector2 mid_uv = vertices[va]->uv.lerp(vertices[vb]->uv, t);
-    int mid_id = add_vertex(mid, mid_uv, vertices[va]->color);
-    int b0[4], b1[4]; float w0[4], w1[4];
-    get_vertex_skinning(va, b0, w0); get_vertex_skinning(vb, b1, w1);
-    int mb[4] = {b0[0], b0[1], b0[2], b0[3]}; float mw[4] = {w0[0], w0[1], w0[2], w0[3]};
-    set_vertex_skinning(mid_id, mb, mw);
+    // Orient interpolation to the face's edge direction.
+    int a = (int)verts[edge]->id;
+    int b = (int)verts[(edge + 1) % 4]->id;
+    int c = (int)verts[(edge + 2) % 4]->id;
+    int d = (int)verts[(edge + 3) % 4]->id;
+    const float cut_t = (a == va) ? t : (1.0f - t);
+
+    auto interpolate_vertex = [&](int v0, int v1, float amount) -> int {
+        Vector3 p = vertices[v0]->position.lerp(vertices[v1]->position, amount);
+        Vector2 uv = vertices[v0]->uv.lerp(vertices[v1]->uv, amount);
+        Color col = vertices[v0]->color.lerp(vertices[v1]->color, amount);
+        int id = add_vertex(p, uv, col);
+        int bones0[4], bones1[4]; float weights0[4], weights1[4];
+        get_vertex_skinning(v0, bones0, weights0);
+        get_vertex_skinning(v1, bones1, weights1);
+        int bones[4]; float weights[4];
+        for (int k = 0; k < 4; ++k) {
+            bones[k] = bones0[k];
+            weights[k] = weights0[k] * (1.0f - amount) + weights1[k] * amount;
+        }
+        set_vertex_skinning(id, bones, weights);
+        normalize_weights(id);
+        return id;
+    };
+
+    int cut_a = interpolate_vertex(a, b, cut_t);
+    int cut_b = interpolate_vertex(d, c, cut_t);
 
     delete_face(face_idx);
-    for (int i = 0; i < n; i++) {
-        int cur = verts[i]->id;
-        int next = verts[(i + 1) % n]->id;
-        if ((cur == va && next == vb) || (cur == vb && next == va)) {
-            add_triangle(cur, mid_id, next);
-        } else {
-            add_triangle(cur, next, mid_id);
-        }
-    }
+    // The winding follows the source face. Both outputs remain quads.
+    add_quad(a, cut_a, cut_b, d);
+    add_quad(cut_a, b, c, cut_b);
 
     dirty = true;
     remap_dirty = true;
