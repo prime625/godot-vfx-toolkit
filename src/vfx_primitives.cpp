@@ -45,8 +45,18 @@ static void _tri_out(VFXMesh* m, int a, int b, int c, const Vector3& outward) {
 }
 
 static void _quad_out(VFXMesh* m, int a, int b, int c, int d, const Vector3& outward) {
-    _tri_out(m, a, b, c, outward);
-    _tri_out(m, a, c, d, outward);
+    // Keep the face as a real quad in the half-edge mesh. The render mesh
+    // will triangulate it internally, while edit-mode wireframe/selection
+    // and the UV editor see only the four polygon boundary edges.
+    Vector3 pa = m->get_vertex_position(a);
+    Vector3 pb = m->get_vertex_position(b);
+    Vector3 pc = m->get_vertex_position(c);
+    Vector3 n = (pb - pa).cross(pc - pa);
+    if (n.dot(outward) >= 0.0f) {
+        m->add_quad(a, d, c, b);
+    } else {
+        m->add_quad(a, b, c, d);
+    }
 }
 
 // ============================================================================
