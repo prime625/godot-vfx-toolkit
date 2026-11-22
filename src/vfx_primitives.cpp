@@ -2,6 +2,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <cmath>
 #include <map>
+#include <tuple>
 #include <vector>
 
 using namespace godot;
@@ -243,16 +244,41 @@ Ref<VFXMesh> VFXPrimitives::create_cube(float size, int subdivisions) {
     const int n = subdivisions;
     const float h = size * 0.5f;
 
-    // Face frames: base corner + spanning axes (each length `size`).
     struct FaceFrame { Vector3 b0, a, b, n; };
     const FaceFrame frames[6] = {
-        { Vector3(-h, -h,  h), Vector3( size, 0, 0), Vector3(0,  size, 0), Vector3( 0, 0,  1) }, // +Z
-        { Vector3( h, -h, -h), Vector3(-size, 0, 0), Vector3(0,  size, 0), Vector3( 0, 0, -1) }, // -Z
-        { Vector3( h, -h, -h), Vector3(0, 0,  size), Vector3(0,  size, 0), Vector3( 1, 0,  0) }, // +X
-        { Vector3(-h, -h,  h), Vector3(0, 0, -size), Vector3(0,  size, 0), Vector3(-1, 0,  0) }, // -X
-        { Vector3(-h,  h, -h), Vector3( size, 0, 0), Vector3(0, 0,  size), Vector3( 0, 1,  0) }, // +Y
-        { Vector3(-h, -h,  h), Vector3( size, 0, 0), Vector3(0, 0, -size), Vector3( 0, -1, 0) }, // -Y
+        { Vector3(-h, -h,  h), Vector3( size, 0, 0), Vector3(0,  size, 0), Vector3( 0, 0,  1) },
+        { Vector3( h, -h, -h), Vector3(-size, 0, 0), Vector3(0,  size, 0), Vector3( 0, 0, -1) },
+        { Vector3( h, -h, -h), Vector3(0, 0,  size), Vector3(0,  size, 0), Vector3( 1, 0,  0) },
+        { Vector3(-h, -h,  h), Vector3(0, 0, -size), Vector3(0,  size, 0), Vector3(-1, 0,  0) },
+        { Vector3(-h,  h, -h), Vector3( size, 0, 0), Vector3(0, 0,  size), Vector3( 0, 1,  0) },
+        { Vector3(-h, -h,  h), Vector3( size, 0, 0), Vector3(0, 0, -size), Vector3( 0, -1, 0) },
     };
+
+    // Weld coincident positions across all six sides. The cube therefore has
+    // one editable vertex at every shared corner/edge point, so moving a face
+    // moves its shared boundary vertices and adjacent faces remain connected.
+    std::map<std::tuple<int, int, int>, int> welded;
+    std::vector<Vector3> normal_sums;
+    auto vertex_for = [&](const Vector3& p, const Vector3& normal) -> int {
+        const int qx = (int)llround(p.x * 1000000.0);
+        const int qy = (int)llround(p.y * 1000000.0);
+        const int qz = (int)llround(p.z * 1000000.0);
+        auto key = std::make_tuple(qx, qy, qz);
+        auto it = welded.find(key);
+        if (it != welded.end()) {
+            normal_sums[it->second] += normal;
+            return it->second;
+        }
+        int id = m->add_vertex(p, Vector2());
+        welded[key] = id;
+        if ((int)normal_sums.size() <= id) normal_sums.resize(id + 1);
+        normal_sums[id] = normal;
+        return id;
+    };
+
+    // Per-corner UV storage preserves the six independent cube UV islands
+    // even though the editable geometry is welded.
+    m->add_uv_layer();
 
     for (int f = 0; f < 6; f++) {
         const FaceFrame& fr = frames[f];
@@ -260,10 +286,7 @@ Ref<VFXMesh> VFXPrimitives::create_cube(float size, int subdivisions) {
         for (int j = 0; j <= n; j++) {
             for (int i = 0; i <= n; i++) {
                 Vector3 pos = fr.b0 + fr.a * ((float)i / n) + fr.b * ((float)j / n);
-                Vector2 uv((float)i / n, (float)j / n);
-                int id = m->add_vertex(pos, uv);
-                m->set_vertex_normal(id, fr.n);
-                grid[j * (n + 1) + i] = id;
+                grid[j * (n + 1) + i] = vertex_for(pos, fr.n);
             }
         }
         for (int j = 0; j < n; j++) {
@@ -273,8 +296,22 @@ Ref<VFXMesh> VFXPrimitives::create_cube(float size, int subdivisions) {
                 int c = grid[(j + 1) * (n + 1) + i + 1];
                 int d = grid[(j + 1) * (n + 1) + i];
                 _quad_out(m.ptr(), a, b, c, d, fr.n);
+
+                PackedVector2Array face_uvs;
+                face_uvs.push_back(Vector2((float)i / n, (float)j / n));
+                face_uvs.push_back(Vector2((float)(i + 1) / n, (float)j / n));
+                face_uvs.push_back(Vector2((float)(i + 1) / n, (float)(j + 1) / n));
+                face_uvs.push_back(Vector2((float)i / n, (float)(j + 1) / n));
+                m->set_face_uvs(0, m->get_face_count() - 1, face_uvs);
             }
         }
+    }
+
+    // Average vertex normals for the welded topology. Per-face UV seams remain
+    // independent; a future split-normal layer can restore hard cube shading.
+    for (int i = 0; i < (int)normal_sums.size(); i++) {
+        if (normal_sums[i].length_squared() > 0.0001f)
+            m->set_vertex_normal(i, normal_sums[i].normalized());
     }
     m->link_twins();
     return m;
