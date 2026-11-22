@@ -214,6 +214,10 @@ void VFXEditorNode::_bind_methods() {
     ClassDB::bind_method(D_METHOD("subdivide_selection"), &VFXEditorNode::subdivide_selection);
     ClassDB::bind_method(D_METHOD("bevel_selection", "amount"), &VFXEditorNode::bevel_selection);
     ClassDB::bind_method(D_METHOD("knife_selection", "p0", "p1"), &VFXEditorNode::knife_selection);
+    ClassDB::bind_method(D_METHOD("merge_selected_vertices", "at_active"), &VFXEditorNode::merge_selected_vertices, DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("dissolve_selected_edges"), &VFXEditorNode::dissolve_selected_edges);
+    ClassDB::bind_method(D_METHOD("select_edge_loop"), &VFXEditorNode::select_edge_loop);
+    ClassDB::bind_method(D_METHOD("select_edge_ring"), &VFXEditorNode::select_edge_ring);
     ADD_SIGNAL(MethodInfo("mesh_changed", PropertyInfo(Variant::OBJECT, "mesh")));
 
     // === ENUMS ===
