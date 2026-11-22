@@ -161,8 +161,39 @@ void VFXMesh::add_triangle(int v0, int v1, int v2) {
 }
 
 void VFXMesh::add_quad(int v0, int v1, int v2, int v3) {
-   add_triangle(v0, v1, v2);
-   add_triangle(v0, v2, v3);
+   // A quad is one editable polygon with four boundary half-edges.
+   // Rendering triangulates it later in get_indices(); the diagonal is
+   // deliberately NOT part of the editable topology or edge selection.
+   const int ids[4] = {v0, v1, v2, v3};
+   for (int i = 0; i < 4; ++i) {
+       if (ids[i] < 0 || ids[i] >= (int)vertices.size() || vertices[ids[i]]->deleted) return;
+       for (int j = i + 1; j < 4; ++j) if (ids[i] == ids[j]) return;
+   }
+
+   vfx::HEFace* face = new vfx::HEFace();
+   face->id = next_face_id++;
+   face->vertex_count = 4;
+   faces.push_back(face);
+
+   vfx::HEEdge* ring[4];
+   for (int i = 0; i < 4; ++i) {
+       ring[i] = new vfx::HEEdge();
+       ring[i]->id = next_edge_id++;
+       ring[i]->vertex = vertices[ids[(i + 1) % 4]];
+       ring[i]->face = face;
+       ring[i]->next = nullptr;
+       ring[i]->twin = nullptr;
+       ring[i]->is_boundary = false;
+       ring[i]->deleted = false;
+       edges.push_back(ring[i]);
+       if (!vertices[ids[i]]->halfedge) vertices[ids[i]]->halfedge = ring[i];
+   }
+   for (int i = 0; i < 4; ++i) ring[i]->next = ring[(i + 1) % 4];
+   face->halfedge = ring[0];
+
+   dirty = true;
+   remap_dirty = true;
+   sync_uv_layers();
 }
 
 int VFXMesh::get_vertex_count() const { return vertices.size(); }
