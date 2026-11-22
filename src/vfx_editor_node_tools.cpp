@@ -2,7 +2,7 @@
 #include "vfx_gltf_exporter.h"
 #include "vfx_texture_painter.h"
 #include "vfx_primitives.h"
-#include <godot_cpp/variant/utility_functions.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>\n#include <algorithm>
 
 using namespace godot;
 
@@ -326,6 +326,82 @@ void VFXEditorNode::knife_selection(const Vector3& p0, const Vector3& p1) {
     if (auto_update) _update_godot_mesh();
     _build_selection_mesh();
     _update_gizmo_for_selection();
+}
+
+// Merge selected vertices into a single vertex. The default is Blender-style
+// Merge at Center; at_active keeps the active/first selected vertex position.
+void VFXEditorNode::merge_selected_vertices(bool at_active) {
+    if (mesh.is_null() || edit_mode != MODE_VERTEX || selected_vertices.size() < 2) return;
+    std::vector<int> ids(selected_vertices.begin(), selected_vertices.end());
+    std::sort(ids.begin(), ids.end());
+    int keep = selected_vertex >= 0 && selected_vertices.count(selected_vertex) ? selected_vertex : ids.front();
+    Vector3 target = mesh->get_vertex_position(keep);
+    if (!at_active) {
+        target = Vector3();
+        int count = 0;
+        for (int id : ids) {
+            if (id < 0 || id >= mesh->get_vertex_count() || mesh->get_vertices()[id]->deleted) continue;
+            target += mesh->get_vertex_position(id);
+            count++;
+        }
+        if (count < 2) return;
+        target /= (float)count;
+    }
+    // Merge sequentially into the retained vertex. Reverse order keeps IDs stable.
+    for (int i = (int)ids.size() - 1; i >= 0; --i) {
+        int id = ids[i];
+        if (id == keep || id < 0 || id >= mesh->get_vertex_count()) continue;
+        if (!mesh->get_vertices()[id]->deleted) mesh->merge_vertices(keep, id);
+    }
+    mesh->set_vertex_position(keep, target);
+    clear_selection();
+    selected_vertices.insert(keep);
+    selected_vertex = keep;
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::dissolve_selected_edges() {
+    if (mesh.is_null() || edit_mode != MODE_EDGE || selected_edges.empty()) return;
+    std::vector<int> ids(selected_edges.begin(), selected_edges.end());
+    std::sort(ids.begin(), ids.end(), std::greater<int>());
+    for (int id : ids) {
+        if (id >= 0 && id < mesh->get_edge_count() && !mesh->get_edges()[id]->deleted)
+            mesh->dissolve_edge(id);
+    }
+    clear_selection();
+    if (auto_update) _update_godot_mesh();
+    _build_selection_mesh();
+    _update_gizmo_for_selection();
+}
+
+void VFXEditorNode::select_edge_loop() {
+    if (mesh.is_null() || edit_mode != MODE_EDGE || selected_edges.empty()) return;
+    int seed = *selected_edges.begin();
+    PackedInt32Array loop = mesh->get_edge_loop(seed);
+    if (loop.is_empty()) return;
+    selected_edges.clear();
+    for (int i = 0; i < loop.size(); ++i) {
+        int id = loop[i];
+        if (id >= 0 && id < mesh->get_edge_count() && !mesh->get_edges()[id]->deleted)
+            selected_edges.insert(id);
+    }
+    _build_selection_mesh();
+}
+
+void VFXEditorNode::select_edge_ring() {
+    if (mesh.is_null() || edit_mode != MODE_EDGE || selected_edges.empty()) return;
+    int seed = *selected_edges.begin();
+    PackedInt32Array ring = mesh->get_edge_ring(seed);
+    if (ring.is_empty()) return;
+    selected_edges.clear();
+    for (int i = 0; i < ring.size(); ++i) {
+        int id = ring[i];
+        if (id >= 0 && id < mesh->get_edge_count() && !mesh->get_edges()[id]->deleted)
+            selected_edges.insert(id);
+    }
+    _build_selection_mesh();
 }
 
 // ============================================================================
