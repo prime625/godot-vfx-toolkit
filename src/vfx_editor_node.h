@@ -369,6 +369,10 @@ public:
     void subdivide_selection();
     void bevel_selection(float amount);
     void knife_selection(const Vector3& p0, const Vector3& p1);
+    void merge_selected_vertices(bool at_active = false);
+    void dissolve_selected_edges();
+    void select_edge_loop();
+    void select_edge_ring();
 
     // === CURVE ===
     void create_curve_tube(const PackedVector3Array& points, float radius, int segments, int rings);
