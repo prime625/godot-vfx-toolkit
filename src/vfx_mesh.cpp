@@ -48,6 +48,7 @@ void VFXMesh::_bind_methods() {
    ClassDB::bind_method(D_METHOD("merge_vertices", "v0", "v1"), &VFXMesh::merge_vertices);
    ClassDB::bind_method(D_METHOD("subdivide_face", "face_idx"), &VFXMesh::subdivide_face);
    ClassDB::bind_method(D_METHOD("loop_cut", "face_idx", "v0", "v1", "t"), &VFXMesh::loop_cut);
+   ClassDB::bind_method(D_METHOD("loop_cut_strip", "face_idx", "v0", "v1", "t"), &VFXMesh::loop_cut_strip);
    ClassDB::bind_method(D_METHOD("bevel_edge", "edge_idx", "amount"), &VFXMesh::bevel_edge);
    ClassDB::bind_method(D_METHOD("bevel_vertex", "vidx", "amount"), &VFXMesh::bevel_vertex);
    ClassDB::bind_method(D_METHOD("dissolve_edge", "edge_idx"), &VFXMesh::dissolve_edge);
@@ -739,6 +740,101 @@ void VFXMesh::loop_cut(int face_idx, int va, int vb, float t) {
     remap_dirty = true;
     recalculate_normals();
     link_twins();
+}
+
+
+// Propagate a quad loop cut through the connected quad strip. The operation
+// is topology-based: each crossed edge gets one shared cut vertex, so adjacent
+// faces remain welded. Non--quad faces and boundaries terminate the strip.
+int VFXMesh::loop_cut_strip(int face_idx, int va, int vb, float t) {
+    if (face_idx < 0 || face_idx >= (int)faces.size() || faces[face_idx]->deleted) return 0;
+    t = vfx::clampf(t, 0.001f, 0.999f);
+    link_twins();
+
+    struct CutFace { int face; int v[4]; int edge_in; int edge_out; };
+    std::vector<CutFace> strip;
+    std::unordered_set<int> visited;
+    int current_face = face_idx;
+    int entry_a = va, entry_b = vb;
+    float current_t = t;
+
+    while (current_face >= 0 && current_face < (int)faces.size() &&
+           !faces[current_face]->deleted && !visited.count(current_face)) {
+        std::vector<vfx::HEVertex*> fv;
+        get_face_vertices(current_face, fv);
+        if (fv.size() != 4) break;
+        int edge_index = -1;
+        for (int i = 0; i < 4; ++i) {
+            int a = (int)fv[i]->id, b = (int)fv[(i + 1) % 4]->id;
+            if ((a == entry_a && b == entry_b) || (a == entry_b && b == entry_a)) {
+                edge_index = i; break;
+            }
+        }
+        if (edge_index < 0) break;
+        CutFace cf; cf.face = current_face;
+        for (int i = 0; i < 4; ++i) cf.v[i] = (int)fv[(edge_index + i) % 4]->id;
+        cf.edge_in = -1; cf.edge_out = -1;
+        vfx::HEEdge* opposite = find_edge_between(cf.v[2], cf.v[3]);
+        if (!opposite) opposite = find_edge_between(cf.v[3], cf.v[2]);
+        if (opposite) cf.edge_out = (int)opposite->id;
+        strip.push_back(cf);
+        visited.insert(current_face);
+        if (cf.edge_out < 0 || cf.edge_out >= (int)edges.size()) break;
+        vfx::HEEdge* out_edge = edges[cf.edge_out];
+        if (!out_edge || !out_edge->twin || !out_edge->twin->face) break;
+        int next_face = (int)out_edge->twin->face->id;
+        if (visited.count(next_face)) break;
+        // The next face enters through the shared opposite edge. Its endpoint
+        // order is resolved against its own winding on the next iteration.
+        entry_a = cf.v[2]; entry_b = cf.v[3];
+        current_t = 1.0f - current_t;
+        current_face = next_face;
+    }
+    if (strip.empty()) return 0;
+
+    // Cache one interpolated vertex per undirected crossed edge. This is what
+    // prevents cracks between adjacent faces in the strip.
+    std::unordered_map<uint64_t, int> cut_vertices;
+    auto edge_key = [](int a, int b) -> uint64_t {
+        uint32_t lo = (uint32_t)std::min(a, b), hi = (uint32_t)std::max(a, b);
+        return (uint64_t(lo) << 32) | uint64_t(hi);
+    };
+    auto cut_on_edge = [&](int a, int b, float amount) -> int {
+        uint64_t key = edge_key(a, b);
+        auto found = cut_vertices.find(key);
+        if (found != cut_vertices.end()) return found->second;
+        // amount is measured in this face's directed edge orientation.
+        Vector3 pos = vertices[a]->position.lerp(vertices[b]->position, amount);
+        Vector2 uv = vertices[a]->uv.lerp(vertices[b]->uv, amount);
+        Color color = vertices[a]->color.lerp(vertices[b]->color, amount);
+        int id = add_vertex(pos, uv, color);
+        int bones_a[4], bones_b[4], bones[4]; float weights_a[4], weights_b[4], weights[4];
+        get_vertex_skinning(a, bones_a, weights_a); get_vertex_skinning(b, bones_b, weights_b);
+        for (int k = 0; k < 4; ++k) {
+            bones[k] = bones_a[k];
+            weights[k] = weights_a[k] * (1.0f - amount) + weights_b[k] * amount;
+        }
+        set_vertex_skinning(id, bones, weights); normalize_weights(id);
+        cut_vertices[key] = id;
+        return id;
+    };
+
+    struct NewFace { int a, b, c, d; };
+    std::vector<NewFace> replacements;
+    replacements.reserve(strip.size() * 2);
+    float face_t = t;
+    for (const CutFace& cf : strip) {
+        int ca = cut_on_edge(cf.v[0], cf.v[1], face_t);
+        int cb = cut_on_edge(cf.v[3], cf.v[2], face_t);
+        face_t = 1.0f - face_t;
+        replacements.push_back({cf.v[0], ca, cb, cf.v[3]});
+        replacements.push_back({ca, cf.v[1], cf.v[2], cb});
+    }
+    for (const CutFace& cf : strip) delete_face(cf.face);
+    for (const NewFace& nf : replacements) add_quad(nf.a, nf.b, nf.c, nf.d);
+    dirty = true; remap_dirty = true;
+    sync_uv_layers(); recalculate_normals(); link_twins();
+    return (int)strip.size();
 }
 
 void VFXMesh::bevel_edge(int edge_idx, float amount) {
