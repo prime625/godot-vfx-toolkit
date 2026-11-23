@@ -156,6 +156,7 @@ public:
     void merge_vertices(int v0, int v1);
     void subdivide_face(int face_idx);
     void loop_cut(int face_idx, int va, int vb, float t);
+    int loop_cut_strip(int face_idx, int va, int vb, float t);
     void bevel_edge(int edge_idx, float amount);
     void bevel_vertex(int vidx, float amount);
     void dissolve_edge(int edge_idx);
